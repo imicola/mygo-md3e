@@ -114,7 +114,7 @@
     - 使用 `ui.Render` 逐一渲染 35 种形状到 `64×64` 画布，断言每种形状均有有效前景像素且零像素溢出到裁切框外。
   - **Commit**：`feat(shape): [T2.3] implement all 35 Material 3 Expressive shapes catalog`
 
-- [ ] **T2.4：实现任意双形状双射变形器（`shape/morph.go`）与绘制辅助**
+- [x] **T2.4：实现任意双形状双射变形器（`shape/morph.go`）与绘制辅助**
   - **交付物**：`shape/morph.go`、`shape/draw.go`、`shape/morph_test.go`
   - **核心能力**：
     - `NewMorph(from, to *RoundedPolygon) *Morph`：按极角进度映射（Angle/Progress DoubleMapper）对两条闭合 Cubic 链做等细分切割，保证段数一致且角点特征尽量对齐；
