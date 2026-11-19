@@ -3,6 +3,7 @@ package shape
 import (
 	"math"
 	"slices"
+	"sort"
 
 	"github.com/egoist/mygo/ui"
 )
@@ -29,8 +30,8 @@ func NewMorph(from, to *RoundedPolygon) *Morph {
 	if from == nil || to == nil || len(from.cubics) < 2 || len(to.cubics) < 2 {
 		panic("shape: a morph needs two polygons")
 	}
-	a := append([]Cubic(nil), from.Normalized().cubics...)
-	b := append([]Cubic(nil), to.Normalized().cubics...)
+	a := from.Normalized().cubics
+	b := to.Normalized().cubics
 	if chainArea(a) < 0 {
 		a = reverseChain(a)
 	}
@@ -40,21 +41,142 @@ func NewMorph(from, to *RoundedPolygon) *Morph {
 	ca, cb := chainCenter(a), chainCenter(b)
 	b = rotateChainToAngle(b, cb, angleAround(ca, a[0].P0))
 
-	aOffsets, aTotal := chainOffsets(a, ca)
-	bOffsets, bTotal := chainOffsets(b, cb)
-	if aTotal <= epsilon || bTotal <= epsilon {
+	chainA := newMorphChain(a, ca)
+	chainB := newMorphChain(b, cb)
+	if chainA.total <= epsilon || chainB.total <= epsilon {
 		panic("shape: a morph needs polygons with an outline around their center")
 	}
-	cuts := mergeFractions(offsetFractions(aOffsets, aTotal), offsetFractions(bOffsets, bTotal))
-	a = splitChainAtFractions(a, ca, aOffsets, aTotal, cuts)
-	b = splitChainAtFractions(b, cb, bOffsets, bTotal, cuts)
-	for len(a) < len(b) {
-		a = subdivideLongest(a)
+	cuts := mergeFractions(chainA.starts, chainB.starts)
+	chainA.splitAtFractions(cuts)
+	chainB.splitAtFractions(cuts)
+	// A chain whose angle repeats has a piece the other has no vertex for.
+	// Cut the other one near that angle too, so that the pieces after it
+	// stay paired instead of shifting by one.
+	for len(chainA.cubics) != len(chainB.cubics) {
+		if len(chainA.cubics) > len(chainB.cubics) {
+			chainB.splitAt(missingFraction(chainA.starts, chainB.starts))
+		} else {
+			chainA.splitAt(missingFraction(chainB.starts, chainA.starts))
+		}
 	}
-	for len(b) < len(a) {
-		b = subdivideLongest(b)
+	return &Morph{a: chainA.cubics, b: chainB.cubics}
+}
+
+// morphChain is one polygon's outline as a morph cuts it: its cubics, the
+// fraction of its total turn at which each starts, and the angles it measures.
+type morphChain struct {
+	cubics  []Cubic
+	starts  []float64
+	center  Point
+	offsets []float64
+	total   float64
+}
+
+// newMorphChain measures the angle at which each of the chain's cubics starts.
+func newMorphChain(cubics []Cubic, center Point) *morphChain {
+	c := &morphChain{cubics: cubics, center: center}
+	c.measure()
+	return c
+}
+
+// measure recomputes the chain's offsets and start fractions from its cubics.
+func (c *morphChain) measure() {
+	c.offsets, c.total = chainOffsets(c.cubics, c.center)
+	c.starts = make([]float64, len(c.cubics))
+	if c.total <= epsilon {
+		return
 	}
-	return &Morph{a: a, b: b}
+	for i := range c.cubics {
+		c.starts[i] = c.offsets[i] / c.total
+	}
+}
+
+// splitAtFractions cuts the chain at each fraction of its total turn, so that
+// two chains cut at the fractions of both have each other's vertices.
+func (c *morphChain) splitAtFractions(fractions []float64) {
+	out := make([]Cubic, 0, len(c.cubics)+len(fractions))
+	for i, cubic := range c.cubics {
+		start, end := c.offsets[i], c.offsets[i+1]
+		var times []float64
+		for _, f := range fractions {
+			target := f * c.total
+			if target <= start+1e-9 || target >= end-1e-9 {
+				continue
+			}
+			if t := splitTimeAtOffset(cubic, c.center, start, target); t > 1e-9 && t < 1-1e-9 {
+				times = append(times, t)
+			}
+		}
+		slices.Sort(times)
+		rest, prev := cubic, 0.0
+		for _, t := range times {
+			u := (t - prev) / (1 - prev)
+			if u <= 1e-9 || u >= 1-1e-9 {
+				continue
+			}
+			left, right := rest.Split(u)
+			out = append(out, left)
+			rest, prev = right, t
+		}
+		out = append(out, rest)
+	}
+	c.cubics = out
+	c.measure()
+}
+
+// splitAt adds one piece to the chain, cutting the piece at fraction, or in
+// its middle when the fraction falls on a vertex or past it, which keeps the
+// outline exactly.
+func (c *morphChain) splitAt(fraction float64) {
+	n := len(c.cubics)
+	if n == 0 {
+		return
+	}
+	i := sort.Search(len(c.starts), func(k int) bool { return c.starts[k] > fraction }) - 1
+	if i < 0 {
+		i = 0
+	}
+	if i >= n {
+		i = n - 1
+	}
+	for i+1 < n && c.starts[i+1] == c.starts[i] {
+		i++ // a piece without angular width cannot be cut again
+	}
+	endFraction := 1.0
+	if i+1 < len(c.starts) {
+		endFraction = c.starts[i+1]
+	}
+	t := 0.5
+	if fraction > c.starts[i]+1e-9 && fraction < endFraction-1e-9 {
+		if tt := splitTimeAtOffset(c.cubics[i], c.center, c.offsets[i], fraction*c.total); tt > 1e-9 && tt < 1-1e-9 {
+			t = tt
+		}
+	}
+	left, right := c.cubics[i].Split(t)
+	out := make([]Cubic, 0, n+1)
+	out = append(out, c.cubics[:i]...)
+	out = append(out, left, right)
+	out = append(out, c.cubics[i+1:]...)
+	c.cubics = out
+	c.measure()
+}
+
+// missingFraction returns a fraction at which longer starts but shorter has no
+// vertex: the angle of a piece the shorter chain has no counterpart for.
+func missingFraction(longer, shorter []float64) float64 {
+	const tolerance = 1e-9
+	j := 0
+	for _, f := range longer {
+		for j < len(shorter) && shorter[j] < f-tolerance {
+			j++
+		}
+		if j < len(shorter) && math.Abs(shorter[j]-f) <= tolerance {
+			j++
+			continue
+		}
+		return f
+	}
+	return 0.5
 }
 
 // AsPath returns the morph at progress, from 0 (from) to 1 (to), in dst. The
@@ -95,15 +217,6 @@ func dstPoint(p Point, dst ui.Rect) ui.Point {
 // angleAround returns the angle of p around center, in radians.
 func angleAround(center, p Point) float64 {
 	return math.Atan2(p.Y-center.Y, p.X-center.X)
-}
-
-// wrapPositive returns a within [0, 2π).
-func wrapPositive(a float64) float64 {
-	a = math.Mod(a, 2*math.Pi)
-	if a < 0 {
-		a += 2 * math.Pi
-	}
-	return a
 }
 
 // wrapSigned returns a within (-π, π].
@@ -182,15 +295,6 @@ func chainOffsets(cubics []Cubic, center Point) ([]float64, float64) {
 	return offsets, offsets[len(cubics)]
 }
 
-// offsetFractions returns the chain's offsets as fractions of total.
-func offsetFractions(offsets []float64, total float64) []float64 {
-	out := make([]float64, len(offsets))
-	for i, o := range offsets {
-		out[i] = o / total
-	}
-	return out
-}
-
 // mergeFractions returns the interior fractions of both lists, sorted and
 // deduplicated: the angles at which both chains are cut.
 func mergeFractions(lists ...[]float64) []float64 {
@@ -212,69 +316,24 @@ func mergeFractions(lists ...[]float64) []float64 {
 	return kept
 }
 
-// splitChainAtFractions cuts the chain at each fraction of its total angle,
-// so that a chain split at the fractions of two shapes has both their
-// vertices.
-func splitChainAtFractions(cubics []Cubic, center Point, offsets []float64, total float64, fractions []float64) []Cubic {
-	out := make([]Cubic, 0, len(cubics)+len(fractions))
-	for i, c := range cubics {
-		start, end := offsets[i], offsets[i+1]
-		var times []float64
-		for _, f := range fractions {
-			target := f * total
-			if target <= start+1e-9 || target >= end-1e-9 {
-				continue
-			}
-			if t := splitTimeAtOffset(c, center, start, target); t > 1e-9 && t < 1-1e-9 {
-				times = append(times, t)
-			}
-		}
-		rest, prev := c, 0.0
-		for _, t := range times {
-			u := (t - prev) / (1 - prev)
-			if u <= 1e-9 || u >= 1-1e-9 {
-				continue
-			}
-			left, right := rest.Split(u)
-			out = append(out, left)
-			rest, prev = right, t
-		}
-		out = append(out, rest)
-	}
-	return out
-}
-
 // splitTimeAtOffset returns the t at which the cubic reaches the given angle
 // offset from the chain's start, found by bisection on the curve's angle
-// around center.
+// around center. The angle is unwrapped signed, so a small backward wobble in
+// a concave segment cannot jump by a whole turn and send the bisection the
+// wrong way; as chainOffsets does, the cut only moves forward.
 func splitTimeAtOffset(c Cubic, center Point, startOffset, target float64) float64 {
 	startAngle := angleAround(center, c.P0)
+	offsetAt := func(t float64) float64 {
+		return startOffset + math.Max(0, wrapSigned(angleAround(center, c.Point(t))-startAngle))
+	}
 	lo, hi := 0.0, 1.0
 	for range 50 {
 		mid := (lo + hi) / 2
-		offset := startOffset + wrapPositive(angleAround(center, c.Point(mid))-startAngle)
-		if offset < target {
+		if offsetAt(mid) < target {
 			lo = mid
 		} else {
 			hi = mid
 		}
 	}
 	return (lo + hi) / 2
-}
-
-// subdivideLongest splits the chain's longest cubic in half. It is the
-// safety net that keeps two chains the same length if rounding left one
-// segment more in a chain.
-func subdivideLongest(cubics []Cubic) []Cubic {
-	best, bestLength := 0, -1.0
-	for i, c := range cubics {
-		if l := c.P0.Distance(c.P3); l > bestLength {
-			best, bestLength = i, l
-		}
-	}
-	left, right := cubics[best].Split(0.5)
-	out := make([]Cubic, 0, len(cubics)+1)
-	out = append(out, cubics[:best]...)
-	out = append(out, left, right)
-	return append(out, cubics[best+1:]...)
 }

@@ -8,12 +8,15 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
-// morphPairs are the cross-topology pairs the task requires, by catalog name.
+// morphPairs are the cross-topology pairs the task requires, by catalog name,
+// with deep concavities on at least one side.
 var morphPairs = [][2]string{
 	{"Circle", "SoftBurst"},
 	{"Square", "Heart"},
 	{"Pentagon", "Sunny"},
 	{"Pill", "Cookie9Sided"},
+	{"Arrow", "Heart"},
+	{"PixelTriangle", "SoftBurst"},
 }
 
 func morphShapes(t *testing.T, from, to string) *Morph {
@@ -110,14 +113,21 @@ func TestMorphEndpoints(t *testing.T) {
 }
 
 // TestMorphIntermediates renders the steps between each pair and checks they
-// are filled and stay inside their box.
+// are filled, stay inside their box, and never cross themselves.
 func TestMorphIntermediates(t *testing.T) {
 	const size = 96
 	dst := ui.Rect{X: 16, Y: 16, W: 64, H: 64}
 	for _, pair := range morphPairs {
 		t.Run(pair[0]+"->"+pair[1], func(t *testing.T) {
 			m := morphShapes(t, pair[0], pair[1])
-			for _, progress := range []float32{0.25, 0.5, 0.75} {
+			for _, progress := range []float32{0, 0.25, 0.5, 0.75, 1} {
+				chain := make([]Cubic, len(m.a))
+				for i := range m.a {
+					chain[i] = m.cubicAt(i, float64(progress))
+				}
+				if a, b, c, d, ok := chainSelfIntersects(chain); ok {
+					t.Errorf("progress %v crosses itself: %+v-%+v meets %+v-%+v", progress, a, b, c, d)
+				}
 				for i := range m.a {
 					c := m.cubicAt(i, float64(progress))
 					for _, p := range []Point{c.P0, c.P1, c.P2, c.P3} {
@@ -145,6 +155,40 @@ func TestMorphIntermediates(t *testing.T) {
 			}
 		})
 	}
+}
+
+// chainSelfIntersects samples the closed chain into a polyline and reports
+// whether two of its non-adjacent segments cross, with where.
+func chainSelfIntersects(cubics []Cubic) (Point, Point, Point, Point, bool) {
+	const samples = 16
+	points := make([]Point, 0, len(cubics)*samples)
+	for _, c := range cubics {
+		for i := range samples {
+			points = append(points, c.Point(float64(i)/samples))
+		}
+	}
+	n := len(points)
+	for i := range n {
+		a, b := points[i], points[(i+1)%n]
+		for j := i + 2; j < n; j++ {
+			if i == 0 && j == n-1 {
+				continue // adjacent through where the chain closes
+			}
+			c, d := points[j], points[(j+1)%n]
+			if segmentsCross(a, b, c, d) {
+				return a, b, c, d, true
+			}
+		}
+	}
+	return Point{}, Point{}, Point{}, Point{}, false
+}
+
+// segmentsCross reports whether the open segments ab and cd cross.
+func segmentsCross(a, b, c, d Point) bool {
+	ab, cd := b.Sub(a), d.Sub(c)
+	d1, d2 := ab.Cross(c.Sub(a)), ab.Cross(d.Sub(a))
+	d3, d4 := cd.Cross(a.Sub(c)), cd.Cross(b.Sub(c))
+	return d1*d2 < 0 && d3*d4 < 0
 }
 
 // TestMorphAllShapes builds every catalog shape's morph with the circle and
