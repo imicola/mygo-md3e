@@ -104,7 +104,7 @@
     - 四重门禁全绿。
   - **Commit**：`feat(shape): [T2.2] implement RoundedPolygon geometry, corner smoothing, and ui.Path builder`
 
-- [ ] **T2.3：实现 MD3E 35 种内置形状目录（`shape/catalog.go`）**
+- [x] **T2.3：实现 MD3E 35 种内置形状目录（`shape/catalog.go`）**
   - **交付物**：`shape/catalog.go`、`shape/catalog_test.go`
   - **核心能力**：
     - 完整实现 [docs/md3e-spec.md](docs/md3e-spec.md) 列出的 35 种内置形状（`Circle` 到 `Heart`），并提供统一枚举/名称目录 `All()` 便于遍历与画廊展示；
