@@ -52,7 +52,7 @@
     - `CGO_ENABLED=0 go test ./tokens/...` 与全量四重门禁通过。
   - **Commit**：`feat(tokens): [T1.1] implement HCT color space and CAM16 conversions`
 
-- [ ] **T1.2：实现 TonalPalette、DynamicScheme 与 45+ ColorRoles**
+- [x] **T1.2：实现 TonalPalette、DynamicScheme 与 45+ ColorRoles**
   - **交付物**：`tokens/palette.go`、`tokens/scheme.go`、`tokens/scheme_test.go`
   - **核心能力**：
     - `TonalPalette`（支持按色阶缓存 `Tone(t float64) ui.Color`）；

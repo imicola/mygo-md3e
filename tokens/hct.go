@@ -211,8 +211,10 @@ func ContrastRatio(a, b ui.Color) float64 {
 }
 
 // ContrastRatioOfTones returns the contrast ratio between two tones, as if
-// they were gray.
+// they were gray. Tones outside 0..100 clamp.
 func ContrastRatioOfTones(tone1, tone2 float64) float64 {
+	tone1 = min(max(tone1, 0), 100)
+	tone2 = min(max(tone2, 0), 100)
 	la := YFromLstar(tone1)
 	lb := YFromLstar(tone2)
 	if la < lb {
