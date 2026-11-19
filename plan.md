@@ -93,7 +93,7 @@
     - 在 `ui.NewTester` 中驱动实际动画元素：推进 `SettleTime()` + 裕量后 `tt.FramePending() == false`，且 `ReduceMotion: true` 时 0 延迟收敛且不产生额外动画帧。
   - **Commit**：`feat(motion): [T2.1] implement MD3E spring physics schemes and damping conversion`
 
-- [ ] **T2.2：实现 RoundedPolygon 几何基元与 Cubic Bézier 归一化（`shape/`）**
+- [x] **T2.2：实现 RoundedPolygon 几何基元与 Cubic Bézier 归一化（`shape/`）**
   - **交付物**：`shape/polygon.go`、`shape/polygon_test.go`
   - **核心能力**：
     - `CornerRounding{Radius, Smoothing}`（含平滑圆角曲率过渡，支持 `Unrounded`）；
