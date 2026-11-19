@@ -154,7 +154,7 @@
     - 四重门禁全绿。
   - **Commit**：`feat(core): [T3.2] implement Surface, Elevation, Typography helper, StateLayer, and Ripple`
 
-- [ ] **T3.3：构建内置基础矢量图标集（`internal/mdicon`）**
+- [x] **T3.3：构建内置基础矢量图标集（`internal/mdicon`）**
   - **交付物**：`internal/mdicon/icons.go`、`internal/mdicon/icons_test.go`
   - **核心能力**：
     - 提供组件库自身所需的标准 Material Symbols 24×24 viewBox 矢量路径/SVG（如 `Check`, `Minus`, `Close`, `ChevronDown`, `ChevronRight`, `ArrowBack`, `ArrowForward`, `Search`, `MoreVert`, `MoreHoriz`, `Add`, `Edit`, `Calendar`, `Clock`, `Visibility`, `VisibilityOff`, `ErrorOutline`, `Star`）；
