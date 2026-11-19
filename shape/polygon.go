@@ -6,6 +6,11 @@
 // are normalized into the unit square [0,1]×[0,1] with their aspect ratio
 // kept, and RoundedPolygon.ToPath maps that square onto any ui.Rect.
 //
+// The coordinates are screen-like, y growing downward, as ui.Rect's are.
+// Winding and angles follow the math convention within them, so a positive
+// signed area, counter-clockwise here, looks clockwise on screen; keep that
+// in mind when comparing against Material's coordinate-free descriptions.
+//
 // The package depends only on the ui package's Path, Painter and Rect; it
 // knows nothing of layout, state or animation.
 package shape
@@ -456,16 +461,16 @@ func roundCorner(prev, curr, next Point, rounding CornerRounding) corner {
 	// corner out while keeping the tangents along the edges.
 	smoothing := math.Max(0, math.Min(1, rounding.Smoothing))
 	k = k*(1-smoothing) + t*smoothing
-	// Convex corners bend toward the vertex, reflex ones away from it.
-	side := 1.0
-	if u0.Cross(u1) < 0 {
-		side = -1
-	}
+	// The outline runs prev → start → end → next, so it leaves start along
+	// -u0 and reaches end along u1 whichever way the corner bends: both
+	// controls sit between their tangent point and the vertex, toward it.
+	// A convex corner bows toward the vertex and a reflex one wraps the
+	// valley around it, with the tangents continuous at both joins.
 	return corner{
 		start: start,
 		end:   end,
-		c1:    start.Add(u0.Mul(side * k)),
-		c2:    end.Add(u1.Mul(side * k)),
+		c1:    start.Sub(u0.Mul(k)),
+		c2:    end.Sub(u1.Mul(k)),
 	}
 }
 

@@ -130,6 +130,50 @@ func TestSmoothingFillsTheCorner(t *testing.T) {
 	}
 }
 
+// TestRoundedCornersAreTangentContinuous checks that the outline passes
+// smoothly through every rounded corner, reflex ones included: where a
+// corner joins its neighbours, the two cubics' tangents point the same way
+// (G1 continuity). Only a sharp vertex, two straight edges meeting, may
+// turn the outline; hand-built chains such as SemiCircle's are not tested
+// here, as their joins are deliberate corners rather than roundings.
+func TestRoundedCornersAreTangentContinuous(t *testing.T) {
+	polygons := map[string]*shape.RoundedPolygon{
+		"triangle":          shape.RegularPolygon(3, 100, shape.CornerRounding{Radius: 15}),
+		"pentagon":          shape.RegularPolygon(5, 100, shape.CornerRounding{Radius: 20, Smoothing: 0.5}),
+		"rectangle":         shape.NewRectangle(200, 120, shape.CornerRounding{Radius: 30}),
+		"circle":            shape.NewCircle(100),
+		"sharp":             shape.RegularPolygon(3, 100, shape.Unrounded),
+		"star":              shape.Star(8, 100, 45, shape.CornerRounding{Radius: 8}, shape.CornerRounding{Radius: 12, Smoothing: 1}),
+		"star circular":     shape.Star(4, 100, 30, shape.CornerRounding{Radius: 10}, shape.CornerRounding{Radius: 6}),
+		"star partly round": shape.Star(12, 100, 55, shape.CornerRounding{Radius: 5, Smoothing: 0.3}, shape.CornerRounding{Radius: 9, Smoothing: 0.6}),
+	}
+	for name, poly := range polygons {
+		t.Run(name, func(t *testing.T) {
+			cubics := poly.Cubics()
+			for i, c := range cubics {
+				next := cubics[(i+1)%len(cubics)]
+				if isStraightCubic(c) && isStraightCubic(next) {
+					// A sharp vertex: the outline may turn here.
+					continue
+				}
+				a := c.Derivative(1).Normalized()
+				b := next.Derivative(0).Normalized()
+				if a.Dot(b) < 0.999 {
+					t.Fatalf("cubic %d joins cubic %d at an angle: tangents %+v and %+v", i, (i+1)%len(cubics), a, b)
+				}
+			}
+		})
+	}
+}
+
+// isStraightCubic reports whether the cubic draws a straight line, its
+// controls on the line from its start to its end.
+func isStraightCubic(c shape.Cubic) bool {
+	line := c.P3.Sub(c.P0)
+	return math.Abs(line.Cross(c.P1.Sub(c.P0))) <= 1e-9 &&
+		math.Abs(line.Cross(c.P2.Sub(c.P0))) <= 1e-9
+}
+
 func TestTransformComposition(t *testing.T) {
 	p := shape.Point{X: 2, Y: 3}
 	turned := shape.Rotate(90).Apply(p)
