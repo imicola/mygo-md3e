@@ -1,6 +1,7 @@
 package tokens
 
 import (
+	"fmt"
 	"math"
 	"testing"
 
@@ -206,6 +207,63 @@ func TestExpressiveRotatesPrimaryHue(t *testing.T) {
 	}
 	if s := expressive.PrimaryPalette; math.Abs(s.Chroma()-40) > 1e-9 {
 		t.Errorf("Expressive primary chroma = %v, want 40", s.Chroma())
+	}
+}
+
+func TestRotatedHueBreakpoints(t *testing.T) {
+	tests := []struct {
+		name      string
+		hue       float64
+		hues      []float64
+		rotations []float64
+		rotation  float64
+	}{
+		{"expressive secondary 0", 0, expressiveHues, expressiveSecondaryRotations, 45},
+		{"expressive secondary 21", 21, expressiveHues, expressiveSecondaryRotations, 95},
+		{"expressive secondary 51", 51, expressiveHues, expressiveSecondaryRotations, 45},
+		{"expressive secondary 321", 321, expressiveHues, expressiveSecondaryRotations, 45},
+		{"expressive tertiary 0", 0, expressiveHues, expressiveTertiaryRotations, 120},
+		{"expressive tertiary 21", 21, expressiveHues, expressiveTertiaryRotations, 120},
+		{"expressive tertiary 51", 51, expressiveHues, expressiveTertiaryRotations, 20},
+		{"expressive tertiary 321", 321, expressiveHues, expressiveTertiaryRotations, 120},
+		{"vibrant secondary 0", 0, vibrantHues, vibrantSecondaryRotations, 18},
+		{"vibrant secondary 41", 41, vibrantHues, vibrantSecondaryRotations, 15},
+		{"vibrant secondary 301", 301, vibrantHues, vibrantSecondaryRotations, 12},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := rotatedHue(tt.hue, tt.hues, tt.rotations)
+			want := SanitizeDegrees(tt.hue + tt.rotation)
+			if math.Abs(got-want) > 1e-9 {
+				t.Errorf("rotatedHue(%v) = %v, want %v", tt.hue, got, want)
+			}
+			if got == tt.hue {
+				t.Errorf("rotatedHue(%v) left the hue unrotated", tt.hue)
+			}
+		})
+	}
+}
+
+func TestExpressiveRotationsAtBreakpointHues(t *testing.T) {
+	tests := []struct {
+		hue               float64
+		secondaryTertiary [2]float64
+	}{
+		{0, [2]float64{45, 120}},
+		{21, [2]float64{116, 141}}, // 21+95 and 21+120
+		{51, [2]float64{96, 71}},   // 51+45 and 51+20
+		{321, [2]float64{6, 81}},   // 321+45 and 321+120, wrapped
+	}
+	for _, tt := range tests {
+		t.Run(fmt.Sprintf("hue %v", tt.hue), func(t *testing.T) {
+			_, secondary, tertiary, _, _ := variantPalettes(Expressive, HCT{Hue: tt.hue, Chroma: 40, Tone: 50})
+			if math.Abs(secondary.Hue()-tt.secondaryTertiary[0]) > 1e-9 {
+				t.Errorf("secondary hue = %v, want %v", secondary.Hue(), tt.secondaryTertiary[0])
+			}
+			if math.Abs(tertiary.Hue()-tt.secondaryTertiary[1]) > 1e-9 {
+				t.Errorf("tertiary hue = %v, want %v", tertiary.Hue(), tt.secondaryTertiary[1])
+			}
+		})
 	}
 }
 

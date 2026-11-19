@@ -204,13 +204,16 @@ func variantPalettes(v Variant, source HCT) (primary, secondary, tertiary, neutr
 }
 
 // rotatedHue returns the source hue rotated by the rotation of the hue band it
-// falls in, as Material's Expressive and Vibrant schemes do.
+// falls in, as Material's Expressive and Vibrant schemes do. Bands are half
+// open, [hue, next), so every hue belongs to exactly one band and a hue that
+// lands on a breakpoint (0, 21, 51, ...) takes the rotation of the band it
+// starts rather than falling through unrotated.
 func rotatedHue(hue float64, hues, rotations []float64) float64 {
 	if len(rotations) == 1 {
 		return SanitizeDegrees(hue + rotations[0])
 	}
 	for i := 0; i+1 < len(hues); i++ {
-		if hues[i] < hue && hue < hues[i+1] {
+		if hues[i] <= hue && hue < hues[i+1] {
 			return SanitizeDegrees(hue + rotations[i])
 		}
 	}
