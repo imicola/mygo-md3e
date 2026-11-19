@@ -23,7 +23,7 @@
 
 ## M0：工程脚手架与验证基线
 
-- [ ] **T0.1：初始化 Go 模块与 MyGo 本地工具链基线**
+- [x] **T0.1：初始化 Go 模块与 MyGo 本地工具链基线**
   - **交付物**：
     - `go.mod`（模块名 `mygo-md3e`，`go 1.27.3`，`tool github.com/egoist/mygo/cmd/mygo`，`require github.com/egoist/mygo v0.0.0`，`replace github.com/egoist/mygo => ./mygo`）
     - `doc.go`（根包 `md3e` 包级文档与版本信息占位）
