@@ -143,7 +143,7 @@
     - 测试验证 `tt.SetDark(true)`、`tt.SetPreferences`（`HighContrast`, `Accent`）变更后默认主题自动响应切换。
   - **Commit**：`feat(theme): [T3.1] implement md3e.Theme, ThemeScope, and ui.Theme/Preferences bridge`
 
-- [ ] **T3.2：实现 Surface、Elevation 渲染、Typography 文本与 StateLayer/Ripple**
+- [x] **T3.2：实现 Surface、Elevation 渲染、Typography 文本与 StateLayer/Ripple**
   - **交付物**：`surface.go`、`ripple.go`、`typography.go`、`surface_test.go`
   - **核心能力**：
     - `Surface` 原语：支持背景色、Tonal Elevation 色调叠加、MD3E Elevation `Level0..5` 多层阴影（Key + Ambient shadow）、边框、独立四角半径；

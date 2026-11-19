@@ -1,0 +1,368 @@
+package md3e
+
+import (
+	"image/color"
+	"math"
+	"testing"
+	"time"
+
+	"github.com/egoist/mygo/ui"
+
+	"mygo-md3e/shape"
+	"mygo-md3e/tokens"
+)
+
+func absColorDiff(a, b color.RGBA) int {
+	abs := func(x int) int {
+		if x < 0 {
+			return -x
+		}
+		return x
+	}
+	return abs(int(a.R)-int(b.R)) + abs(int(a.G)-int(b.G)) + abs(int(a.B)-int(b.B))
+}
+
+func TestElevationSurfaceColorsAndShadows(t *testing.T) {
+	light := ThemeFromSeed(DefaultSeedColor, ThemeOptions{Dark: false})
+	dark := ThemeFromSeed(DefaultSeedColor, ThemeOptions{Dark: true})
+
+	for _, tc := range []struct {
+		name string
+		th   *Theme
+	}{
+		{name: "light", th: light},
+		{name: "dark", th: dark},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			levels := []tokens.ElevationLevel{
+				tokens.Level0, tokens.Level1, tokens.Level2,
+				tokens.Level3, tokens.Level4, tokens.Level5,
+			}
+			var rendered []color.RGBA
+			for _, lvl := range levels {
+				img := ui.Render(func(c *ui.Context) {
+					ThemeScope(c, tc.th, func() {
+						ui.Box(c).Size(120, 120).Background(ui.RGB(255, 255, 255)).Padding(20).Children(func() {
+							Surface(c, SurfaceOptions{
+								Elevation: lvl,
+								Radius:    8,
+							}).Size(60, 40)
+						})
+					})
+				}, 120, 120, 1)
+
+				// Sample surface interior center at (50, 40).
+				center := img.RGBAAt(50, 40)
+				rendered = append(rendered, center)
+
+				// Sample shadow region just below the 60x40 box (placed at (20,20)..(80,60)): (50, 62).
+				below := img.RGBAAt(50, 62)
+				if lvl == tokens.Level0 {
+					if below != (color.RGBA{R: 255, G: 255, B: 255, A: 255}) {
+						t.Fatalf("Level0 rendered shadow pixel below box: %+v", below)
+					}
+				} else {
+					if below == (color.RGBA{R: 255, G: 255, B: 255, A: 255}) {
+						t.Fatalf("%s did not render shadow pixel below surface", tc.name)
+					}
+				}
+			}
+
+			for i := 0; i < len(rendered)-1; i++ {
+				if rendered[i] == rendered[i+1] {
+					t.Fatalf("%s elevation Level%d and Level%d rendered identical center pixel %+v",
+						tc.name, i, i+1, rendered[i])
+				}
+			}
+
+			base := ui.RGB(240, 240, 240)
+			tinted := ApplyTonalElevation(tc.th, base, tokens.Level3)
+			if tinted == base {
+				t.Fatalf("%s ApplyTonalElevation did not tint custom base color", tc.name)
+			}
+		})
+	}
+}
+
+func TestTypographyScaleAndTextHelper(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor, ThemeOptions{TextScale: 1.5})
+
+	var gotMetrics [tokens.TypeRoleCount]TypeStyleMetrics
+	var emphMetrics [tokens.TypeRoleCount]TypeStyleMetrics
+
+	tt := ui.NewTester(func(c *ui.Context) {
+		ThemeScope(c, th, func() {
+			ui.Column(c).Children(func() {
+				for role := tokens.TypeRole(0); role < tokens.TypeRoleCount; role++ {
+					gotMetrics[role] = TypeStyleOf(c, role)
+					emphMetrics[role] = TypeStyleOf(c, role, true)
+				}
+				Text(c, "Display", tokens.DisplayLarge)
+				Text(c, "Body", tokens.BodyMedium)
+				Text(c, "Label", tokens.LabelSmall, true)
+			})
+		})
+	}, 400, 400)
+
+	for role := tokens.TypeRole(0); role < tokens.TypeRoleCount; role++ {
+		wantStd := th.Typography.Style(role, false)
+		wantEmp := th.Typography.Style(role, true)
+		if math.Abs(float64(gotMetrics[role].Size)-wantStd.Size*1.5) > 0.01 {
+			t.Fatalf("role %d scaled size = %v, want %v", role, gotMetrics[role].Size, wantStd.Size*1.5)
+		}
+		if emphMetrics[role].Weight != wantEmp.Weight || emphMetrics[role].Weight <= gotMetrics[role].Weight {
+			t.Fatalf("role %d emphasized weight = %d, std = %d", role, emphMetrics[role].Weight, gotMetrics[role].Weight)
+		}
+	}
+
+	dispRect, ok1 := tt.Find("Display")
+	bodyRect, ok2 := tt.Find("Body")
+	labelRect, ok3 := tt.Find("Label")
+	if !ok1 || !ok2 || !ok3 {
+		t.Fatalf("expected all styled texts in layout: %v %v %v", ok1, ok2, ok3)
+	}
+	if dispRect.H <= bodyRect.H || bodyRect.H <= labelRect.H {
+		t.Fatalf("unexpected text heights: display=%v body=%v label=%v", dispRect.H, bodyRect.H, labelRect.H)
+	}
+}
+
+func TestStateLayerHoverZeroRebuildAndOpacity(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor)
+	builds := 0
+
+	tt := ui.NewTester(func(c *ui.Context) {
+		builds++
+		ThemeScope(c, th, func() {
+			ui.Box(c).Size(200, 120).Background(ui.RGB(255, 255, 255)).Padding(20).Children(func() {
+				s := Surface(c, SurfaceOptions{
+					Color:  ui.RGB(255, 255, 255),
+					Radius: 12,
+				}).Size(120, 60)
+				AttachStateLayer(c, s, StateLayerOptions{
+					Color:  ui.RGB(0, 0, 0),
+					Radius: 12,
+				})
+			})
+		})
+	}, 200, 120)
+
+	if builds != 1 {
+		t.Fatalf("initial builds = %d, want 1", builds)
+	}
+	idlePx := tt.Image().RGBAAt(80, 50)
+	if idlePx != (color.RGBA{R: 255, G: 255, B: 255, A: 255}) {
+		t.Fatalf("idle interior pixel = %+v, want pure white", idlePx)
+	}
+
+	// Hover inside Surface: must not spin rebuilds on frame, and DrawOver animates
+	// the 8% StateLayer strictly via partial repaints (0 rebuilds across Advance).
+	tt.Move(80, 50)
+	if builds > 2 {
+		t.Fatalf("builds after hover Move = %d, expected at most 1 Tester settle build", builds)
+	}
+	afterMoveBuilds := builds
+	tt.Advance(48 * time.Millisecond)
+	midHoverPx := tt.Image().RGBAAt(80, 50)
+	tt.Advance(220 * time.Millisecond)
+	if builds != afterMoveBuilds {
+		t.Fatalf("builds grew during StateLayer hover animation: got %d, want %d (0 rebuilds during Advance)", builds, afterMoveBuilds)
+	}
+	if tt.FramePending() {
+		t.Fatal("FramePending should be false once StateLayer hover settled")
+	}
+	hoverPx := tt.Image().RGBAAt(80, 50)
+	if midHoverPx.R >= idlePx.R || midHoverPx.R <= hoverPx.R {
+		t.Fatalf("expected smooth hover fade mid (%d) between idle (%d) and settled (%d)", midHoverPx.R, idlePx.R, hoverPx.R)
+	}
+	// Black at 0.08 alpha over white 255 -> 255 * (1 - 0.08) ≈ 235.
+	if hoverPx.R < 229 || hoverPx.R > 240 {
+		t.Fatalf("hover pixel R = %d, want ~235 (8%% black overlay on white)", hoverPx.R)
+	}
+
+	// Move pointer out: DrawOver fades StateLayer back to 0 without rebuilding during Advance.
+	tt.Move(5, 5)
+	afterLeaveBuilds := builds
+	tt.Advance(250 * time.Millisecond)
+	if builds != afterLeaveBuilds {
+		t.Fatalf("builds grew during StateLayer hover leave fade: got %d, want %d", builds, afterLeaveBuilds)
+	}
+	if tt.FramePending() {
+		t.Fatal("FramePending should be false after StateLayer faded out")
+	}
+	leftPx := tt.Image().RGBAAt(80, 50)
+	if leftPx != idlePx {
+		t.Fatalf("pixel after hover leave = %+v, want %+v", leftPx, idlePx)
+	}
+}
+
+func TestExpressiveRipplePropagationClippingAndReduceMotion(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor)
+	asymmetricRadii := [4]float32{28, 0, 28, 0}
+
+	tt := ui.NewTester(func(c *ui.Context) {
+		ThemeScope(c, th, func() {
+			// Window-sized root canvas filled neutral gray so corner clip bleed is unmistakably distinct.
+			ui.Box(c).Size(240, 120).Background(ui.RGB(220, 220, 220)).Padding(20).Children(func() {
+				s := Surface(c, SurfaceOptions{
+					Color:    ui.RGB(255, 255, 255),
+					Radii:    asymmetricRadii,
+					HasRadii: true,
+					Clip:     true,
+				}).Size(200, 80)
+				AttachRipple(c, s, StateLayerOptions{
+					Color:    ui.RGB(0, 0, 0),
+					Radii:    asymmetricRadii,
+					HasRadii: true,
+				})
+			})
+		})
+	}, 240, 120)
+
+	// Surface occupies [20, 20]..[220, 100].
+	// Top-left corner pixel (22, 22) is (2, 2) local — outside 28dp rounded corner (dist from (28,28) is ~36.8 > 28).
+	// Bottom-right corner pixel (218, 98) is (198, 78) local — outside 28dp bottom-right rounded corner.
+	outsideTL := color.RGBA{R: 220, G: 220, B: 220, A: 255}
+
+	if px := tt.Image().RGBAAt(22, 22); px != outsideTL {
+		t.Fatalf("top-left outside 28dp corner = %+v, want background %+v", px, outsideTL)
+	}
+	if px := tt.Image().RGBAAt(218, 98); px != outsideTL {
+		t.Fatalf("bottom-right outside 28dp corner = %+v, want background %+v", px, outsideTL)
+	}
+
+	// Press near left edge of surface at window (44, 60) -> local (24, 40).
+	tt.Press(44, 60)
+	nearPress := tt.Image().RGBAAt(46, 60)
+	farSide := tt.Image().RGBAAt(205, 60) // distance ~161dp; at t=0 initial radius is ~0.20*maxR (~36dp).
+	if nearPress.R >= 245 {
+		t.Fatalf("expected ripple darken near press origin at t=0, got %+v", nearPress)
+	}
+	if farSide.R <= nearPress.R {
+		t.Fatalf("expected unreached far side (%+v) to remain lighter than near press (%+v) at t=0", farSide, nearPress)
+	}
+
+	// Check strict asymmetric 4-corner clipping during active ripple press!
+	if px := tt.Image().RGBAAt(22, 22); px != outsideTL {
+		t.Fatalf("ripple bled outside TL 28dp corner: %+v", px)
+	}
+
+	// Advance 360ms while still held: wave reaches far side AND settles with zero pending frames.
+	tt.Advance(360 * time.Millisecond)
+	farHeld := tt.Image().RGBAAt(205, 60)
+	if farHeld.R >= 245 {
+		t.Fatalf("expected expanding ripple to reach far side after 360ms, got %+v", farHeld)
+	}
+	if px := tt.Image().RGBAAt(218, 98); px != outsideTL {
+		t.Fatalf("fully expanded ripple bled outside BR 28dp corner: %+v", px)
+	}
+	if tt.FramePending() {
+		t.Fatal("FramePending should settle to false even while press is held after full expansion")
+	}
+
+	// Release press and advance until fade completes and pointer moves out.
+	tt.Release(44, 60)
+	tt.Move(5, 5)
+	tt.Advance(450 * time.Millisecond)
+	if tt.FramePending() {
+		t.Fatal("FramePending must be false after ripple release and fade complete")
+	}
+	if settled := tt.Image().RGBAAt(46, 60); settled != (color.RGBA{R: 255, G: 255, B: 255, A: 255}) {
+		t.Fatalf("surface pixel after ripple faded out = %+v, want pure white", settled)
+	}
+
+	// Enable ReduceMotion: immediate static feedback, zero circular wave frames, FramePending always false.
+	tt.SetPreferences(ui.Preferences{ReduceMotion: true})
+	tt.Move(60, 60)
+	if tt.FramePending() {
+		t.Fatal("ReduceMotion hover should not request pending animation frames")
+	}
+	if hoverRM := tt.Image().RGBAAt(60, 60); hoverRM.R < 228 || hoverRM.R > 240 {
+		t.Fatalf("ReduceMotion static hover pixel R = %d, want ~235", hoverRM.R)
+	}
+
+	tt.Press(44, 60)
+	if tt.FramePending() {
+		t.Fatal("ReduceMotion press should not queue ripple animation frames")
+	}
+	nearRM := tt.Image().RGBAAt(46, 60)
+	farRM := tt.Image().RGBAAt(205, 60)
+	if absColorDiff(nearRM, farRM) > 2 || nearRM.R >= 240 {
+		t.Fatalf("ReduceMotion press should show immediate uniform pressed state layer: near=%+v far=%+v", nearRM, farRM)
+	}
+
+	tt.Release(44, 60)
+	tt.Move(5, 5)
+	if tt.FramePending() {
+		t.Fatal("ReduceMotion release should settle with FramePending == false")
+	}
+}
+
+func TestSurfacePolygonShapeClipKeyboardAndRTL(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor)
+
+	// 1. Custom *shape.RoundedPolygon surface + ripple clipping check + keyboard Enter/Space pulse.
+	tt := ui.NewTester(func(c *ui.Context) {
+		ThemeScope(c, th, func() {
+			ui.Box(c).Size(160, 160).Background(ui.RGB(200, 200, 200)).Padding(20).Children(func() {
+				b := ui.ButtonBase(c).Size(100, 100)
+				_ = b.Clicked()
+				AttachRipple(c, b, StateLayerOptions{
+					Color: ui.RGB(0, 0, 0),
+					Shape: shape.Cookie4Sided(),
+				})
+				b.Children(func() {
+					Surface(c, SurfaceOptions{
+						Color: ui.RGB(255, 255, 255),
+						Shape: shape.Cookie4Sided(),
+					}).Size(100, 100)
+				})
+			})
+		})
+	}, 160, 160)
+
+	// Box is [20..120] x [20..120]. Cookie4Sided pinches inward at corners, so (22, 22) is outside polygon!
+	bg := color.RGBA{R: 200, G: 200, B: 200, A: 255}
+	if px := tt.Image().RGBAAt(22, 22); px != bg {
+		t.Fatalf("corner outside Cookie4Sided polygon = %+v, want background %+v", px, bg)
+	}
+
+	// Trigger keyboard focus + Space ripple at center (70, 70).
+	tt.Key(0, ui.KeyTab)
+	tt.KeyDown(ui.KeySpace)
+	if center := tt.Image().RGBAAt(70, 70); center.R >= 245 {
+		t.Fatalf("expected keyboard Space ripple darken at polygon center (70, 70), got %+v", center)
+	}
+	if px := tt.Image().RGBAAt(22, 22); px != bg {
+		t.Fatalf("ripple bled outside Cookie4Sided polygon corner: %+v", px)
+	}
+	tt.KeyUp(ui.KeySpace)
+	tt.Advance(500 * time.Millisecond)
+	if tt.FramePending() {
+		t.Fatal("keyboard ripple should settle with FramePending == false")
+	}
+
+	// 2. RTL logical PaddingStart / PaddingEnd verification (window width 200 matches Surface width).
+	rtlTT := ui.NewTester(func(c *ui.Context) {
+		ThemeScope(c, th, func() {
+			Surface(c, SurfaceOptions{
+				PaddingStart: 40,
+				PaddingEnd:   4,
+			}).Width(200).Children(func() {
+				Text(c, "Hi", tokens.BodyMedium)
+			})
+		})
+	}, 200, 80)
+
+	ltrRect, ok := rtlTT.Find("Hi")
+	if !ok {
+		t.Fatal("LTR text not found")
+	}
+	rtlTT.SetDirection(ui.RightToLeft)
+	rtlRect, ok := rtlTT.Find("Hi")
+	if !ok {
+		t.Fatal("RTL text not found")
+	}
+	if ltrRect.X != 40 || rtlRect.X != 4 {
+		t.Fatalf("unexpected RTL PaddingStart behavior: ltr=%+v (want X=40) rtl=%+v (want X=4)", ltrRect, rtlRect)
+	}
+}
