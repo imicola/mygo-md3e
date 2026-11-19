@@ -41,7 +41,7 @@
 
 ## M1：MD3E 设计令牌与 HCT 色彩引擎（`tokens/`）
 
-- [ ] **T1.1：实现 HCT 色彩空间核心数学库**
+- [x] **T1.1：实现 HCT 色彩空间核心数学库**
   - **交付物**：`tokens/hct.go`、`tokens/hct_test.go`
   - **核心能力**：
     - sRGB ↔ Linear RGB ↔ CIE XYZ (D65) ↔ CIE L\*a\*b\* 精确转换；
