@@ -206,6 +206,57 @@ func TestEffectsAnimateWithReducedMotion(t *testing.T) {
 	}
 }
 
+// TestResolveSnapSemantics checks that Snap, with the system's own
+// ReduceMotion off, lands in the frame after the change and stops there.
+func TestResolveSnapSemantics(t *testing.T) {
+	var target, shown float32
+	view := func(c *ui.Context) {
+		e := ui.Box(c).Size(10, 10)
+		shown = e.AnimateTo("v", target, motion.Resolve(motion.Expressive, motion.DefaultSpatial, true))
+	}
+	tt := ui.NewTester(view, 100, 100)
+
+	target = 1
+	tt.Frame()
+	if shown != 0 {
+		t.Errorf("value = %v in the frame of the change, want 0 (Snap takes one frame)", shown)
+	}
+	if !tt.FramePending() {
+		t.Error("the snap asked for no frame to land in")
+	}
+	tt.Advance(20 * time.Millisecond) // the next refresh, where the snap lands
+	if shown != 1 {
+		t.Errorf("value = %v after the snap frame, want 1", shown)
+	}
+	if tt.FramePending() {
+		t.Error("the snap keeps asking for frames")
+	}
+}
+
+// TestResolveValidates checks that Resolve rejects unknown tokens and schemes
+// whether or not it is about to snap.
+func TestResolveValidates(t *testing.T) {
+	cases := []struct {
+		name   string
+		scheme motion.Scheme
+		token  motion.Token
+	}{
+		{"unknown token", motion.Expressive, motion.Token(99)},
+		{"negative token", motion.Expressive, motion.Token(-1)},
+		{"unknown scheme", motion.Scheme(9), motion.DefaultSpatial},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			defer func() {
+				if recover() == nil {
+					t.Error("Resolve did not panic")
+				}
+			}()
+			motion.Resolve(tc.scheme, tc.token, true)
+		})
+	}
+}
+
 // TestResolveFlags checks the animation flags each kind of token carries.
 func TestResolveFlags(t *testing.T) {
 	for _, scheme := range schemes {

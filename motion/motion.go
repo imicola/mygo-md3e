@@ -167,10 +167,14 @@ func Spring(scheme Scheme, token Token) ui.SpringOptions {
 }
 
 // Snap is the animation Resolve gives a spatial token when motion is to be
-// reduced: a value reaches its target within the frame after the change.
+// reduced: a value reaches its target in the frame after the change. The ui
+// package goes to the target at once, without a frame, only when the desktop
+// itself asks for less motion (Preferences.ReduceMotion); a caller that
+// reduces motion on its own gets this one-frame animation instead.
 var Snap = ui.Animation{Duration: time.Nanosecond, Ease: ui.Linear}
 
-// Resolve returns the animation of token under scheme.
+// Resolve returns the animation of token under scheme. It panics for a token
+// outside the six MD3E tokens or an unknown scheme, whether or not it snaps.
 //
 // Spatial springs overshoot as MD3E allows. Effects springs are critically
 // damped, and set Oklab and NonMotion: colors mix in Oklab, and as they move
@@ -179,10 +183,11 @@ var Snap = ui.Animation{Duration: time.Nanosecond, Ease: ui.Linear}
 // that pass c.Preferences().ReduceMotion get the snap here and from
 // ui.AnimateTo alike.
 func Resolve(scheme Scheme, token Token, reduceMotion bool) ui.Animation {
+	spec := SpecOf(scheme, token)
 	if token.Kind() == Spatial && reduceMotion {
 		return Snap
 	}
-	a := ui.Animation{Spring: SpecOf(scheme, token).SpringOptions()}
+	a := ui.Animation{Spring: spec.SpringOptions()}
 	if token.Kind() == Effects {
 		a.Oklab = true
 		a.NonMotion = true
