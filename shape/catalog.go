@@ -327,20 +327,34 @@ func fromCubics(center Point, cubics ...Cubic) *RoundedPolygon {
 }
 
 // pixelate returns the vertices of a stair-stepped outline along the edges
-// of vertices, steps steps an edge.
+// of vertices, steps steps an edge. Each edge moves along one axis and then
+// the other, starting with the axis the previous edge did not end on, so that
+// the stairs never double back along the line they came from.
 func pixelate(vertices []Point, steps int) []Point {
 	n := len(vertices)
+	lastAxis := 0 // 1: horizontal, 2: vertical, 0: neither yet
 	var out []Point
 	for i := range vertices {
 		a, b := vertices[i], vertices[(i+1)%n]
+		horizontalFirst := lastAxis != 1
 		cur := a
 		for s := 1; s <= steps; s++ {
 			p := a.Lerp(b, float64(s)/float64(steps))
 			if p == cur {
 				continue
 			}
-			out = append(out, Point{X: p.X, Y: cur.Y}, p)
+			if horizontalFirst {
+				out = append(out, Point{X: p.X, Y: cur.Y}, p)
+			} else {
+				out = append(out, Point{X: cur.X, Y: p.Y}, p)
+			}
 			cur = p
+		}
+		switch {
+		case horizontalFirst && b.Y != a.Y, !horizontalFirst && b.X == a.X:
+			lastAxis = 2
+		default:
+			lastAxis = 1
 		}
 	}
 	kept := out[:0]
