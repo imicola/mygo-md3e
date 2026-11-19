@@ -215,6 +215,31 @@ func TestCAM16Inverse(t *testing.T) {
 	}
 }
 
+// TestColorFromCAM16ClampsNegativeInputs checks that a negative lightness or
+// chroma resolves to black rather than to a NaN through the square root.
+func TestColorFromCAM16ClampsNegativeInputs(t *testing.T) {
+	if got := ColorFromCAM16(-10, -20, 200); got != ui.RGB(0, 0, 0) {
+		t.Errorf("negative lightness and chroma is %v, want black", got)
+	}
+	if got := ColorFromCAM16(0, 60, 200); got != ui.RGB(0, 0, 0) {
+		t.Errorf("zero lightness is %v, want black", got)
+	}
+	if got := ColorFromCAM16(100, 500, 200); got.A != 255 {
+		t.Errorf("over-saturated color is %v, want an opaque color", got)
+	}
+}
+
+// TestInverseAdaptResponseLimit checks that the response at and beyond the
+// model's ±400 limit stays finite instead of dividing by zero.
+func TestInverseAdaptResponseLimit(t *testing.T) {
+	for _, component := range []float64{400, 500, -400, -500} {
+		got := inverseAdaptResponse(component, 1)
+		if math.IsNaN(got) || math.IsInf(got, 0) {
+			t.Errorf("inverseAdaptResponse(%v) = %v, want a finite response", component, got)
+		}
+	}
+}
+
 func TestLabConversion(t *testing.T) {
 	colors := []ui.Color{
 		ui.Hex("#6750A4"), ui.RGB(0, 0, 0), ui.RGB(255, 255, 255),

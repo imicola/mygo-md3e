@@ -105,9 +105,14 @@ func CAM16FromColor(c ui.Color) CAM16 {
 }
 
 // ColorFromCAM16 returns the sRGB color with the CAM16 lightness j, chroma
-// and hue. A color outside the sRGB gamut clamps per channel.
+// and hue. A negative lightness or chroma clamps to zero, and a color outside
+// the sRGB gamut clamps per channel.
 func ColorFromCAM16(j, chroma, hue float64) ui.Color {
-	return ColorFromXYZ(xyzFromCAM16(cam16{j: j, chroma: chroma, hue: hue}))
+	return ColorFromXYZ(xyzFromCAM16(cam16{
+		j:      math.Max(0, j),
+		chroma: math.Max(0, chroma),
+		hue:    hue,
+	}))
 }
 
 // SanitizeDegrees wraps degrees into 0..360.
@@ -517,6 +522,14 @@ func adaptResponse(component, fl float64) float64 {
 
 // inverseAdaptResponse is the inverse of adaptResponse.
 func inverseAdaptResponse(component, fl float64) float64 {
-	base := math.Max(0, 27.13*math.Abs(component)/(400-math.Abs(component)))
+	// The forward response stays within ±400; a component at that limit
+	// would divide by zero, so cap the denominator and let the caller clamp
+	// the resulting color into the gamut.
+	magnitude := math.Abs(component)
+	denominator := 400 - magnitude
+	if denominator < 1e-6 {
+		denominator = 1e-6
+	}
+	base := 27.13 * magnitude / denominator
 	return math.Copysign(100/fl*math.Pow(base, 1.0/0.42), component)
 }
