@@ -276,6 +276,9 @@ func (s *DynamicScheme) resolve() ColorScheme {
 
 	var c ColorScheme
 
+	// The fixed roles are the same in light and dark themes.
+	fixedTone, fixedDimTone, onFixedTone, onFixedVariantTone := s.fixedTones()
+
 	// Primary.
 	primaryInitial := 40.0
 	switch {
@@ -328,10 +331,10 @@ func (s *DynamicScheme) resolve() ColorScheme {
 	c.PrimaryContainer = s.PrimaryPalette.Tone(primaryContainerTone)
 	c.OnPrimaryContainer = s.PrimaryPalette.Tone(s.tone(onPrimaryContainerInitial, primaryContainerTone, 4.5, 7, 11, false))
 	c.InversePrimary = s.PrimaryPalette.Tone(s.tone(lerp(80, 40, boolFloat(dark)), surfaceTone, 4.5, 7, 7, false))
-	c.PrimaryFixed = s.PrimaryPalette.Tone(90)
-	c.PrimaryFixedDim = s.PrimaryPalette.Tone(80)
-	c.OnPrimaryFixed = s.PrimaryPalette.Tone(10)
-	c.OnPrimaryFixedVariant = s.PrimaryPalette.Tone(30)
+	c.PrimaryFixed = s.PrimaryPalette.Tone(fixedTone)
+	c.PrimaryFixedDim = s.PrimaryPalette.Tone(fixedDimTone)
+	c.OnPrimaryFixed = s.PrimaryPalette.Tone(onFixedTone)
+	c.OnPrimaryFixedVariant = s.PrimaryPalette.Tone(onFixedVariantTone)
 
 	// Secondary.
 	secondaryInitial := 40.0
@@ -373,10 +376,10 @@ func (s *DynamicScheme) resolve() ColorScheme {
 	c.OnSecondary = s.SecondaryPalette.Tone(s.tone(onSecondaryInitial, secondaryTone, 7, 11, 21, false))
 	c.SecondaryContainer = s.SecondaryPalette.Tone(secondaryContainerTone)
 	c.OnSecondaryContainer = s.SecondaryPalette.Tone(s.tone(onSecondaryContainerInitial, secondaryContainerTone, 4.5, 7, 11, false))
-	c.SecondaryFixed = s.SecondaryPalette.Tone(90)
-	c.SecondaryFixedDim = s.SecondaryPalette.Tone(80)
-	c.OnSecondaryFixed = s.SecondaryPalette.Tone(10)
-	c.OnSecondaryFixedVariant = s.SecondaryPalette.Tone(30)
+	c.SecondaryFixed = s.SecondaryPalette.Tone(fixedTone)
+	c.SecondaryFixedDim = s.SecondaryPalette.Tone(fixedDimTone)
+	c.OnSecondaryFixed = s.SecondaryPalette.Tone(onFixedTone)
+	c.OnSecondaryFixedVariant = s.SecondaryPalette.Tone(onFixedVariantTone)
 
 	// Tertiary.
 	tertiaryInitial := 40.0
@@ -429,10 +432,10 @@ func (s *DynamicScheme) resolve() ColorScheme {
 	c.OnTertiary = s.TertiaryPalette.Tone(s.tone(onTertiaryInitial, tertiaryTone, 7, 11, 21, false))
 	c.TertiaryContainer = s.TertiaryPalette.Tone(tertiaryContainerTone)
 	c.OnTertiaryContainer = s.TertiaryPalette.Tone(s.tone(onTertiaryContainerInitial, tertiaryContainerTone, 4.5, 7, 11, false))
-	c.TertiaryFixed = s.TertiaryPalette.Tone(90)
-	c.TertiaryFixedDim = s.TertiaryPalette.Tone(80)
-	c.OnTertiaryFixed = s.TertiaryPalette.Tone(10)
-	c.OnTertiaryFixedVariant = s.TertiaryPalette.Tone(30)
+	c.TertiaryFixed = s.TertiaryPalette.Tone(fixedTone)
+	c.TertiaryFixedDim = s.TertiaryPalette.Tone(fixedDimTone)
+	c.OnTertiaryFixed = s.TertiaryPalette.Tone(onFixedTone)
+	c.OnTertiaryFixedVariant = s.TertiaryPalette.Tone(onFixedVariantTone)
 
 	// Error.
 	errorInitial := 40.0
@@ -466,7 +469,10 @@ func (s *DynamicScheme) resolve() ColorScheme {
 	c.SurfaceContainerHigh = s.NeutralPalette.Tone(highTone)
 	c.SurfaceContainerHighest = s.NeutralPalette.Tone(highestContainerTone)
 	c.SurfaceVariant = s.NeutralVariantPalette.Tone(lerp(90, 30, boolFloat(dark)))
-	c.SurfaceTint = s.PrimaryPalette.Tone(lerp(40, 80, boolFloat(dark)))
+	// The tint that elevation mixes into surfaces is the primary itself, as
+	// docs/md3e-spec.md has it; a hard-coded tone would part them under
+	// Monochrome and high contrast.
+	c.SurfaceTint = c.Primary
 
 	onBackgroundInitial := 10.0
 	if dark {
@@ -527,6 +533,48 @@ func (s *DynamicScheme) tone(initial, bg, normal, medium, high float64, isBackgr
 	return answer
 }
 
+// fixedTones returns the tones of a family's fixed roles: its fixed
+// container, the dim variant, and the content on them. The tones do not
+// change between light and dark themes; Monochrome switches to its gray set,
+// as Material's does, and higher contrast pushes the content tones apart from
+// both containers so that it stays legible on either.
+func (s *DynamicScheme) fixedTones() (fixed, fixedDim, onFixed, onFixedVariant float64) {
+	fixed, fixedDim, onFixed, onFixedVariant = 90, 80, 10, 30
+	if s.Options.Variant == Monochrome {
+		fixed, fixedDim, onFixed, onFixedVariant = 40, 30, 100, 90
+	}
+	level := s.Options.Contrast.level()
+	onFixed = toneOnBoth(onFixed, fixed, fixedDim, 4.5, 7, 11, level)
+	onFixedVariant = toneOnBoth(onFixedVariant, fixed, fixedDim, 3, 4.5, 7, level)
+	return
+}
+
+// toneOnBoth returns the tone content takes when it is drawn on either of two
+// container tones: initial when it reaches the desired contrast against both,
+// and otherwise the dark or light tone that does, as Material's solve over a
+// dual background does.
+func toneOnBoth(initial, tone1, tone2, normal, medium, high, level float64) float64 {
+	desired := curve(normal, medium, high, level)
+	upper, lower := math.Max(tone1, tone2), math.Min(tone1, tone2)
+	if ContrastRatioOfTones(upper, initial) >= desired && ContrastRatioOfTones(lower, initial) >= desired {
+		return initial
+	}
+	light, dark := lighterTone(upper, desired), darkerTone(lower, desired)
+	if tonePrefersLightForeground(tone1) || tonePrefersLightForeground(tone2) {
+		if light < 0 {
+			return 100
+		}
+		return light
+	}
+	if dark >= 0 {
+		return dark
+	}
+	if light >= 0 {
+		return light
+	}
+	return 0
+}
+
 // foregroundTone returns a tone with about ratio contrast against bgTone,
 // preferring a light foreground below tone 60 and a dark one above it, as
 // Material's DynamicColor.foregroundTone does.
@@ -581,12 +629,12 @@ func lighterTone(tone, ratio float64) float64 {
 		return -1
 	}
 	darkY := YFromLstar(tone)
-	lightY := ratio*(darkY+5) - 5
+	lightY := math.Min(100, math.Max(0, ratio*(darkY+5)-5))
 	real := ratioOfYs(lightY, darkY)
 	if real < ratio && math.Abs(real-ratio) > 0.04 {
 		return -1
 	}
-	// Darken slightly, so that gamut mapping keeps the ratio.
+	// Brighten slightly, so that gamut mapping keeps the ratio.
 	v := LstarFromY(lightY) + 0.4
 	if v < 0 || v > 100 {
 		return -1
@@ -623,34 +671,25 @@ func ratioOfYs(y1, y2 float64) float64 {
 }
 
 // findDesiredChromaByTone walks from tone toward the tone where palette's
-// chroma peaks, so that a fidelity scheme's container keeps its color.
+// color reaches the most of its chroma, so that a fidelity scheme's container
+// keeps its color. sRGB cuts the chroma a tone can hold, so the tone a palette
+// asks for is often more colorful than the color it resolves to there; the
+// search follows the resolved colors, as Material's does.
 func findDesiredChromaByTone(palette *TonalPalette, tone float64, byDecreasingTone bool) float64 {
 	answer := tone
-	closest := palette.HCT(tone)
-	if closest.Chroma >= palette.Chroma() {
-		return answer
-	}
+	best := HCTFromColor(palette.Tone(tone)).Chroma
 	step := 1.0
 	if byDecreasingTone {
 		step = -1
 	}
-	chromaPeak := closest.Chroma
 	for range 100 {
-		answer += step
-		if answer < 0 || answer > 100 {
+		tone += step
+		if tone < 0 || tone > 100 || best >= palette.Chroma() {
 			break
 		}
-		candidate := palette.HCT(answer)
-		if chromaPeak > candidate.Chroma {
-			break
+		if candidate := HCTFromColor(palette.Tone(tone)).Chroma; candidate > best {
+			best, answer = candidate, tone
 		}
-		if math.Abs(candidate.Chroma-palette.Chroma()) < 0.4 {
-			break
-		}
-		if math.Abs(candidate.Chroma-palette.Chroma()) < math.Abs(closest.Chroma-palette.Chroma()) {
-			closest = candidate
-		}
-		chromaPeak = math.Max(chromaPeak, candidate.Chroma)
 	}
 	return answer
 }

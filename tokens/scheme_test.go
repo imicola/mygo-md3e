@@ -267,6 +267,120 @@ func TestExpressiveRotationsAtBreakpointHues(t *testing.T) {
 	}
 }
 
+func TestSurfaceTintFollowsPrimary(t *testing.T) {
+	for _, v := range []Variant{TonalSpot, Expressive, Monochrome, Fidelity} {
+		for _, dark := range []bool{false, true} {
+			for _, contrast := range []Contrast{ContrastStandard, ContrastHigh} {
+				s := NewDynamicScheme(DynamicSchemeOptions{
+					Seed: sampleSeed, Dark: dark, Variant: v, Contrast: contrast,
+				}).Colors
+				if s.SurfaceTint != s.Primary {
+					t.Errorf("%v dark=%v contrast=%v: SurfaceTint %v differs from Primary %v",
+						v, dark, contrast, s.SurfaceTint, s.Primary)
+				}
+			}
+		}
+	}
+}
+
+// TestFixedRolesMonochrome checks that Monochrome switches the fixed roles to
+// Material's gray tones, in both themes.
+func TestFixedRolesMonochrome(t *testing.T) {
+	light := NewDynamicScheme(DynamicSchemeOptions{Seed: sampleSeed, Variant: Monochrome}).Colors
+	dark := NewDynamicScheme(DynamicSchemeOptions{Seed: sampleSeed, Variant: Monochrome, Dark: true}).Colors
+	roles := []struct {
+		name        string
+		light, dark ui.Color
+		tone        float64
+	}{
+		{"PrimaryFixed", light.PrimaryFixed, dark.PrimaryFixed, 40},
+		{"PrimaryFixedDim", light.PrimaryFixedDim, dark.PrimaryFixedDim, 30},
+		{"OnPrimaryFixed", light.OnPrimaryFixed, dark.OnPrimaryFixed, 100},
+		{"OnPrimaryFixedVariant", light.OnPrimaryFixedVariant, dark.OnPrimaryFixedVariant, 90},
+	}
+	for _, role := range roles {
+		if role.light != role.dark {
+			t.Errorf("%s differs between light (%v) and dark (%v)", role.name, role.light, role.dark)
+		}
+		if got := HCTFromColor(role.light).Tone; math.Abs(got-role.tone) > 0.6 {
+			t.Errorf("%s tone = %.2f, want %.0f", role.name, got, role.tone)
+		}
+		if c := role.light; c.R != c.G || c.G != c.B {
+			t.Errorf("%s is %v, want a gray", role.name, c)
+		}
+	}
+}
+
+// TestFixedRolesHighContrast checks that high contrast keeps the fixed
+// content legible on both fixed containers while the containers themselves
+// stay fixed.
+func TestFixedRolesHighContrast(t *testing.T) {
+	for _, dark := range []bool{false, true} {
+		name := "light"
+		if dark {
+			name = "dark"
+		}
+		t.Run(name, func(t *testing.T) {
+			s := NewDynamicScheme(DynamicSchemeOptions{
+				Seed: sampleSeed, Dark: dark, Contrast: ContrastHigh,
+			}).Colors
+			if got := HCTFromColor(s.PrimaryFixed).Tone; math.Abs(got-90) > 0.6 {
+				t.Errorf("PrimaryFixed tone = %.2f, want 90", got)
+			}
+			if got := HCTFromColor(s.PrimaryFixedDim).Tone; math.Abs(got-80) > 0.6 {
+				t.Errorf("PrimaryFixedDim tone = %.2f, want 80", got)
+			}
+			if got := ContrastRatio(s.OnPrimaryFixed, s.PrimaryFixedDim); got < 11 {
+				t.Errorf("OnPrimaryFixed on PrimaryFixedDim is %.2f:1, want at least 11", got)
+			}
+			if got := ContrastRatio(s.OnPrimaryFixedVariant, s.PrimaryFixedDim); got < 7 {
+				t.Errorf("OnPrimaryFixedVariant on PrimaryFixedDim is %.2f:1, want at least 7", got)
+			}
+		})
+	}
+}
+
+// TestFidelitySecondaryContainerKeepsChroma checks that a saturated seed's
+// Fidelity scheme moves the secondary container to the tone where its color
+// is most saturated, instead of leaving it at the gamut-cut default tone.
+func TestFidelitySecondaryContainerKeepsChroma(t *testing.T) {
+	seed := ui.RGB(255, 0, 0)
+	for _, dark := range []bool{false, true} {
+		name := "light"
+		if dark {
+			name = "dark"
+		}
+		t.Run(name, func(t *testing.T) {
+			fidelity := NewDynamicScheme(DynamicSchemeOptions{Seed: seed, Variant: Fidelity, Dark: dark}).Colors
+			tonal := NewDynamicScheme(DynamicSchemeOptions{Seed: seed, Variant: TonalSpot, Dark: dark}).Colors
+			got := HCTFromColor(fidelity.SecondaryContainer).Chroma
+			want := HCTFromColor(tonal.SecondaryContainer).Chroma
+			if got < want+20 {
+				t.Errorf("Fidelity SecondaryContainer chroma = %.1f, want well above TonalSpot's %.1f", got, want)
+			}
+		})
+	}
+}
+
+func TestFindDesiredChromaByTone(t *testing.T) {
+	const want = 82.0
+	palette := NewTonalPalette(27.4, want)
+	down := findDesiredChromaByTone(palette, 90, true)
+	if down >= 90 {
+		t.Fatalf("decreasing search returned %v, want a tone below 90", down)
+	}
+	if got := HCTFromColor(palette.Tone(down)).Chroma; got < want-2 {
+		t.Errorf("decreasing search stopped at tone %.0f with chroma %.1f, want about %.0f", down, got, want)
+	}
+	up := findDesiredChromaByTone(palette, 30, false)
+	if up <= 30 {
+		t.Fatalf("increasing search returned %v, want a tone above 30", up)
+	}
+	if got := HCTFromColor(palette.Tone(up)).Chroma; got < want-2 {
+		t.Errorf("increasing search stopped at tone %.0f with chroma %.1f, want about %.0f", up, got, want)
+	}
+}
+
 func TestTonalPaletteCache(t *testing.T) {
 	p := NewTonalPalette(300, 40)
 	first := p.Tone(40)
