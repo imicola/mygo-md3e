@@ -65,7 +65,7 @@
     - 验证 `ContrastHigh` 比 `ContrastStandard` 下 `OnPrimary` 与 `Primary`、`OnSurface` 与 `Surface` 对比度严格更高且满足 AA/AAA 阈值。
   - **Commit**：`feat(tokens): [T1.2] implement TonalPalette, DynamicScheme variants, and MD3 color roles`
 
-- [ ] **T1.3：实现 Shape、SizeTier、Typography（含 Emphasized）与 Elevation Tokens**
+- [x] **T1.3：实现 Shape、SizeTier、Typography（含 Emphasized）与 Elevation Tokens**
   - **交付物**：`tokens/shape.go`、`tokens/size.go`、`tokens/type.go`、`tokens/elevation.go`、`tokens/tokens_test.go`
   - **核心能力**：
     - `ShapeScale` 10 档圆角（`None`, `ExtraSmall`, `Small`, `Medium`, `Large`, `LargeIncreased`, `ExtraLarge`, `ExtraLargeIncreased`, `ExtraExtraLarge`, `Full`）；
