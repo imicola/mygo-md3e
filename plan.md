@@ -131,7 +131,7 @@
 
 ## M3：主题桥接、状态层、涟漪与基础原语（根包 `md3e`）
 
-- [ ] **T3.1：实现 `md3e.Theme`、上下文作用域与 `ui.Theme` 桥接**
+- [x] **T3.1：实现 `md3e.Theme`、上下文作用域与 `ui.Theme` 桥接**
   - **交付物**：`theme.go`、`theme_test.go`
   - **核心能力**：
     - `Theme` 结构（聚合 `tokens.ColorScheme`、`tokens.TypographyScale`、`tokens.ShapeScale`、`motion.Scheme`、`IsDark bool`、`Contrast`、以及动态派生配置）；

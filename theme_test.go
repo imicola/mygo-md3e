@@ -1,0 +1,369 @@
+package md3e
+
+import (
+	"runtime"
+	"testing"
+
+	"github.com/egoist/mygo/ui"
+
+	"mygo-md3e/motion"
+	"mygo-md3e/tokens"
+)
+
+func TestThemeFromSeedOptionsAndDefaults(t *testing.T) {
+	def := ThemeFromSeed(ui.Color{})
+	if def.Dark {
+		t.Fatal("default ThemeFromSeed should be light")
+	}
+	if def.Motion != motion.Expressive {
+		t.Fatalf("default Motion = %v, want motion.Expressive", def.Motion)
+	}
+	if def.EffectiveTextScale() != 1 {
+		t.Fatalf("default EffectiveTextScale = %v, want 1", def.EffectiveTextScale())
+	}
+	if def.Colors.Primary != ThemeFromSeed(DefaultSeedColor).Colors.Primary {
+		t.Fatal("zero seed color should fall back to DefaultSeedColor")
+	}
+	if def.Shapes != DefaultShapeScale() {
+		t.Fatal("default Shapes should match DefaultShapeScale()")
+	}
+	if got := def.TypeStyle(tokens.HeadlineMedium, true); got != def.Typography.Style(tokens.HeadlineMedium, true) {
+		t.Fatalf("TypeStyle(HeadlineMedium, true) = %+v, want %+v", got, def.Typography.Style(tokens.HeadlineMedium, true))
+	}
+	if def.ContentColorFor(def.Colors.Primary) != def.Colors.OnPrimary {
+		t.Fatal("ContentColorFor(Primary) did not return OnPrimary")
+	}
+	if def.ContentColorFor(def.Colors.PrimaryContainer) != def.Colors.OnPrimaryContainer {
+		t.Fatal("ContentColorFor(PrimaryContainer) did not return OnPrimaryContainer")
+	}
+	if def.ContentColorFor(def.Warning) != def.OnWarning {
+		t.Fatal("ContentColorFor(Warning) did not return OnWarning")
+	}
+	if def.ContentColorFor(def.Success) != def.OnSuccess {
+		t.Fatal("ContentColorFor(Success) did not return OnSuccess")
+	}
+
+	customShapes := DefaultShapeScale()
+	customShapes.Medium = 18
+	darkExp := ThemeFromSeed(ui.Hex("#1b873f"), ThemeOptions{
+		Dark:         true,
+		Variant:      tokens.Expressive,
+		Contrast:     tokens.ContrastHigh,
+		Motion:       motion.Standard,
+		Font:         "Inter",
+		TextScale:    1.25,
+		ReduceMotion: true,
+		Shapes:       &customShapes,
+	})
+	if !darkExp.Dark || darkExp.Contrast != tokens.ContrastHigh || darkExp.Motion != motion.Standard {
+		t.Fatalf("darkExp metadata mismatch: %+v", darkExp)
+	}
+	if darkExp.Shapes.Radius(tokens.ShapeMedium) != 18 {
+		t.Fatalf("custom ShapeMedium radius = %v, want 18", darkExp.Shapes.Radius(tokens.ShapeMedium))
+	}
+	if darkExp.Font != "Inter" || darkExp.EffectiveTextScale() != 1.25 || !darkExp.ReduceMotion {
+		t.Fatalf("darkExp text/motion options mismatch: Font=%q TextScale=%v ReduceMotion=%v",
+			darkExp.Font, darkExp.EffectiveTextScale(), darkExp.ReduceMotion)
+	}
+	anim := darkExp.Animation(motion.DefaultSpatial)
+	if anim.Duration != motion.Snap.Duration {
+		t.Fatalf("ReduceMotion Animation.Duration = %v, want %v", anim.Duration, motion.Snap.Duration)
+	}
+	if relativeLuminance(darkExp.Colors.Surface) >= relativeLuminance(def.Colors.Surface) {
+		t.Fatal("dark theme surface luminance should be lower than light theme surface")
+	}
+}
+
+func TestToUIThemeBridgeAndSemanticMapping(t *testing.T) {
+	th := ThemeFromSeed(ui.Hex("#006495"), ThemeOptions{
+		Contrast:  tokens.ContrastHigh,
+		TextScale: 1.5,
+		Font:      "Roboto",
+	})
+	uiT := th.ToUITheme()
+	if uiT == nil {
+		t.Fatal("ToUITheme returned nil")
+	}
+	if uiT.Dark != th.Dark {
+		t.Fatalf("uiT.Dark = %v, want %v", uiT.Dark, th.Dark)
+	}
+	if uiT.Background != th.Colors.Surface {
+		t.Fatalf("uiT.Background = %+v, want Surface %+v", uiT.Background, th.Colors.Surface)
+	}
+	if uiT.Surface != th.Colors.SurfaceContainer {
+		t.Fatalf("uiT.Surface = %+v, want SurfaceContainer %+v", uiT.Surface, th.Colors.SurfaceContainer)
+	}
+	if uiT.Accent != th.Colors.Primary || uiT.AccentText != th.Colors.OnPrimary {
+		t.Fatalf("Accent/AccentText mismatch: got (%+v, %+v), want (%+v, %+v)",
+			uiT.Accent, uiT.AccentText, th.Colors.Primary, th.Colors.OnPrimary)
+	}
+	if uiT.Text != th.Colors.OnSurface || uiT.TextMuted != th.Colors.OnSurfaceVariant {
+		t.Fatal("Text/TextMuted did not bridge to OnSurface/OnSurfaceVariant")
+	}
+	if uiT.Border != th.Colors.Outline {
+		t.Fatalf("high contrast uiT.Border = %+v, want Outline %+v", uiT.Border, th.Colors.Outline)
+	}
+	if uiT.Danger != th.Colors.Error || uiT.Warning != th.Warning || uiT.Success != th.Success {
+		t.Fatal("semantic Danger/Warning/Success roles did not bridge cleanly")
+	}
+	if uiT.Inverse != th.Colors.InverseSurface || uiT.InverseText != th.Colors.InverseOnSurface {
+		t.Fatal("Inverse/InverseText did not bridge to InverseSurface/InverseOnSurface")
+	}
+	if uiT.FocusRingWidth != 3 || uiT.FocusRingOffset != 2 {
+		t.Fatalf("high-contrast focus ring = (%v, %v), want (3, 2)", uiT.FocusRingWidth, uiT.FocusRingOffset)
+	}
+	if uiT.FontSize != 21 || uiT.Font != "Roboto" {
+		t.Fatalf("FontSize/Font = (%v, %q), want (21, Roboto)", uiT.FontSize, uiT.Font)
+	}
+	if uiT.Radius != th.Shapes.Small || uiT.Spacing != 4 {
+		t.Fatalf("Radius/Spacing = (%v, %v), want (%v, 4)", uiT.Radius, uiT.Spacing, th.Shapes.Small)
+	}
+
+	// Mutating returned *ui.Theme must not affect another ToUITheme call.
+	uiT.Accent = ui.Hex("#000000")
+	if th.UITheme().Accent != th.Colors.Primary {
+		t.Fatal("ToUITheme/UITheme must return fresh copies")
+	}
+}
+
+func TestDefaultThemeFollowsDarkAndPreferences(t *testing.T) {
+	var seen []*Theme
+	var seenUI []*ui.Theme
+
+	tt := ui.NewTester(func(c *ui.Context) {
+		seen = append(seen, CurrentTheme(c))
+		seenUI = append(seenUI, c.Theme())
+		ui.Box(c).Size(40, 40)
+	}, 400, 300)
+
+	light := seen[len(seen)-1]
+	if light.Dark {
+		t.Fatal("initial DefaultTheme should be light")
+	}
+	if light.Colors.Primary != ThemeFromSeed(DefaultSeedColor).Colors.Primary {
+		t.Fatal("initial DefaultTheme should derive from DefaultSeedColor")
+	}
+	if light.Contrast != tokens.ContrastStandard || light.EffectiveTextScale() != 1 || light.ReduceMotion {
+		t.Fatalf("unexpected baseline default preferences: %+v", light)
+	}
+
+	tt.SetDark(true)
+	dark := seen[len(seen)-1]
+	if !dark.Dark {
+		t.Fatal("DefaultTheme did not react to SetDark(true)")
+	}
+	if dark.Colors.Surface == light.Colors.Surface {
+		t.Fatal("dark Surface should differ from light Surface")
+	}
+
+	accent := ui.Hex("#e65100")
+	tt.SetPreferences(ui.Preferences{
+		Accent:       accent,
+		HighContrast: true,
+		TextScale:    1.5,
+		ReduceMotion: true,
+	})
+	prefTheme := seen[len(seen)-1]
+	if !prefTheme.Dark {
+		t.Fatal("prefTheme should stay dark after SetDark(true)")
+	}
+	if prefTheme.Contrast != tokens.ContrastHigh {
+		t.Fatalf("prefTheme.Contrast = %v, want ContrastHigh", prefTheme.Contrast)
+	}
+	if prefTheme.EffectiveTextScale() != 1.5 {
+		t.Fatalf("prefTheme.TextScale = %v, want 1.5", prefTheme.EffectiveTextScale())
+	}
+	if !prefTheme.ReduceMotion {
+		t.Fatal("prefTheme.ReduceMotion should be true")
+	}
+	expectedPrimary := ThemeFromSeed(accent, ThemeOptions{Dark: true, Contrast: tokens.ContrastHigh}).Colors.Primary
+	if prefTheme.Colors.Primary != expectedPrimary {
+		t.Fatalf("prefTheme Primary = %+v, want %+v derived from Accent preference", prefTheme.Colors.Primary, expectedPrimary)
+	}
+	if seenUI[len(seenUI)-1] == nil {
+		t.Fatal("window ui.Theme unexpectedly nil")
+	}
+}
+
+func TestNestedThemeScopeAndOverlayInheritance(t *testing.T) {
+	outerTheme := ThemeFromSeed(ui.Hex("#6750a4"), ThemeOptions{Dark: false})
+	innerTheme := ThemeFromSeed(ui.Hex("#1b873f"), ThemeOptions{Dark: true})
+
+	var (
+		outerBefore       *Theme
+		outerAfter        *Theme
+		innerGot          *Theme
+		innerUIGot        *ui.Theme
+		overlayGot        *Theme
+		overlayUIGot      *ui.Theme
+		overlayPaintTheme *ui.Theme
+		popoverGot        *Theme
+		dialogGot         *Theme
+		menuGot           *Theme
+		openPopover       = true
+		openDialog        = true
+		openMenu          = true
+	)
+
+	tt := ui.NewTester(func(c *ui.Context) {
+		ThemeScope(c, outerTheme, func() {
+			outerBefore = CurrentTheme(c)
+
+			ThemeScope(c, innerTheme, func() {
+				innerGot = CurrentTheme(c)
+				innerUIGot = c.Theme()
+
+				ui.Overlay(c, func() {
+					overlayGot = CurrentTheme(c)
+					overlayUIGot = c.Theme()
+					ui.Box(c).Size(30, 20).Draw(func(p *ui.Painter, r ui.Rect) {
+						overlayPaintTheme = p.Theme()
+					})
+				})
+
+				anchor := ui.Box(c).Size(60, 24)
+				ui.PopoverBase(c, anchor, &openPopover, func(panel ui.Element) {
+					popoverGot = CurrentTheme(c)
+					panel.Children(func() { ui.Text(c, "pop") })
+				})
+
+				ui.DialogBase(c, &openDialog, func(backdrop, panel ui.Element) {
+					dialogGot = CurrentTheme(c)
+					panel.Children(func() { ui.Text(c, "dlg") })
+				})
+
+				menu := ui.MenuBase(c.Key("menu"), &openMenu)
+				menu.Trigger.Children(func() { ui.Text(c, "menu") })
+				menu.Popup(func(panel ui.Element) {
+					menuGot = CurrentTheme(c)
+					panel.Children(func() { ui.Text(c, "item") })
+				})
+			})
+
+			outerAfter = CurrentTheme(c)
+		})
+	}, 500, 400)
+
+	if outerBefore == nil || outerAfter == nil {
+		t.Fatal("outer theme snapshots missing")
+	}
+	if outerBefore.Dark || outerBefore.Colors.Primary != outerTheme.Colors.Primary {
+		t.Fatalf("outerBefore = (Dark:%v Primary:%+v), want Light Purple", outerBefore.Dark, outerBefore.Colors.Primary)
+	}
+	if outerAfter.Dark || outerAfter.Colors.Primary != outerTheme.Colors.Primary {
+		t.Fatalf("outerAfter did not restore cleanly: (Dark:%v Primary:%+v)", outerAfter.Dark, outerAfter.Colors.Primary)
+	}
+	if innerGot == nil || !innerGot.Dark || innerGot.Colors.Primary != innerTheme.Colors.Primary {
+		t.Fatalf("innerGot = (Dark:%v Primary:%+v), want Dark Green", innerGot.Dark, innerGot.Colors.Primary)
+	}
+	if innerUIGot == nil || !innerUIGot.Dark || innerUIGot.Accent != innerTheme.Colors.Primary {
+		t.Fatalf("c.Theme() inside inner ThemeScope did not bridge to inner ui.Theme: %+v", innerUIGot)
+	}
+	if overlayGot == nil || overlayGot.Colors.Primary != innerTheme.Colors.Primary || !overlayGot.Dark {
+		t.Fatalf("CurrentTheme inside ui.Overlay = %+v, want inner Dark Green", overlayGot)
+	}
+	if overlayUIGot != innerUIGot || overlayPaintTheme != innerUIGot {
+		t.Fatalf("Overlay c.Theme()/p.Theme() mismatch: overlayUIGot=%p paint=%p inner=%p",
+			overlayUIGot, overlayPaintTheme, innerUIGot)
+	}
+	for name, got := range map[string]*Theme{
+		"PopoverBase": popoverGot,
+		"DialogBase":  dialogGot,
+		"MenuBase":    menuGot,
+	} {
+		if got == nil || !got.Dark || got.Colors.Primary != innerTheme.Colors.Primary {
+			t.Fatalf("%s CurrentTheme = %+v, want inner Dark Green", name, got)
+		}
+	}
+
+	// Verify Preferences propagate into explicit ThemeScope AND native UITheme FontSize.
+	tt.SetPreferences(ui.Preferences{
+		HighContrast: true,
+		TextScale:    1.5,
+		ReduceMotion: true,
+	})
+	if innerGot.Contrast != tokens.ContrastHigh || innerGot.EffectiveTextScale() != 1.5 || !innerGot.ReduceMotion {
+		t.Fatalf("explicit ThemeScope did not react to Preferences: Contrast=%v TextScale=%v ReduceMotion=%v",
+			innerGot.Contrast, innerGot.EffectiveTextScale(), innerGot.ReduceMotion)
+	}
+	if innerUIGot.FontSize != 21 || innerUIGot.FocusRingWidth != 3 {
+		t.Fatalf("bridged UITheme did not scale with Preferences: FontSize=%v FocusRingWidth=%v",
+			innerUIGot.FontSize, innerUIGot.FocusRingWidth)
+	}
+}
+
+func TestThemeScopeNestedUIThemedAndManualThemePreferences(t *testing.T) {
+	outerTheme := ThemeFromSeed(ui.Hex("#6750a4"), ThemeOptions{Dark: false})
+	customUI := ui.DarkTheme()
+	customUI.Accent = ui.Hex("#00bfa5")
+
+	var stockDarkGot, customDarkGot, manualResolved *Theme
+	manual := Theme{
+		Dark:   false,
+		Colors: outerTheme.Colors,
+	}
+
+	tt := ui.NewTester(func(c *ui.Context) {
+		ThemeScope(c, outerTheme, func() {
+			ui.Themed(c, ui.DarkTheme()).Children(func() {
+				stockDarkGot = CurrentTheme(c)
+			})
+			ui.Themed(c, customUI).Children(func() {
+				customDarkGot = CurrentTheme(c)
+			})
+		})
+		ThemeScope(c, &manual, func() {
+			manualResolved = CurrentTheme(c)
+		})
+	}, 400, 300)
+
+	if stockDarkGot == nil || !stockDarkGot.Dark {
+		t.Fatalf("nested ui.Themed(DarkTheme) should switch CurrentTheme to dark, got %+v", stockDarkGot)
+	}
+	if customDarkGot == nil || !customDarkGot.Dark {
+		t.Fatal("nested custom ui.Themed should preserve Dark: true")
+	}
+	wantCustomPrimary := ThemeFromSeed(customUI.Accent, ThemeOptions{Dark: true}).Colors.Primary
+	if customDarkGot.Colors.Primary != wantCustomPrimary {
+		t.Fatalf("nested custom ui.Themed Accent = %+v, want %+v", customDarkGot.Colors.Primary, wantCustomPrimary)
+	}
+
+	tt.SetPreferences(ui.Preferences{HighContrast: true, TextScale: 1.25, ReduceMotion: true})
+	if manualResolved.Contrast != tokens.ContrastHigh || manualResolved.EffectiveTextScale() != 1.25 || !manualResolved.ReduceMotion {
+		t.Fatalf("manual theme under Preferences = Contrast:%v TextScale:%v ReduceMotion:%v",
+			manualResolved.Contrast, manualResolved.EffectiveTextScale(), manualResolved.ReduceMotion)
+	}
+	if manualResolved.Colors.Primary != outerTheme.Colors.Primary {
+		t.Fatal("manual unseeded theme HighContrast must preserve custom Primary color instead of replacing it with seed")
+	}
+}
+
+func TestThemeScopeWeakRegistryNoMemoryLeak(t *testing.T) {
+	runOnce := func(seed ui.Color) {
+		th := ThemeFromSeed(seed)
+		ui.NewTester(func(c *ui.Context) {
+			ThemeScope(c, th, func() {
+				_ = CurrentTheme(c)
+				ui.Box(c).Size(10, 10)
+			})
+		}, 200, 200)
+	}
+
+	runtime.GC()
+	baseline := themeRegistryCountForTest()
+
+	for i := range 24 {
+		runOnce(ui.RGBA(uint8(40+i*7), 90, 200, 1))
+	}
+
+	for range 12 {
+		runtime.GC()
+		runtime.Gosched()
+		if themeRegistryCountForTest() <= baseline {
+			break
+		}
+	}
+	if got := themeRegistryCountForTest(); got > baseline {
+		t.Fatalf("theme registry leaked entries after scopes dropped: count=%d baseline=%d", got, baseline)
+	}
+}
