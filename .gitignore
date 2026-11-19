@@ -1,0 +1,20 @@
+# Upstream MyGo checkout (read-only local reference/replace target)
+mygo/
+
+# MyGo / Go build & test outputs
+/build/
+/.mygo/
+mygo_windows_*.syso
+*.exe
+*.test
+*.out
+coverage.*
+
+# Golden image failure diffs (from github.com/egoist/mygo/ui/golden)
+*.got.png
+
+# OS & editor files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
