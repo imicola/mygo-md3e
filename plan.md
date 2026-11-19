@@ -81,7 +81,7 @@
 
 ## M2：MD3E 物理动效与 35 种几何变形引擎（`motion/` & `shape/`）
 
-- [ ] **T2.1：实现 MD3E Spring Physics 动效系统（`motion/`）**
+- [x] **T2.1：实现 MD3E Spring Physics 动效系统（`motion/`）**
   - **交付物**：`motion/motion.go`、`motion/motion_test.go`
   - **核心能力**：
     - `Scheme`（`Expressive` / `Standard`）、`Token`（`FastSpatial`, `DefaultSpatial`, `SlowSpatial`, `FastEffects`, `DefaultEffects`, `SlowEffects`）；
