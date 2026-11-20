@@ -318,7 +318,7 @@
     - 测试验证三种 Card 外观与点击态、Divider 水平/垂直与缩进、Expressive List 多项分组圆角配置及选中态变化、无障碍列表项角色与选中状态。
   - **Commit**：`feat(containers): [T7.1] implement MD3E Cards, Divider, and Expressive Segmented List`
 
-- [ ] **T7.2：实现 NavigationBar、NavigationRail 与 NavigationDrawer**
+- [x] **T7.2：实现 NavigationBar、NavigationRail 与 NavigationDrawer**
   - **交付物**：`navbar.go`、`navrail.go`、`navdrawer.go`、`navigation_test.go`
   - **核心能力**：
     - `NavigationBar`：底部目的地导航，选中项弹性胶囊指示器（宽度与透明度弹簧过渡）、图标+标签（Always / SelectedOnly / Never）及内置 `Badge`；
