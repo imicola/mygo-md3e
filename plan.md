@@ -221,7 +221,7 @@
 
 ## M5：选择、滑块与输入控件
 
-- [ ] **T5.1：实现 Expressive Switch、Checkbox 与 Radio**
+- [x] **T5.1：实现 Expressive Switch、Checkbox 与 Radio**
   - **交付物**：`switch.go`、`checkbox.go`、`radio.go`、`selection_controls_test.go`
   - **核心能力**：
     - `Switch`（基于 `ui.SwitchBase`）：`52×32` 轨道，拇指在 Off(`16`/`24`)、On(`24` + `✓`)、Pressed(`28`) 间通过 `FastSpatial` 弹簧缩放平移，支持 RTL；
