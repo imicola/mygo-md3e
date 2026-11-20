@@ -208,7 +208,7 @@
     - 测试验证 FAB 三种尺寸精确像素框、ExtendedFAB 折叠/展开宽度变化、FABMenu 项数校验（<2 或 >6 明确约束/测试边界）、展开后菜单项点击回调、Escape 关闭与焦点归还。
   - **Commit**：`feat(fab): [T4.4] implement FAB, ExtendedFAB, and Expressive FABMenu`
 
-- [ ] **T4.5：实现 FloatingToolbar 与 AppBar（TopAppBar / SearchAppBar）**
+- [x] **T4.5：实现 FloatingToolbar 与 AppBar（TopAppBar / SearchAppBar）**
   - **交付物**：`toolbar.go`、`appbar.go`、`toolbar_test.go`
   - **核心能力**：
     - `FloatingToolbar`：支持 `Horizontal` 与 `Vertical` 方向、`Standard` 与 `Vibrant` 双色调主题、紧邻耦合标准 `FAB` 布局及显隐/折叠弹簧动画；
