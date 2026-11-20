@@ -231,7 +231,7 @@
     - 覆盖点击/Space 切换、Switch 拇指尺寸在选中前后对比、Checkbox 三态切换、RadioGroup 方向键单选、Disabled 与 `ReduceMotion`、`AccessByRole` 检查。
   - **Commit**：`feat(selection): [T5.1] implement Expressive Switch, tri-state Checkbox, and RadioGroup`
 
-- [ ] **T5.2：实现 Expressive Slider & RangeSlider**
+- [x] **T5.2：实现 Expressive Slider & RangeSlider**
   - **交付物**：`slider.go`、`slider_test.go`
   - **核心能力**：
     - `Slider`（基于 `ui.SliderBase`）与 `RangeSlider`（双拇指焦点/拖拽）：

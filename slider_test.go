@@ -1,0 +1,581 @@
+package md3e
+
+import (
+	"image"
+	"math"
+	"testing"
+	"time"
+
+	"github.com/egoist/mygo/ui"
+)
+
+// sliderCanvas builds a 420x260 white canvas with the controls 100 DIP down,
+// leaving room for value indicators above them.
+func sliderCanvas(th *Theme, build func(c *ui.Context)) *ui.Tester {
+	return ui.NewTester(func(c *ui.Context) {
+		ThemeScope(c, th, func() {
+			ui.Box(c).Size(420, 260).Background(canvasRGB).Padding(20).AlignItems(ui.Start).Children(func() {
+				ui.Box(c).Height(100)
+				build(c)
+			})
+		})
+	}, 420, 260)
+}
+
+// sliderX returns the x of fraction f of a slider's content box.
+func sliderX(b ui.Rect, f float32) float32 {
+	return b.X + sliderPad + (b.W-2*sliderPad)*f
+}
+
+// hasColorInRect reports whether any pixel of rect matches col.
+func hasColorInRect(img *image.RGBA, rect ui.Rect, col ui.Color, tol int) bool {
+	for y := int(rect.Y); y < int(rect.Y+rect.H); y++ {
+		for x := int(rect.X); x < int(rect.X+rect.W); x++ {
+			if colorMatches(img.RGBAAt(x, y), col, tol) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// TestSliderDragKeyboardAndStep checks pointer dragging, the keyboard keys, the
+// step snapping and the access range and value.
+func TestSliderDragKeyboardAndStep(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor)
+	value := 25.0
+	tt := sliderCanvas(th, func(c *ui.Context) {
+		Slider(c, &value, 0, 100, SliderOptions{Label: "Volume"})
+	})
+	info := buttonInfo(t, tt, ui.RoleSlider, "Volume")
+	cx, cy := info.Bounds.X+info.Bounds.W/2, info.Bounds.Y+info.Bounds.H/2
+	target := sliderX(info.Bounds, 0.75)
+	tt.Press(target, cy)
+	tt.Release(target, cy)
+	if math.Abs(value-75) > 1.5 {
+		t.Fatalf("drag set value %v, want about 75", value)
+	}
+	tt.Advance(time.Millisecond)
+	info, _ = tt.AccessByRole(ui.RoleSlider, "Volume")
+	if math.Abs(info.Now-75) > 1.5 || info.Min != 0 || info.Max != 100 {
+		t.Fatalf("access range %v..%v now %v, want 0..100 about 75", info.Min, info.Max, info.Now)
+	}
+	_ = cx
+
+	// Step: dragging snaps to the step, and the arrows move by it.
+	stepped := 0.0
+	st := sliderCanvas(th, func(c *ui.Context) {
+		Slider(c, &stepped, 0, 100, SliderOptions{Label: "Quality", Step: 10})
+	})
+	sinfo := buttonInfo(t, st, ui.RoleSlider, "Quality")
+	x37 := sliderX(sinfo.Bounds, 0.37)
+	y := sinfo.Bounds.Y + sinfo.Bounds.H/2
+	st.ClickAt(x37, y)
+	if stepped != 40 {
+		t.Fatalf("step drag set %v, want 40", stepped)
+	}
+	st.Key(0, ui.KeyRight)
+	if stepped != 50 {
+		t.Fatalf("Right set %v, want 50", stepped)
+	}
+	st.Key(0, ui.KeyHome)
+	if stepped != 0 {
+		t.Fatalf("Home set %v, want 0", stepped)
+	}
+	st.Key(0, ui.KeyEnd)
+	if stepped != 100 {
+		t.Fatalf("End set %v, want 100", stepped)
+	}
+	st.Key(0, ui.KeyPageDown)
+	if stepped != 90 {
+		t.Fatalf("PageDown set %v, want 90", stepped)
+	}
+	st.Advance(time.Millisecond)
+	sinfo, _ = st.AccessByRole(ui.RoleSlider, "Quality")
+	if sinfo.Now != 90 || sinfo.Step != 10 {
+		t.Fatalf("access now %v step %v, want 90 and 10", sinfo.Now, sinfo.Step)
+	}
+}
+
+// TestSliderTrackGapCenteredAndStops checks the 6 DIP gaps around the handle,
+// the centered two-sided fill and the discrete stop dots.
+func TestSliderTrackGapCenteredAndStops(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor)
+	cs := th.Colors
+
+	value := 50.0
+	tt := sliderCanvas(th, func(c *ui.Context) {
+		Slider(c, &value, 0, 100, SliderOptions{Label: "Volume"})
+	})
+	b := buttonInfo(t, tt, ui.RoleSlider, "Volume").Bounds
+	y := int(b.Y + b.H/2)
+	tx := sliderX(b, 0.5)
+	img := tt.Image()
+	gapLeft := img.RGBAAt(int(tx-4), y)
+	if absColorDiff(gapLeft, rgbOf(ui.RGB(255, 255, 255))) > 6 {
+		t.Fatalf("left track gap %+v is not the canvas", gapLeft)
+	}
+	gapRight := img.RGBAAt(int(tx+4), y)
+	if absColorDiff(gapRight, rgbOf(ui.RGB(255, 255, 255))) > 6 {
+		t.Fatalf("right track gap %+v is not the canvas", gapRight)
+	}
+	if px := img.RGBAAt(int(tx-11), y); !colorMatches(px, cs.Primary, 20) {
+		t.Fatalf("active track %+v is not Primary", px)
+	}
+	if px := img.RGBAAt(int(tx+11), y); !colorMatches(px, cs.SurfaceContainerHighest, 20) {
+		t.Fatalf("inactive track %+v is not SurfaceContainerHighest", px)
+	}
+	if px := img.RGBAAt(int(tx), y); !colorMatches(px, cs.Primary, 20) {
+		t.Fatalf("handle %+v is not the Primary capsule", px)
+	}
+
+	// Centered: the active track fills from the middle to the handle, and the
+	// far side stays inactive.
+	centered := 25.0
+	ct := sliderCanvas(th, func(c *ui.Context) {
+		Slider(c, &centered, 0, 100, SliderOptions{Label: "Balance", Centered: true})
+	})
+	cb := buttonInfo(t, ct, ui.RoleSlider, "Balance").Bounds
+	cy := int(cb.Y + cb.H/2)
+	if px := ct.Image().RGBAAt(int(sliderX(cb, 0.4)), cy); !colorMatches(px, cs.Primary, 20) {
+		t.Fatalf("centered active half %+v is not Primary", px)
+	}
+	if px := ct.Image().RGBAAt(int(sliderX(cb, 0.6)), cy); !colorMatches(px, cs.SurfaceContainerHighest, 20) {
+		t.Fatalf("centered far half %+v is not inactive", px)
+	}
+
+	// Stop dots: the active one is OnPrimary on the Primary track, the inactive
+	// one OnSurfaceVariant on the inactive track.
+	stop := 0.0
+	st := sliderCanvas(th, func(c *ui.Context) {
+		Slider(c, &stop, 0, 1, SliderOptions{Label: "Rate", Step: 0.25})
+	})
+	sb := buttonInfo(t, st, ui.RoleSlider, "Rate").Bounds
+	sy := int(sb.Y + sb.H/2)
+	// Click at 0.5 so one stop is active and one inactive.
+	st.ClickAt(sliderX(sb, 0.5), float32(sy))
+	sim := st.Image()
+	activeDot := sim.RGBAAt(int(sliderX(sb, 0.25)), sy)
+	if !colorMatches(activeDot, cs.OnPrimary, 40) {
+		t.Fatalf("active stop dot %+v is not OnPrimary", activeDot)
+	}
+	inactiveDot := sim.RGBAAt(int(sliderX(sb, 0.75)), sy)
+	if !colorMatches(inactiveDot, cs.OnSurfaceVariant, 40) {
+		t.Fatalf("inactive stop dot %+v is not OnSurfaceVariant", inactiveDot)
+	}
+	if absColorDiff(activeDot, inactiveDot) < 40 {
+		t.Fatalf("active and inactive stop dots are too alike: %+v and %+v", activeDot, inactiveDot)
+	}
+
+	// Pressing narrows the capsule handle from 4 to 2 DIP and it springs back.
+	pressValue := 50.0
+	pt := sliderCanvas(th, func(c *ui.Context) {
+		Slider(c, &pressValue, 0, 100, SliderOptions{Label: "Volume"})
+	})
+	pb := buttonInfo(t, pt, ui.RoleSlider, "Volume").Bounds
+	pty := int(pb.Y + pb.H/2)
+	ptx := sliderX(pb, 0.5)
+	pt.Press(ptx, float32(pty))
+	pt.Advance(600 * time.Millisecond)
+	pressInk := 0
+	for x := int(ptx) - 4; x <= int(ptx)+4; x++ {
+		if colorMatches(pt.Image().RGBAAt(x, pty), cs.Primary, 20) {
+			pressInk++
+		}
+	}
+	if pressInk > 3 {
+		t.Fatalf("pressed handle is %d px wide, want the narrowed 2 DIP capsule", pressInk)
+	}
+	pt.Release(ptx, float32(pty))
+	pt.Advance(900 * time.Millisecond)
+	restInk := 0
+	for x := int(ptx) - 4; x <= int(ptx)+4; x++ {
+		if colorMatches(pt.Image().RGBAAt(x, pty), cs.Primary, 20) {
+			restInk++
+		}
+	}
+	if restInk < 3 {
+		t.Fatalf("released handle is %d px wide, want the resting 4 DIP capsule", restInk)
+	}
+}
+
+// TestSliderValueIndicator checks that the teardrop indicator springs in above
+// the dragged handle and leaves again on release, and that ReduceMotion shows
+// and hides it without pending frames.
+func TestSliderValueIndicator(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor)
+	value := 50.0
+	tt := sliderCanvas(th, func(c *ui.Context) {
+		Slider(c, &value, 0, 100, SliderOptions{Label: "Volume"})
+	})
+	info := buttonInfo(t, tt, ui.RoleSlider, "Volume")
+	cx, cy := sliderX(info.Bounds, 0.5), info.Bounds.Y+info.Bounds.H/2
+	above := ui.Rect{X: cx - 70, Y: info.Bounds.Y - sliderIndicatorHeight - 8, W: 140, H: sliderIndicatorHeight}
+	tt.Press(cx, cy)
+	tt.Advance(700 * time.Millisecond)
+	if !hasColorInRect(tt.Image(), above, th.Colors.InverseSurface, 16) {
+		t.Fatal("value indicator did not show above the pressed handle")
+	}
+	tt.Release(cx, cy)
+	tt.Advance(1200 * time.Millisecond)
+	if hasColorInRect(tt.Image(), above, th.Colors.InverseSurface, 16) {
+		t.Fatal("value indicator did not hide after release")
+	}
+	if tt.FramePending() {
+		t.Fatal("indicator spring did not settle")
+	}
+
+	// ReduceMotion: it appears at once and leaves at once.
+	rm := sliderCanvas(th, func(c *ui.Context) {
+		Slider(c, &value, 0, 100, SliderOptions{Label: "Volume"})
+	})
+	rm.SetPreferences(ui.Preferences{ReduceMotion: true})
+	info = buttonInfo(t, rm, ui.RoleSlider, "Volume")
+	cx, cy = sliderX(info.Bounds, 0.5), info.Bounds.Y+info.Bounds.H/2
+	above = ui.Rect{X: cx - 70, Y: info.Bounds.Y - sliderIndicatorHeight - 8, W: 140, H: sliderIndicatorHeight}
+	rm.Press(cx, cy)
+	if !hasColorInRect(rm.Image(), above, th.Colors.InverseSurface, 16) {
+		t.Fatal("ReduceMotion value indicator did not show at once")
+	}
+	if rm.FramePending() {
+		t.Fatal("ReduceMotion indicator should not ask for frames")
+	}
+	rm.Release(cx, cy)
+	if hasColorInRect(rm.Image(), above, th.Colors.InverseSurface, 16) {
+		t.Fatal("ReduceMotion value indicator did not hide at once")
+	}
+	if rm.FramePending() {
+		t.Fatal("ReduceMotion indicator release should not ask for frames")
+	}
+
+	// Keyboard focus alone shows the indicator, and losing focus hides it.
+	kv := sliderCanvas(th, func(c *ui.Context) {
+		Slider(c, &value, 0, 100, SliderOptions{Label: "Volume"})
+	})
+	kv.Key(0, ui.KeyTab)
+	kinfo := buttonInfo(t, kv, ui.RoleSlider, "Volume")
+	above = ui.Rect{
+		X: sliderX(kinfo.Bounds, 0.5) - 70,
+		Y: kinfo.Bounds.Y - sliderIndicatorHeight - 8,
+		W: 140,
+		H: sliderIndicatorHeight,
+	}
+	kv.Advance(700 * time.Millisecond)
+	if !hasColorInRect(kv.Image(), above, th.Colors.InverseSurface, 16) {
+		t.Fatal("keyboard focus did not show the value indicator")
+	}
+	kv.ClickAt(400, 20)
+	kv.Advance(1200 * time.Millisecond)
+	if hasColorInRect(kv.Image(), above, th.Colors.InverseSurface, 16) {
+		t.Fatal("losing focus did not hide the value indicator")
+	}
+	if kv.FramePending() {
+		t.Fatal("focus indicator spring did not settle")
+	}
+}
+
+// TestSliderRTLMirror checks that the low value sits at the right, that a drag
+// mirrors the value and that Right decreases it.
+func TestSliderRTLMirror(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor)
+	value := 25.0
+	tt := sliderCanvas(th, func(c *ui.Context) {
+		Slider(c, &value, 0, 100, SliderOptions{Label: "Volume"})
+	})
+	tt.SetDirection(ui.RightToLeft)
+	info := buttonInfo(t, tt, ui.RoleSlider, "Volume")
+	b := info.Bounds
+	y := int(b.Y + b.H/2)
+	if px := tt.Image().RGBAAt(int(sliderX(b, 0.75)), y); !colorMatches(px, th.Colors.Primary, 20) {
+		t.Fatalf("RTL handle at the 75%% display position is %+v, not Primary", px)
+	}
+	if px := tt.Image().RGBAAt(int(sliderX(b, 0.25)), y); !colorMatches(px, th.Colors.SurfaceContainerHighest, 20) {
+		t.Fatalf("RTL 25%% position %+v is not inactive track", px)
+	}
+
+	target := sliderX(b, 0.25)
+	tt.Press(target, b.Y+b.H/2)
+	tt.Release(target, b.Y+b.H/2)
+	if math.Abs(value-75) > 1.5 {
+		t.Fatalf("RTL drag set %v, want about 75", value)
+	}
+	tt.Key(0, ui.KeyRight)
+	if value >= 75 {
+		t.Fatalf("RTL Right set %v, want a lower value", value)
+	}
+	tt.Advance(900 * time.Millisecond)
+	if tt.FramePending() {
+		t.Fatal("RTL slider springs did not settle")
+	}
+}
+
+// TestRangeSliderDragCrossingAndKeyboard checks that the low handle cannot pass
+// the high one, that the track presses drag the nearest handle, and that each
+// handle takes the keys independently.
+func TestRangeSliderDragCrossingAndKeyboard(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor)
+	low, high := 20.0, 80.0
+	tt := sliderCanvas(th, func(c *ui.Context) {
+		RangeSlider(c, &low, &high, 0, 100, RangeSliderOptions{Label: "Price"})
+	})
+	minInfo := buttonInfo(t, tt, ui.RoleSlider, "Min")
+	maxInfo := buttonInfo(t, tt, ui.RoleSlider, "Max")
+	if minInfo.Bounds.X >= maxInfo.Bounds.X {
+		t.Fatalf("LTR Min at %v is not left of Max at %v", minInfo.Bounds.X, maxInfo.Bounds.X)
+	}
+	minCx, minCy := minInfo.Bounds.X+minInfo.Bounds.W/2, minInfo.Bounds.Y+minInfo.Bounds.H/2
+	tt.Press(minCx, minCy)
+	tt.Move(360, minCy)
+	tt.Release(360, minCy)
+	if low > high {
+		t.Fatalf("low %v passed high %v", low, high)
+	}
+	if math.Abs(low-80) > 1.5 {
+		t.Fatalf("crossing drag left low at %v, want clamped to 80", low)
+	}
+	tt.Advance(900 * time.Millisecond)
+	if tt.FramePending() {
+		t.Fatal("range thumb springs did not settle")
+	}
+
+	// Keyboard: each handle moves on its own, within the other's value.
+	low, high = 20, 80
+	kb := sliderCanvas(th, func(c *ui.Context) {
+		RangeSlider(c, &low, &high, 0, 100, RangeSliderOptions{Label: "Price"})
+	})
+	kb.Key(0, ui.KeyTab)
+	if !kb.Focused("Min") {
+		t.Fatal("Tab did not focus the Min handle")
+	}
+	kb.Key(0, ui.KeyRight)
+	if low != 21 {
+		t.Fatalf("Right set Min %v, want 21", low)
+	}
+	kb.Key(0, ui.KeyTab)
+	if !kb.Focused("Max") {
+		t.Fatal("second Tab did not focus the Max handle")
+	}
+	kb.Key(0, ui.KeyHome)
+	if high != low {
+		t.Fatalf("Home set Max %v, want the Min value %v", high, low)
+	}
+	kb.Key(0, ui.KeyEnd)
+	if high != 100 {
+		t.Fatalf("End set Max %v, want 100", high)
+	}
+	kb.Key(0, ui.KeyPageDown)
+	if high != 90 {
+		t.Fatalf("PageDown set Max %v, want 90", high)
+	}
+	kb.Key(0, ui.KeyHome)
+	kb.Advance(time.Millisecond)
+	maxInfo = buttonInfo(t, kb, ui.RoleSlider, "Max")
+	if maxInfo.Now != low || maxInfo.Min != 0 || maxInfo.Max != 100 {
+		t.Fatalf("access range Min %v Max %v Now %v, want 0 100 %v", maxInfo.Min, maxInfo.Max, maxInfo.Now, low)
+	}
+
+	// A press on the track beside the handles drags the nearer one.
+	low, high = 20, 80
+	nearest := sliderCanvas(th, func(c *ui.Context) {
+		RangeSlider(c, &low, &high, 0, 100, RangeSliderOptions{Label: "Price"})
+	})
+	gb := buttonInfo(t, nearest, ui.RoleGroup, "Price").Bounds
+	tx := sliderX(gb, 0.65)
+	ty := gb.Y + gb.H/2
+	nearest.Press(tx, ty)
+	nearest.Release(tx, ty)
+	if math.Abs(high-65) > 2 || low != 20 {
+		t.Fatalf("track press set low=%v high=%v, want the nearer Max at about 65", low, high)
+	}
+	nearest.Advance(900 * time.Millisecond)
+	if nearest.FramePending() {
+		t.Fatal("track press left halo springs pending")
+	}
+}
+
+// TestRangeSliderEqualValuesAndRTL checks that equal handles can be pulled
+// apart, that the handles mirror right to left, and that a drag moves the low
+// value toward the left there.
+func TestRangeSliderEqualValuesAndRTL(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor)
+	low, high := 50.0, 50.0
+	tt := sliderCanvas(th, func(c *ui.Context) {
+		RangeSlider(c, &low, &high, 0, 100, RangeSliderOptions{Label: "Price"})
+	})
+	b := buttonInfo(t, tt, ui.RoleGroup, "Price").Bounds
+	y := b.Y + b.H/2
+	x := sliderX(b, 0.4)
+	tt.Press(x, y)
+	tt.Move(sliderX(b, 0.1), y)
+	tt.Release(sliderX(b, 0.1), y)
+	if low >= 50 || math.Abs(high-50) > 1.5 {
+		t.Fatalf("left drag on equal handles set low=%v high=%v, want low below 50 and high at 50", low, high)
+	}
+
+	// Rightward drag from the same equal pair moves the other handle.
+	low, high = 50, 50
+	rt := sliderCanvas(th, func(c *ui.Context) {
+		RangeSlider(c, &low, &high, 0, 100, RangeSliderOptions{Label: "Price"})
+	})
+	rb := buttonInfo(t, rt, ui.RoleGroup, "Price").Bounds
+	ry := rb.Y + rb.H/2
+	rx := sliderX(rb, 0.6)
+	rt.Press(rx, ry)
+	rt.Move(sliderX(rb, 0.9), ry)
+	rt.Release(sliderX(rb, 0.9), ry)
+	if high <= 50 || math.Abs(low-50) > 1.5 {
+		t.Fatalf("right drag on equal handles set low=%v high=%v, want high above 50 and low at 50", low, high)
+	}
+
+	// Right to left: Min is at the right, and dragging it further left raises it.
+	low, high = 20, 80
+	rtl := sliderCanvas(th, func(c *ui.Context) {
+		RangeSlider(c, &low, &high, 0, 100, RangeSliderOptions{Label: "Price"})
+	})
+	rtl.SetDirection(ui.RightToLeft)
+	minInfo := buttonInfo(t, rtl, ui.RoleSlider, "Min")
+	maxInfo := buttonInfo(t, rtl, ui.RoleSlider, "Max")
+	if minInfo.Bounds.X <= maxInfo.Bounds.X {
+		t.Fatalf("RTL Min at %v is not right of Max at %v", minInfo.Bounds.X, maxInfo.Bounds.X)
+	}
+	mcx, mcy := minInfo.Bounds.X+minInfo.Bounds.W/2, minInfo.Bounds.Y+minInfo.Bounds.H/2
+	rtl.Press(mcx, mcy)
+	rtl.Move(mcx-60, mcy)
+	rtl.Release(mcx-60, mcy)
+	if low <= 20 || low > high {
+		t.Fatalf("RTL leftward Min drag set low=%v high=%v, want low raised within Max", low, high)
+	}
+	before := low
+	rtl.Key(0, ui.KeyLeft)
+	if low <= before {
+		t.Fatalf("RTL Left set Min %v, want a higher value than %v", low, before)
+	}
+	rtl.Advance(900 * time.Millisecond)
+	if rtl.FramePending() {
+		t.Fatal("RTL range springs did not settle")
+	}
+}
+
+// TestRangeSliderIndicator checks that the dragged handle shows its own value
+// above it, and that the indicator hides on release.
+func TestRangeSliderIndicator(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor)
+	low, high := 20.0, 80.0
+	tt := sliderCanvas(th, func(c *ui.Context) {
+		RangeSlider(c, &low, &high, 0, 100, RangeSliderOptions{Label: "Price"})
+	})
+	minInfo := buttonInfo(t, tt, ui.RoleSlider, "Min")
+	maxInfo := buttonInfo(t, tt, ui.RoleSlider, "Max")
+	if minInfo.Bounds.Y != maxInfo.Bounds.Y {
+		t.Fatalf("range handles differ in y: %v and %v", minInfo.Bounds.Y, maxInfo.Bounds.Y)
+	}
+	cx := minInfo.Bounds.X + minInfo.Bounds.W/2
+	cy := minInfo.Bounds.Y + minInfo.Bounds.H/2
+	above := ui.Rect{
+		X: cx - 70,
+		Y: minInfo.Bounds.Y - sliderIndicatorHeight - 8,
+		W: 140,
+		H: sliderIndicatorHeight,
+	}
+	tt.Press(cx, cy)
+	tt.Advance(700 * time.Millisecond)
+	if !hasColorInRect(tt.Image(), above, th.Colors.InverseSurface, 16) {
+		t.Fatal("range slider did not show the dragged handle's value")
+	}
+	tt.Release(cx, cy)
+	tt.Advance(1200 * time.Millisecond)
+	if hasColorInRect(tt.Image(), above, th.Colors.InverseSurface, 16) {
+		t.Fatal("range slider value indicator did not hide")
+	}
+	if tt.FramePending() {
+		t.Fatal("range slider springs did not settle")
+	}
+}
+
+// TestSliderDisabledAndReduceMotion checks that disabled sliders ignore the
+// pointer and the keys, and that ReduceMotion leaves no frames pending.
+func TestSliderDisabledAndReduceMotion(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor)
+	value := 30.0
+	tt := sliderCanvas(th, func(c *ui.Context) {
+		Slider(c, &value, 0, 100, SliderOptions{Label: "Volume", Disabled: true})
+	})
+	info := buttonInfo(t, tt, ui.RoleSlider, "Volume")
+	if !info.Disabled {
+		t.Fatal("disabled slider does not report itself disabled")
+	}
+	cs := th.Colors
+	white := ui.RGB(255, 255, 255)
+	b := info.Bounds
+	y := int(b.Y + b.H/2)
+	wantInactive := cs.OnSurface.Alpha(0.12).Over(white)
+	if px := tt.Image().RGBAAt(int(sliderX(b, 0.9)), y); !colorMatches(px, wantInactive, 12) {
+		t.Fatalf("disabled inactive track %+v, want OnSurface at 12%%", px)
+	}
+	wantActive := cs.OnSurface.Alpha(0.38).Over(white)
+	if px := tt.Image().RGBAAt(int(sliderX(b, 0.15)), y); !colorMatches(px, wantActive, 12) {
+		t.Fatalf("disabled active track %+v, want OnSurface at 38%%", px)
+	}
+	tt.ClickAt(sliderX(info.Bounds, 0.8), info.Bounds.Y+info.Bounds.H/2)
+	tt.Key(0, ui.KeyTab)
+	tt.Key(0, ui.KeyRight)
+	tt.Advance(600 * time.Millisecond)
+	if value != 30 {
+		t.Fatalf("disabled slider changed its value to %v", value)
+	}
+	if tt.FramePending() {
+		t.Fatal("disabled slider left frames pending")
+	}
+
+	low, high := 20.0, 80.0
+	rd := sliderCanvas(th, func(c *ui.Context) {
+		RangeSlider(c, &low, &high, 0, 100, RangeSliderOptions{Label: "Price", Disabled: true})
+	})
+	minInfo := buttonInfo(t, rd, ui.RoleSlider, "Min")
+	if !minInfo.Disabled {
+		t.Fatal("disabled range handle does not report itself disabled")
+	}
+	rd.ClickAt(sliderX(minInfo.Bounds, 0.9), minInfo.Bounds.Y+minInfo.Bounds.H/2)
+	rd.Key(0, ui.KeyTab)
+	rd.Key(0, ui.KeyRight)
+	rd.Advance(600 * time.Millisecond)
+	if low != 20 || high != 80 {
+		t.Fatalf("disabled range slider changed to %v..%v", low, high)
+	}
+	if rd.FramePending() {
+		t.Fatal("disabled range slider left frames pending")
+	}
+
+	// ReduceMotion: dragging lands at once without animation frames.
+	value = 30
+	rm := sliderCanvas(th, func(c *ui.Context) {
+		Slider(c, &value, 0, 100, SliderOptions{Label: "Volume"})
+	})
+	rm.SetPreferences(ui.Preferences{ReduceMotion: true})
+	info = buttonInfo(t, rm, ui.RoleSlider, "Volume")
+	rm.ClickAt(sliderX(info.Bounds, 0.8), info.Bounds.Y+info.Bounds.H/2)
+	if math.Abs(value-80) > 1.5 {
+		t.Fatalf("ReduceMotion drag set %v, want about 80", value)
+	}
+	if rm.FramePending() {
+		t.Fatal("ReduceMotion slider should not ask for frames")
+	}
+
+	// A ReduceMotion range drag lands at once and leaves no animations behind.
+	low, high = 20, 80
+	rrm := sliderCanvas(th, func(c *ui.Context) {
+		RangeSlider(c, &low, &high, 0, 100, RangeSliderOptions{Label: "Price"})
+	})
+	rrm.SetPreferences(ui.Preferences{ReduceMotion: true})
+	rmin := buttonInfo(t, rrm, ui.RoleSlider, "Min")
+	rmx, rmy := rmin.Bounds.X+rmin.Bounds.W/2, rmin.Bounds.Y+rmin.Bounds.H/2
+	rrm.Press(rmx, rmy)
+	rrm.Move(rmx+60, rmy)
+	rrm.Release(rmx+60, rmy)
+	if low <= 20 || low > high {
+		t.Fatalf("ReduceMotion range drag set low=%v high=%v", low, high)
+	}
+	if rrm.FramePending() {
+		t.Fatal("ReduceMotion range slider should not ask for frames")
+	}
+}
