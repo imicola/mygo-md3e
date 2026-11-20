@@ -315,6 +315,20 @@ func TestSplitButtonDisabled(t *testing.T) {
 	if !action.Disabled || arrow.Disabled {
 		t.Fatalf("action-disabled split button reports action %v, arrow %v disabled", action.Disabled, arrow.Disabled)
 	}
+
+	// The palettes are strict: the action alone wears MD3E's disabled OnSurface
+	// container while the arrow keeps the variant's enabled container.
+	th := ThemeFromSeed(DefaultSeedColor)
+	rgb := func(c ui.Color) color.RGBA { return color.RGBA{R: c.R, G: c.G, B: c.B, A: c.A} }
+	wantAction := rgb(th.Colors.OnSurface.Alpha(float32(tokens.DisabledContainerOpacity)).Over(canvasRGB))
+	wantArrow := rgb(th.Colors.Primary)
+	if got := g.tt.Image().RGBAAt(int(action.Bounds.X)+6, int(action.Bounds.Y+action.Bounds.H/2)); absColorDiff(got, wantAction) > 4 {
+		t.Fatalf("action-disabled container = %v, want the disabled OnSurface 12%% %v", got, wantAction)
+	}
+	if got := g.tt.Image().RGBAAt(int(arrow.Bounds.X)+6, int(arrow.Bounds.Y+arrow.Bounds.H/2)); absColorDiff(got, wantArrow) > 4 {
+		t.Fatalf("arrow container = %v, want the enabled Primary %v", got, wantArrow)
+	}
+
 	ax, ay = center(action.Bounds)
 	rx, ry = center(arrow.Bounds)
 	g.tt.ClickAt(ax, ay)

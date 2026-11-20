@@ -20,6 +20,9 @@ type SplitButtonOptions struct {
 	Disabled bool
 	// ActionDisabled disables the leading action alone, leaving the menu.
 	ActionDisabled bool
+	// LeadingIcon draws an icon before the action's label, at the tier's
+	// icon size.
+	LeadingIcon IconDraw
 	// ArrowLabel names the menu trigger for assistive technology; "More
 	// options" when empty.
 	ArrowLabel string
@@ -89,6 +92,9 @@ func SplitButton(c *ui.Context, label string, opts ...SplitButtonOptions) (group
 	spec := tierSpec(o.Size)
 	rtl := c.Direction() == ui.RightToLeft
 	pal := buttonPaletteOf(th, o.Variant, o.Disabled)
+	// The action resolves its own palette: disabling it alone must show the
+	// MD3E disabled container and content while the arrow stays enabled.
+	actionPal := buttonPaletteOf(th, o.Variant, o.Disabled || o.ActionDisabled)
 	outer := restingRadius(spec, ButtonShapeRound)
 	inner := float32(connectedInnerRadii)
 	pad := float32(spec.Padding)
@@ -97,6 +103,7 @@ func SplitButton(c *ui.Context, label string, opts ...SplitButtonOptions) (group
 		AlignItems(ui.Stretch).
 		Shrink(0).
 		Height(float32(spec.Height)).
+		Gap(connectedGroupGap).
 		DimDisabled(false).
 		Role(ui.RoleGroup).
 		FocusGroup(ui.Horizontal).
@@ -124,7 +131,7 @@ func SplitButton(c *ui.Context, label string, opts ...SplitButtonOptions) (group
 			Gap(iconLabelGap(o.Size)).
 			Disabled(o.Disabled || o.ActionDisabled).
 			Label(actionLabel).
-			TextColor(pal.content)
+			TextColor(actionPal.content)
 		arrow = ui.ButtonBase(c).
 			DimDisabled(false).
 			FocusRing(false).
@@ -155,33 +162,37 @@ func SplitButton(c *ui.Context, label string, opts ...SplitButtonOptions) (group
 		arrowTarget = [4]float32{pressedRadius, pressedRadius, pressedRadius, pressedRadius}
 	}
 
-	styleSplitSegment(c, th, action, pal, actionTarget)
-	styleSplitSegment(c, th, arrow, pal, arrowTarget)
+	// The Elevated variant lifts each segment on its own, so that the shadow
+	// follows the arrow's pill and the seam's 2 DIP gap rather than the group's
+	// joint box; the pressed segment rises from Level1 to Level2.
+	actionElevation := actionPal.elevation
+	if action.Pressed() && actionElevation > tokens.Level0 && actionElevation < tokens.Level5 {
+		actionElevation++
+	}
+	arrowElevation := pal.elevation
+	if arrow.Pressed() && arrowElevation > tokens.Level0 && arrowElevation < tokens.Level5 {
+		arrowElevation++
+	}
 
-	// The Elevated variant lifts the whole control, its shadow following the
-	// group's pill rather than each segment's seam.
-	elevation := pal.elevation
-	if (action.Pressed() || arrow.Pressed()) && elevation > tokens.Level0 && elevation < tokens.Level5 {
-		elevation++
-	}
-	if elevation > tokens.Level0 {
-		ApplyElevationShadows(th, group.Radius(outer), elevation)
-	}
+	styleSplitSegment(c, th, action, actionPal, actionTarget, actionElevation)
+	styleSplitSegment(c, th, arrow, pal, arrowTarget, arrowElevation)
 
 	// The chevron turns 180 degrees as the menu opens and back as it closes.
 	degrees := arrow.AnimateTo(splitChevronKey{}, splitChevronDegrees(*open), th.Animation(motion.DefaultSpatial))
-	iconInk := pal.content
 	action.Children(func() {
+		if o.LeadingIcon != nil {
+			drawIconBox(c, o.LeadingIcon, float32(spec.IconSize), actionPal.content)
+		}
 		ApplyTypeStyle(c, ui.Text(c, label).NoWrap(), buttonTypeRole(o.Size))
 	})
 	arrow.Children(func() {
 		ui.Box(c).Size(float32(spec.IconSize), float32(spec.IconSize)).Draw(func(p *ui.Painter, r ui.Rect) {
 			if degrees == 0 {
-				mdicon.ChevronDown.Draw(p, r, iconInk)
+				mdicon.ChevronDown.Draw(p, r, pal.content)
 				return
 			}
 			p.Transform(ui.Rotation(degrees), r.X+r.W/2, r.Y+r.H/2, func() {
-				mdicon.ChevronDown.Draw(p, r, iconInk)
+				mdicon.ChevronDown.Draw(p, r, pal.content)
 			})
 		})
 	})
@@ -207,14 +218,17 @@ func SplitButton(c *ui.Context, label string, opts ...SplitButtonOptions) (group
 	return group, action, arrow, open
 }
 
-// styleSplitSegment gives one segment its container, border, corner morph and
-// state layer, and stretches it to the group's height.
-func styleSplitSegment(c *ui.Context, th *Theme, el ui.Element, pal buttonColors, target [4]float32) {
+// styleSplitSegment gives one segment its container, border, elevation, corner
+// morph and state layer, and stretches it to the group's height.
+func styleSplitSegment(c *ui.Context, th *Theme, el ui.Element, pal buttonColors, target [4]float32, elevation tokens.ElevationLevel) {
 	if pal.container.A > 0 {
 		el.Background(pal.container)
 	}
 	if pal.border.A > 0 {
 		el.Border(1, pal.border)
+	}
+	if elevation > tokens.Level0 {
+		ApplyElevationShadows(th, el, elevation)
 	}
 	var radii [4]float32
 	for i := 0; i < 4; i++ {
