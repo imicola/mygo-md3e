@@ -396,6 +396,23 @@ func TestTextAreaMultilineAndScroll(t *testing.T) {
 	}
 	tt.Type("\n" + many.String())
 	tt.Advance(600 * time.Millisecond)
+
+	// The overflowing text area shows its vertical scroll bar inside its
+	// right edge, in the theme's Scrollbar color.
+	barInk := th.Colors.OnSurfaceVariant.Alpha(0.32).Over(canvasRGB)
+	img := tt.Image()
+	bars := 0
+	for y := int(info.Bounds.Y); y < int(info.Bounds.Y+info.Bounds.H); y++ {
+		for x := int(info.Bounds.X+info.Bounds.W) - 10; x < int(info.Bounds.X+info.Bounds.W)-2; x++ {
+			if absColorDiff(img.RGBAAt(x, y), rgbOf(barInk)) <= 90 {
+				bars++
+			}
+		}
+	}
+	if bars < 6 {
+		t.Fatalf("text area shows no scroll bar: %d ink pixels near its right edge", bars)
+	}
+
 	before := inkSum(tt, field)
 	tt.Wheel(field.X+field.W/2, field.Y+field.H/2, 0, 120)
 	tt.Advance(600 * time.Millisecond)
