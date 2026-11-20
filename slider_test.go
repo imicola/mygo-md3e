@@ -90,10 +90,14 @@ func TestSliderDragKeyboardAndStep(t *testing.T) {
 	if stepped != 90 {
 		t.Fatalf("PageDown set %v, want 90", stepped)
 	}
+	st.Key(0, ui.KeyLeft)
+	if stepped != 80 {
+		t.Fatalf("Left set %v, want 80", stepped)
+	}
 	st.Advance(time.Millisecond)
 	sinfo, _ = st.AccessByRole(ui.RoleSlider, "Quality")
-	if sinfo.Now != 90 || sinfo.Step != 10 {
-		t.Fatalf("access now %v step %v, want 90 and 10", sinfo.Now, sinfo.Step)
+	if sinfo.Now != 80 || sinfo.Step != 10 {
+		t.Fatalf("access now %v step %v, want 80 and 10", sinfo.Now, sinfo.Step)
 	}
 }
 
@@ -351,6 +355,11 @@ func TestRangeSliderDragCrossingAndKeyboard(t *testing.T) {
 	if low != 21 {
 		t.Fatalf("Right set Min %v, want 21", low)
 	}
+	kb.Key(0, ui.KeyLeft)
+	if low != 20 {
+		t.Fatalf("Left set Min %v, want 20", low)
+	}
+	kb.Key(0, ui.KeyRight)
 	kb.Key(0, ui.KeyTab)
 	if !kb.Focused("Max") {
 		t.Fatal("second Tab did not focus the Max handle")
