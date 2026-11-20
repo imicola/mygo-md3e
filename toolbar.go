@@ -172,6 +172,7 @@ func floatingToolbarBar(c *ui.Context, items []FloatingToolbarItem, o FloatingTo
 		Background(container).
 		TextColor(ink).
 		Radius(floatingToolbarSide / 2).
+		DimDisabled(false).
 		Role(ui.RoleToolbar).
 		Orientation(toolbarOrientation(o.Orientation)).
 		FocusGroup(toolbarOrientation(o.Orientation)).
@@ -205,25 +206,35 @@ func floatingToolbarBar(c *ui.Context, items []FloatingToolbarItem, o FloatingTo
 
 	bar.Children(func() {
 		for i := range items {
+			// Only build the items the animated pill currently has room for:
+			// the ones past its clipped edge must leave the focus order and
+			// the access tree while the toolbar is collapsed.
+			slotEnd := float32(floatingToolbarPadding*2 + (i+1)*floatingToolbarItem + i*floatingToolbarGap)
+			if slotEnd > animated+0.5 {
+				continue
+			}
 			item := &items[i]
 			btn := ui.ButtonBase(c).
 				DimDisabled(false).
 				FocusRing(false).
 				Size(floatingToolbarItem, floatingToolbarItem).
 				Shrink(0).
-				Label(item.Label).
-				Disabled(item.Disabled).
-				TextColor(ink).
-				Radius(floatingToolbarItem / 2)
+				Label(item.Label)
+			disabled := item.Disabled || (visible && btn.IsDisabled())
+			itemInk := ink
+			if disabled {
+				itemInk = ink.Alpha(float32(tokens.DisabledContentOpacity))
+			}
+			btn.Disabled(item.Disabled).TextColor(itemInk).Radius(floatingToolbarItem / 2)
 			AttachRipple(c, btn, StateLayerOptions{
-				Color:    ink,
+				Color:    itemInk,
 				Radius:   floatingToolbarItem / 2,
-				Disabled: item.Disabled,
+				Disabled: disabled,
 			})
 			clicked := btn.Clicked()
 			btn.Children(func() {
 				if item.Icon != nil {
-					drawIconBox(c, item.Icon, 24, ink)
+					drawIconBox(c, item.Icon, 24, itemInk)
 				}
 			})
 			if clicked && item.OnClick != nil {

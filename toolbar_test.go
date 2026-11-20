@@ -89,6 +89,10 @@ func TestFloatingToolbarLayoutsAndTones(t *testing.T) {
 			}
 
 			fab := buttonInfo(t, tt, ui.RoleButton, "Compose")
+			if fab.Bounds.W != 56 || fab.Bounds.H != 56 {
+				t.Fatalf("%s/%s: coupled FAB = %v×%v, want the standard 56×56",
+					ori.name, tone.name, fab.Bounds.W, fab.Bounds.H)
+			}
 			if rectsOverlap(bar.Bounds, fab.Bounds) {
 				t.Fatalf("%s/%s: the toolbar and the FAB overlap: %v and %v",
 					ori.name, tone.name, bar.Bounds, fab.Bounds)
@@ -151,6 +155,9 @@ func TestFloatingToolbarKeyboardCollapseAndHide(t *testing.T) {
 	fullWidth := bar.Bounds.W
 	expanded = false
 	tt.Frame()
+	if tt.FramePending() {
+		t.Fatal("ReduceMotion collapse asked for an animation frame")
+	}
 	tt.Advance(800 * time.Millisecond)
 	if tt.FramePending() {
 		t.Fatal("collapsing the toolbar left frames pending")
@@ -159,9 +166,23 @@ func TestFloatingToolbarKeyboardCollapseAndHide(t *testing.T) {
 	if math.Abs(float64(bar.Bounds.W-64)) > 1 {
 		t.Fatalf("collapsed toolbar width = %v, want 64", bar.Bounds.W)
 	}
+	if _, ok := tt.AccessByRole(ui.RoleButton, "Add"); ok {
+		t.Fatal("the collapsed toolbar still exposes its hidden items")
+	}
+	tt.Key(0, ui.KeyTab)
+	if !tt.Focused("Bold") {
+		t.Fatal("Tab did not reach the remaining toolbar item")
+	}
+	tt.Key(0, ui.KeyRight)
+	if !tt.Focused("Bold") {
+		t.Fatal("Right moved the focus into a collapsed, invisible toolbar item")
+	}
 
 	expanded = true
 	tt.Frame()
+	if tt.FramePending() {
+		t.Fatal("ReduceMotion expand asked for an animation frame")
+	}
 	tt.Advance(800 * time.Millisecond)
 	if tt.FramePending() {
 		t.Fatal("expanding the toolbar left frames pending")
@@ -181,6 +202,263 @@ func TestFloatingToolbarKeyboardCollapseAndHide(t *testing.T) {
 	tt.Advance(800 * time.Millisecond)
 	if tt.FramePending() {
 		t.Fatal("showing the toolbar left frames pending")
+	}
+}
+
+// TestFloatingToolbarSpringRTLAndDisabledVisual checks the real spring
+// collapse, the mirrored RTL row, the 38% disabled item ink, and that hiding
+// does not jump to ui's 50% dimming on its first frame.
+func TestFloatingToolbarSpringRTLAndDisabledVisual(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor)
+	items := []FloatingToolbarItem{
+		{Label: "Bold", Icon: mdicon.Edit.Draw},
+		{Label: "Add", Icon: mdicon.Add.Draw, Disabled: true},
+	}
+	darkest := func(tt *ui.Tester, b ui.Rect) int {
+		min := 255
+		for y := int(b.Y) + 8; y < int(b.Y+b.H)-8; y++ {
+			for x := int(b.X) + 8; x < int(b.X+b.W)-8; x++ {
+				if r := int(tt.Image().RGBAAt(x, y).R); r < min {
+					min = r
+				}
+			}
+		}
+		return min
+	}
+
+	visible := true
+	expanded := true
+	tt := ui.NewTester(func(c *ui.Context) {
+		ThemeScope(c, th, func() {
+			ui.Box(c).Size(520, 320).Background(canvasRGB).Padding(40).Children(func() {
+				FloatingToolbar(c, items, FloatingToolbarOptions{
+					Label:    "Tools",
+					Expanded: &expanded,
+					Visible:  &visible,
+				})
+			})
+		})
+	}, 520, 320)
+
+	bold := buttonInfo(t, tt, ui.RoleButton, "Bold")
+	disabledAdd := buttonInfo(t, tt, ui.RoleButton, "Add")
+	if !disabledAdd.Disabled {
+		t.Fatal("the disabled item does not report itself disabled")
+	}
+	if got, want := darkest(tt, disabledAdd.Bounds), darkest(tt, bold.Bounds); got <= want+40 {
+		t.Fatalf("disabled item ink is as dark as the enabled one (%d vs %d): no 38%% content", got, want)
+	}
+
+	// Hiding starts at full opacity: no instant 50% dim jump.
+	bar := buttonInfo(t, tt, ui.RoleToolbar, "Tools")
+	container := rgbOf(th.Colors.SurfaceContainer)
+	visible = false
+	tt.Frame()
+	px := tt.Image().RGBAAt(int(bar.Bounds.X)+4, int(bar.Bounds.Y+bar.Bounds.H/2))
+	if absColorDiff(px, container) > 4 {
+		t.Fatalf("first hidden frame container = %v, want %v without a dim jump", px, container)
+	}
+	tt.Advance(1200 * time.Millisecond)
+	if tt.FramePending() {
+		t.Fatal("hiding the toolbar left frames pending")
+	}
+
+	// The ordinary spring path: collapsing and expanding request frames and
+	// settle, and RTL mirrors the item row.
+	expanded2, visible2 := true, true
+	tt2 := ui.NewTester(func(c *ui.Context) {
+		ThemeScope(c, th, func() {
+			ui.Box(c).Size(520, 320).Background(canvasRGB).Padding(40).Children(func() {
+				FloatingToolbar(c, items, FloatingToolbarOptions{
+					Label:    "Tools",
+					Expanded: &expanded2,
+					Visible:  &visible2,
+				})
+			})
+		})
+	}, 520, 320)
+
+	bar2 := buttonInfo(t, tt2, ui.RoleToolbar, "Tools")
+	full := bar2.Bounds.W
+	expanded2 = false
+	tt2.Frame()
+	if !tt2.FramePending() {
+		t.Fatal("collapsing the toolbar should spring, not snap")
+	}
+	tt2.Advance(1200 * time.Millisecond)
+	if tt2.FramePending() {
+		t.Fatal("the collapse spring did not settle")
+	}
+	if got := buttonInfo(t, tt2, ui.RoleToolbar, "Tools").Bounds.W; math.Abs(float64(got-64)) > 1 {
+		t.Fatalf("collapsed toolbar width = %v, want 64", got)
+	}
+	expanded2 = true
+	tt2.Frame()
+	if !tt2.FramePending() {
+		t.Fatal("expanding the toolbar should spring, not snap")
+	}
+	tt2.Advance(1200 * time.Millisecond)
+	if got := buttonInfo(t, tt2, ui.RoleToolbar, "Tools").Bounds.W; math.Abs(float64(got-full)) > 1 {
+		t.Fatalf("re-expanded toolbar width = %v, want %v", got, full)
+	}
+
+	tt2.SetDirection(ui.RightToLeft)
+	tt2.Advance(600 * time.Millisecond)
+	bold = buttonInfo(t, tt2, ui.RoleButton, "Bold")
+	add := buttonInfo(t, tt2, ui.RoleButton, "Add")
+	if bold.Bounds.X <= add.Bounds.X {
+		t.Fatalf("right to left row did not mirror: Bold x=%v Add x=%v", bold.Bounds.X, add.Bounds.X)
+	}
+}
+
+// TestTopAppBarCenteringAndTitlePadding checks the symmetric CenterAligned
+// side slots with uneven icons and the 16 DIP start padding of expanded titles.
+func TestTopAppBarCenteringAndTitlePadding(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor)
+	cases := []struct {
+		name    string
+		nav     bool
+		actions []AppBarAction
+	}{
+		{"navigation only", true, nil},
+		{"action only", false, []AppBarAction{{Label: "More", Icon: mdicon.MoreVert.Draw}}},
+		{"one left, two right", true, []AppBarAction{
+			{Label: "More", Icon: mdicon.MoreVert.Draw},
+			{Label: "Filter", Icon: mdicon.Edit.Draw},
+		}},
+	}
+	for _, tc := range cases {
+		tt := ui.NewTester(func(c *ui.Context) {
+			ThemeScope(c, th, func() {
+				ui.Box(c).Size(640, 260).Background(canvasRGB).Children(func() {
+					o := TopAppBarOptions{Variant: TopAppBarCenterAligned, Label: "Mail bar", Actions: tc.actions}
+					if tc.nav {
+						o.NavigationIcon = mdicon.Menu.Draw
+					}
+					TopAppBar(c, "Inbox", o)
+				})
+			})
+		}, 640, 260)
+
+		bar := buttonInfo(t, tt, ui.RoleRegion, "Mail bar")
+		title, ok := tt.Find("Inbox")
+		if !ok {
+			t.Fatalf("%s: title not laid out", tc.name)
+		}
+		got := title.X + title.W/2
+		want := bar.Bounds.X + bar.Bounds.W/2
+		if math.Abs(float64(got-want)) > 1 {
+			t.Fatalf("%s: title center x = %v, want the bar center %v", tc.name, got, want)
+		}
+	}
+
+	// Small without a navigation icon starts the title 16 DIP from the edge.
+	tt := ui.NewTester(func(c *ui.Context) {
+		ThemeScope(c, th, func() {
+			ui.Box(c).Size(640, 120).Background(canvasRGB).Children(func() {
+				TopAppBar(c, "Inbox", TopAppBarOptions{Label: "Mail bar"})
+			})
+		})
+	}, 640, 120)
+	bar := buttonInfo(t, tt, ui.RoleRegion, "Mail bar")
+	title, _ := tt.Find("Inbox")
+	if math.Abs(float64(title.X-(bar.Bounds.X+16))) > 1 {
+		t.Fatalf("small bar title x = %v, want %v", title.X, bar.Bounds.X+16)
+	}
+
+	// Medium and Large expanded titles keep the same 16 DIP start padding.
+	for _, variant := range []struct {
+		name string
+		v    TopAppBarVariant
+	}{
+		{"Medium", TopAppBarMedium},
+		{"Large", TopAppBarLarge},
+	} {
+		tt := ui.NewTester(func(c *ui.Context) {
+			ThemeScope(c, th, func() {
+				ui.Box(c).Size(640, 260).Background(canvasRGB).Children(func() {
+					TopAppBar(c, "Inbox", TopAppBarOptions{Variant: variant.v, Label: "Mail bar"})
+				})
+			})
+		}, 640, 260)
+		bar := buttonInfo(t, tt, ui.RoleRegion, "Mail bar")
+		title, _ := tt.Find("Inbox")
+		if math.Abs(float64(title.X-(bar.Bounds.X+16))) > 1 {
+			t.Fatalf("%s bar title x = %v, want %v", variant.name, title.X, bar.Bounds.X+16)
+		}
+	}
+}
+
+// TestSearchAppBarDefaultsPlaceholderDecorationAndDisabled checks the default
+// "Search" placeholder, the centered decorative icon, and that a disabled bar
+// keeps its container and uses 38% content instead of ui's 50% dimming.
+func TestSearchAppBarDefaultsPlaceholderDecorationAndDisabled(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor)
+	query := ""
+	tt := ui.NewTester(func(c *ui.Context) {
+		ThemeScope(c, th, func() {
+			ui.Box(c).Size(560, 200).Background(canvasRGB).Padding(24).Children(func() {
+				SearchAppBar(c, &query)
+			})
+		})
+	}, 560, 200)
+
+	field := buttonInfo(t, tt, ui.RoleTextField, "Search")
+	if field.Placeholder != "Search" {
+		t.Fatalf("default placeholder = %q, want Search", field.Placeholder)
+	}
+	bar := buttonInfo(t, tt, ui.RoleSearch, "Search")
+	slot := ui.Rect{X: bar.Bounds.X + 8, Y: bar.Bounds.Y + 4, W: 48, H: 48}
+	bg := rgbOf(th.Colors.SurfaceContainerHigh)
+	minX, minY, maxX, maxY := 1<<30, 1<<30, -1, -1
+	// Stay clear of the pill's rounded left end, which antialiases into the
+	// canvas inside the 48 DIP slot's corners.
+	for y := int(slot.Y) + 8; y < int(slot.Y+slot.H)-8; y++ {
+		for x := int(slot.X) + 8; x < int(slot.X+slot.W)-8; x++ {
+			if absColorDiff(tt.Image().RGBAAt(x, y), bg) > 20 {
+				minX, minY = min(minX, x), min(minY, y)
+				maxX, maxY = max(maxX, x), max(maxY, y)
+			}
+		}
+	}
+	if maxX < 0 {
+		t.Fatal("the decorative leading icon painted nothing")
+	}
+	gotCX := float32(minX+maxX)/2 + 0.5
+	gotCY := float32(minY+maxY)/2 + 0.5
+	wantCX, wantCY := slot.X+slot.W/2, slot.Y+slot.H/2
+	if math.Abs(float64(gotCX-wantCX)) > 2.5 || math.Abs(float64(gotCY-wantCY)) > 2.5 {
+		t.Fatalf("decorative icon center = (%v, %v), want the 48 DIP slot center (%v, %v)",
+			gotCX, gotCY, wantCX, wantCY)
+	}
+
+	disabledQuery := ""
+	dt := ui.NewTester(func(c *ui.Context) {
+		ThemeScope(c, th, func() {
+			ui.Box(c).Size(560, 200).Background(canvasRGB).Padding(24).Children(func() {
+				SearchAppBar(c, &disabledQuery, SearchAppBarOptions{
+					Disabled: true,
+					Trailing: []AppBarAction{{Label: "Filter", Icon: mdicon.MoreVert.Draw}},
+				})
+			})
+		})
+	}, 560, 200)
+	dbar := buttonInfo(t, dt, ui.RoleSearch, "Search")
+	px := dt.Image().RGBAAt(int(dbar.Bounds.X)+4, int(dbar.Bounds.Y+dbar.Bounds.H/2))
+	if absColorDiff(px, bg) > 4 {
+		t.Fatalf("disabled bar container = %v, want the undimmed %v", px, bg)
+	}
+	filter := buttonInfo(t, dt, ui.RoleButton, "Filter")
+	darkest := 255
+	for y := int(filter.Bounds.Y) + 12; y < int(filter.Bounds.Y+filter.Bounds.H)-12; y++ {
+		for x := int(filter.Bounds.X) + 12; x < int(filter.Bounds.X+filter.Bounds.W)-12; x++ {
+			if r := int(dt.Image().RGBAAt(x, y).R); r < darkest {
+				darkest = r
+			}
+		}
+	}
+	if darkest < 100 {
+		t.Fatalf("disabled trailing icon R = %d, want the 38%% OnSurface tone", darkest)
 	}
 }
 
