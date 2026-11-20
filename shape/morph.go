@@ -197,6 +197,18 @@ func (m *Morph) AsPath(progress float32, dst ui.Rect) *ui.Path {
 	return p.Close()
 }
 
+// CubicsAt returns the morph's whole cubic chain at progress, from 0 (from) to
+// 1 (to), for callers that measure or draw the outline themselves; AsPath
+// reuses a path instead. The slice is newly allocated.
+func (m *Morph) CubicsAt(progress float32) []Cubic {
+	t := float64(max(0, min(1, progress)))
+	out := make([]Cubic, len(m.a))
+	for i := range m.a {
+		out[i] = m.cubicAt(i, t)
+	}
+	return out
+}
+
 // cubicAt returns the i-th cubic of the morph at t, for tests and debug
 // drawing.
 func (m *Morph) cubicAt(i int, t float64) Cubic {

@@ -267,7 +267,7 @@
 
 ## M6：进度、加载与反馈组件
 
-- [ ] **T6.1：实现 Expressive Shape-Morphing `LoadingIndicator`**
+- [x] **T6.1：实现 Expressive Shape-Morphing `LoadingIndicator`**
   - **交付物**：`loading.go`、`loading_test.go`
   - **核心能力**：
     - 基于 `shape.Morph` 与 `motion` 弹簧驱动，在可配置多边形序列（默认 7 种 MD3E 经典形状循环）之间连续变形并伴随角速度旋转；
