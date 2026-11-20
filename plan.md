@@ -179,7 +179,7 @@
     - 四重门禁全绿。
   - **Commit**：`feat(button): [T4.1] implement Expressive Button with 5 variants, XS-XL sizes, and corner morph`
 
-- [ ] **T4.2：实现 Expressive IconButton & ToggleIconButton**
+- [x] **T4.2：实现 Expressive IconButton & ToggleIconButton**
   - **交付物**：`iconbutton.go`、`iconbutton_test.go`
   - **核心能力**：
     - 基于 `ui.ButtonBase` / `ui.ToggleBase`，支持 `IconButtonStandard`, `IconButtonFilled`, `IconButtonTonal`, `IconButtonOutlined`；

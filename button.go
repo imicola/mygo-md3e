@@ -87,7 +87,9 @@ type buttonCornerKey struct{}
 //
 // The corner morph reads Pressed in the build pass, as the radius is an
 // element attribute; hover and focus feedbacks stay in DrawOver inside
-// AttachRipple, so hovering never rebuilds the view.
+// AttachRipple, so hovering never rebuilds the view. That Focus state layer is
+// the button's focus cue: ui's default focus ring is turned off so it cannot
+// overdraw the morphing corner.
 func Button(c *ui.Context, label string, opts ...ButtonOptions) ui.Element {
 	if len(opts) > 1 {
 		panic("md3e: Button takes at most one ButtonOptions")
@@ -104,6 +106,7 @@ func Button(c *ui.Context, label string, opts ...ButtonOptions) ui.Element {
 
 	el := ui.ButtonBase(c).
 		DimDisabled(false).
+		FocusRing(false).
 		Height(float32(spec.Height)).
 		PaddingX(float32(spec.Padding)).
 		Gap(iconLabelGap(o.Size)).
