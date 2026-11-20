@@ -1,6 +1,7 @@
 package md3e
 
 import (
+	"math"
 	"runtime"
 	"testing"
 
@@ -9,6 +10,72 @@ import (
 	"mygo-md3e/motion"
 	"mygo-md3e/tokens"
 )
+
+// TestPartialShapeScaleAndIdempotentPreferences checks that a partial
+// ShapeScale falls back per field, and that ThemeScope does not multiply
+// TextScale twice after WithPreferences already resolved it.
+func TestPartialShapeScaleAndIdempotentPreferences(t *testing.T) {
+	partial := ShapeScale{Medium: 18}
+	if got, want := partial.Radius(tokens.ShapeMedium), float32(18); got != want {
+		t.Fatalf("custom ShapeMedium = %v, want %v", got, want)
+	}
+	for _, scale := range []tokens.ShapeScale{
+		tokens.ShapeExtraSmall, tokens.ShapeSmall, tokens.ShapeLarge, tokens.ShapeExtraLarge, tokens.ShapeFull,
+	} {
+		if got, want := partial.Radius(scale), float32(scale.Radius()); got != want {
+			t.Fatalf("partial ShapeScale %v = %v, want the default %v", scale, got, want)
+		}
+	}
+
+	th := ThemeFromSeed(DefaultSeedColor, ThemeOptions{TextScale: 1.2})
+	prefs := ui.Preferences{TextScale: 1.5}
+	var got *Theme
+	ui.NewTesterWith(func(c *ui.Context) {
+		ThemeScope(c, th.WithPreferences(prefs), func() {
+			got = CurrentTheme(c)
+			ui.Box(c).Size(10, 10)
+		})
+	}, 100, 100, ui.TesterOptions{Preferences: prefs})
+	if got == nil {
+		t.Fatal("the scoped theme was not resolved")
+	}
+	if math.Abs(float64(got.EffectiveTextScale()-1.8)) > 1e-4 {
+		t.Fatalf("resolved TextScale = %v, want 1.2*1.5=1.8 once", got.EffectiveTextScale())
+	}
+}
+
+// TestThemeRegistryDropsNaNScopes checks that a theme with a NaN field, which
+// can never equal its map key, does not leak registry entries.
+func TestThemeRegistryDropsNaNScopes(t *testing.T) {
+	runtime.GC()
+	uiBaseline := themeRegistryCountForTest()
+	specBaseline := themeSpecRegistryCountForTest()
+
+	th := ThemeFromSeed(DefaultSeedColor)
+	th.Shapes.Medium = float32(math.NaN())
+	for range 6 {
+		ui.NewTester(func(c *ui.Context) {
+			ThemeScope(c, th, func() {
+				_ = CurrentTheme(c)
+				ui.Box(c).Size(10, 10)
+			})
+		}, 60, 60)
+	}
+
+	for range 12 {
+		runtime.GC()
+		runtime.Gosched()
+		if themeRegistryCountForTest() <= uiBaseline && themeSpecRegistryCountForTest() <= specBaseline {
+			break
+		}
+	}
+	if got := themeRegistryCountForTest(); got > uiBaseline {
+		t.Fatalf("theme registry leaked NaN entries: count=%d baseline=%d", got, uiBaseline)
+	}
+	if got := themeSpecRegistryCountForTest(); got > specBaseline {
+		t.Fatalf("theme spec index leaked NaN entries: count=%d baseline=%d", got, specBaseline)
+	}
+}
 
 func TestThemeFromSeedOptionsAndDefaults(t *testing.T) {
 	def := ThemeFromSeed(ui.Color{})

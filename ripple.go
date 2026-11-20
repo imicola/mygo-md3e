@@ -208,7 +208,10 @@ func attachOverlayFeedback(c *ui.Context, el ui.Element, withRipple bool, opt St
 		switch {
 		case opt.Dragged:
 			targetAlpha = float32(tokens.StateDraggedOpacity)
-		case pressed || (st.pointerHeld && (!withRipple || reduceMotion)):
+		case (pressed || st.pointerHeld) && (!withRipple || reduceMotion):
+			// The ripple itself is the pressed feedback; adding the 10% pressed
+			// layer on top would double it. Keep the layer for keyboard and
+			// ReduceMotion feedback, where no wave spreads.
 			targetAlpha = float32(tokens.StatePressedOpacity)
 		case focused:
 			targetAlpha = float32(tokens.StateFocusOpacity)
@@ -290,8 +293,14 @@ func attachOverlayFeedback(c *ui.Context, el ui.Element, withRipple bool, opt St
 						continue
 					}
 					waveInk := ink.Alpha(waveAlpha)
+					cx, cy := ox/clipRect.W, oy/clipRect.H
+					if cx == 0 && cy == 0 {
+						// ui's RadialGradient reads the zero Point as the box
+						// center; nudge a top-left origin off it.
+						cx = 1e-4
+					}
 					p.FillRadialGradient(clipRect, ui.RadialGradient{
-						Center: ui.Point{X: ox / clipRect.W, Y: oy / clipRect.H},
+						Center: ui.Point{X: cx, Y: cy},
 						Radius: curR,
 						Stops: []ui.GradientStop{
 							{Color: waveInk, At: 0},

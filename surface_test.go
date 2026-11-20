@@ -84,6 +84,103 @@ func TestElevationSurfaceColorsAndShadows(t *testing.T) {
 	}
 }
 
+// TestRippleOnButtonBaseDoesNotDoublePressLayer checks that a real button's
+// ripple is the pressed feedback alone, that the layer stays at the hover
+// opacity, and that a press on the top-left corner starts the wave there
+// instead of jumping to the gradient's default center.
+func TestRippleOnButtonBaseDoesNotDoublePressLayer(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor)
+	tt := ui.NewTester(func(c *ui.Context) {
+		ThemeScope(c, th, func() {
+			ui.Box(c).Size(280, 160).Background(ui.RGB(255, 255, 255)).Padding(20).Children(func() {
+				b := ui.ButtonBase(c).Size(200, 80).Background(ui.RGB(255, 255, 255)).Label("Pad")
+				_ = b.Clicked()
+				AttachRipple(c, b, StateLayerOptions{Color: ui.RGB(0, 0, 0), BorderInset: 1})
+			})
+		})
+	}, 280, 160)
+
+	b := buttonInfo(t, tt, ui.RoleButton, "Pad")
+	x, y := b.Bounds.X+1, b.Bounds.Y+1
+	// A point outside the label near the pressed corner, and the corner itself.
+	farX := int(b.Bounds.X) + 30
+	midY := int(b.Bounds.Y + b.Bounds.H/2)
+	tt.Move(x, y)
+	tt.Press(x, y)
+	corner := tt.Image().RGBAAt(int(b.Bounds.X)+3, int(b.Bounds.Y)+3)
+	far := tt.Image().RGBAAt(farX, midY)
+	if corner.R >= far.R {
+		t.Fatalf("wave did not start at the pressed corner: corner R=%d far R=%d", corner.R, far.R)
+	}
+
+	tt.Advance(400 * time.Millisecond)
+	settled := tt.Image().RGBAAt(farX, midY)
+	// Hover 8% plus the 10% ripple leaves ~211; the doubled pressed layer
+	// would be ~206.
+	if settled.R < 208 || settled.R > 216 {
+		t.Fatalf("pressed ripple pixel R = %d, want about 211 (no doubled 10%% layer)", settled.R)
+	}
+	tt.Release(x, y)
+	tt.Move(0, 0)
+	tt.Advance(600 * time.Millisecond)
+	if tt.FramePending() {
+		t.Fatal("the pressed ripple did not settle")
+	}
+}
+
+// TestSurfaceTonalElevationOverride checks that a lower TonalElevation can
+// override a higher Elevation's tone while its shadows remain.
+func TestSurfaceTonalElevationOverride(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor)
+	img := ui.Render(func(c *ui.Context) {
+		ThemeScope(c, th, func() {
+			ui.Box(c).Size(120, 120).Background(ui.RGB(255, 255, 255)).Padding(20).Children(func() {
+				Surface(c, SurfaceOptions{
+					Elevation:      tokens.Level3,
+					TonalElevation: tokens.Level1,
+					Radius:         8,
+				}).Size(60, 40)
+			})
+		})
+	}, 120, 120, 1)
+
+	center := img.RGBAAt(50, 40)
+	if want := rgbOf(SurfaceColorForElevation(th, tokens.Level1)); absColorDiff(center, want) > 4 {
+		t.Fatalf("tonal override center = %v, want the Level1 tone %v", center, want)
+	}
+	if below := img.RGBAAt(50, 62); below == (color.RGBA{R: 255, G: 255, B: 255, A: 255}) {
+		t.Fatal("the Level3 shadows disappeared with the lower tonal override")
+	}
+}
+
+// TestSurfacePolygonClip checks that a custom polygon Surface with Clip keeps
+// its children inside the surface's box.
+func TestSurfacePolygonClip(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor)
+	gray := color.RGBA{R: 220, G: 220, B: 220, A: 255}
+	img := ui.Render(func(c *ui.Context) {
+		ThemeScope(c, th, func() {
+			ui.Box(c).Size(240, 200).Background(ui.RGB(220, 220, 220)).Padding(20).Children(func() {
+				s := Surface(c, SurfaceOptions{
+					Color: ui.RGB(255, 255, 255),
+					Shape: shape.Circle(),
+					Clip:  true,
+				}).Size(80, 80)
+				s.Children(func() {
+					ui.Box(c).Size(300, 300).Background(ui.RGB(255, 0, 0))
+				})
+			})
+		})
+	}, 240, 200, 1)
+
+	if px := img.RGBAAt(60, 60); px.R < 200 {
+		t.Fatalf("the oversized child did not paint inside the surface: %v", px)
+	}
+	if px := img.RGBAAt(160, 60); px != gray {
+		t.Fatalf("the oversized child escaped the clipped surface: %v", px)
+	}
+}
+
 func TestTypographyScaleAndTextHelper(t *testing.T) {
 	th := ThemeFromSeed(DefaultSeedColor, ThemeOptions{TextScale: 1.5})
 

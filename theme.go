@@ -46,36 +46,40 @@ func DefaultShapeScale() ShapeScale {
 	}
 }
 
-// Radius returns the radius in DIPs configured for scale. If the ShapeScale is
-// zero-valued, the standard MD3E fallback radius for scale is returned.
+// Radius returns the radius in DIPs configured for scale. Fields left at zero
+// fall back to the standard MD3E radius for their own scale, so a partial
+// ShapeScale customizes just the steps it sets.
 func (s ShapeScale) Radius(scale tokens.ShapeScale) float32 {
-	if s == (ShapeScale{}) {
-		return float32(scale.Radius())
-	}
+	fallback := float32(scale.Radius())
+	var v float32
 	switch scale {
 	case tokens.ShapeNone:
 		return s.None
 	case tokens.ShapeExtraSmall:
-		return s.ExtraSmall
+		v = s.ExtraSmall
 	case tokens.ShapeSmall:
-		return s.Small
+		v = s.Small
 	case tokens.ShapeMedium:
-		return s.Medium
+		v = s.Medium
 	case tokens.ShapeLarge:
-		return s.Large
+		v = s.Large
 	case tokens.ShapeLargeIncreased:
-		return s.LargeIncreased
+		v = s.LargeIncreased
 	case tokens.ShapeExtraLarge:
-		return s.ExtraLarge
+		v = s.ExtraLarge
 	case tokens.ShapeExtraLargeIncreased:
-		return s.ExtraLargeIncreased
+		v = s.ExtraLargeIncreased
 	case tokens.ShapeExtraExtraLarge:
-		return s.ExtraExtraLarge
+		v = s.ExtraExtraLarge
 	case tokens.ShapeFull:
-		return s.Full
+		v = s.Full
 	default:
-		return float32(scale.Radius())
+		return fallback
 	}
+	if v == 0 {
+		return fallback
+	}
+	return v
 }
 
 // ThemeOptions configures how ThemeFromSeed constructs an MD3E theme.
@@ -119,6 +123,12 @@ type Theme struct {
 	seed    ui.Color
 	hasSeed bool
 	variant tokens.Variant
+
+	// baseTextScale is TextScale before desktop preferences were folded in,
+	// so that resolvedValue can reapply different preferences idempotently
+	// instead of multiplying the scale twice.
+	baseTextScale   float32
+	hasAppliedPrefs bool
 }
 
 // ThemeFromSeed derives an MD3E Theme from seed using Material HCT palettes.
@@ -170,6 +180,8 @@ func ThemeFromSeed(seed ui.Color, opts ...ThemeOptions) *Theme {
 		seed:         seed,
 		hasSeed:      true,
 		variant:      o.Variant,
+
+		baseTextScale: scale,
 	}
 	applySemanticRoles(t)
 	return t
@@ -377,6 +389,12 @@ func (t *Theme) resolvedValue(p ui.Preferences) Theme {
 	}
 
 	baseScale := cp.TextScale
+	if cp.hasAppliedPrefs && cp.baseTextScale > 0 {
+		// Preferences were already folded in once: reapply them from the
+		// original scale so that ThemeScope(t.WithPreferences(p), ...) does
+		// not multiply TextScale twice.
+		baseScale = cp.baseTextScale
+	}
 	if baseScale <= 0 {
 		baseScale = 1
 	}
@@ -385,6 +403,8 @@ func (t *Theme) resolvedValue(p ui.Preferences) Theme {
 		prefScale = 1
 	}
 	cp.TextScale = baseScale * prefScale
+	cp.baseTextScale = baseScale
+	cp.hasAppliedPrefs = true
 	cp.ReduceMotion = cp.ReduceMotion || p.ReduceMotion
 	return cp
 }
@@ -488,14 +508,24 @@ func (t *Theme) buildUITheme() ui.Theme {
 // Weak-reference theme registries prevent memory leaks across multiple windows
 // and short-lived ui.Tester runs while preserving pointer stability across rebuilds.
 type scopedUIKey struct {
-	wp   weak.Pointer[ui.Theme]
-	spec Theme
+	wp weak.Pointer[ui.Theme]
+	id uint64
+}
+
+// scopedThemeEntry tags a registry entry with its registration id, so cleanup
+// removes exactly the entry it registered even if the address is reused.
+type scopedThemeEntry struct {
+	theme *Theme
+	spec  Theme
+	wp    weak.Pointer[ui.Theme]
+	id    uint64
 }
 
 var (
 	themeRegMu     sync.RWMutex
-	themeByUI      = map[weak.Pointer[ui.Theme]]*Theme{}
-	themeBySpec    = map[Theme]weak.Pointer[ui.Theme]{}
+	themeByUI      = map[weak.Pointer[ui.Theme]]scopedThemeEntry{}
+	themeBySpec    = map[Theme]scopedThemeEntry{}
+	themeSeq       uint64
 	defaultThemeMu sync.RWMutex
 	defaultThemes  = map[defaultThemeKey]*Theme{}
 
@@ -518,9 +548,9 @@ func registerScopedTheme(resolved Theme) *ui.Theme {
 	themeRegMu.Lock()
 	defer themeRegMu.Unlock()
 
-	if wp, ok := themeBySpec[resolved]; ok {
-		if existing := wp.Value(); existing != nil {
-			if cached := themeByUI[wp]; cached != nil {
+	if e, ok := themeBySpec[resolved]; ok {
+		if existing := e.wp.Value(); existing != nil {
+			if cached, ok := themeByUI[e.wp]; ok && cached.id == e.id && cached.theme != nil {
 				return existing
 			}
 		}
@@ -531,17 +561,26 @@ func registerScopedTheme(resolved Theme) *ui.Theme {
 	uiPtr := &uiVal
 	wp := weak.Make(uiPtr)
 	stored := resolved
-	themeBySpec[stored] = wp
-	themeByUI[wp] = &stored
+	themeSeq++
+	id := themeSeq
+	themeBySpec[stored] = scopedThemeEntry{wp: wp, id: id}
+	themeByUI[wp] = scopedThemeEntry{theme: &stored, spec: stored, id: id}
 
+	// Cleanup works from themeByUI, which is keyed by the weak pointer alone:
+	// a Theme with a NaN field is unequal to itself, so deleting its spec key
+	// would always miss. Rebuilding the spec index from the live entries
+	// drops such stale keys too.
 	runtime.AddCleanup(uiPtr, func(k scopedUIKey) {
 		themeRegMu.Lock()
 		defer themeRegMu.Unlock()
-		delete(themeByUI, k.wp)
-		if cur, ok := themeBySpec[k.spec]; ok && cur == k.wp {
-			delete(themeBySpec, k.spec)
+		if cur, ok := themeByUI[k.wp]; ok && cur.id == k.id {
+			delete(themeByUI, k.wp)
 		}
-	}, scopedUIKey{wp: wp, spec: stored})
+		themeBySpec = make(map[Theme]scopedThemeEntry, len(themeByUI))
+		for wp, e := range themeByUI {
+			themeBySpec[e.spec] = scopedThemeEntry{wp: wp, id: e.id}
+		}
+	}, scopedUIKey{wp: wp, id: id})
 
 	return uiPtr
 }
@@ -552,12 +591,12 @@ func lookupScopedTheme(uiT *ui.Theme) (*Theme, bool) {
 	}
 	wp := weak.Make(uiT)
 	themeRegMu.RLock()
-	t, ok := themeByUI[wp]
+	e, ok := themeByUI[wp]
 	themeRegMu.RUnlock()
-	if !ok || t == nil {
+	if !ok || e.theme == nil {
 		return nil, false
 	}
-	return t, true
+	return e.theme, true
 }
 
 func cachedThemeFromSeed(seed ui.Color, dark bool, variant tokens.Variant, prefs ui.Preferences) *Theme {
@@ -595,6 +634,11 @@ func cachedThemeFromSeed(seed ui.Color, dark bool, variant tokens.Variant, prefs
 		TextScale:    textScale,
 		ReduceMotion: prefs.ReduceMotion,
 	})
+	// The cached theme already carries the desktop preferences: its scale is
+	// a preference value, not a caller base, so ThemeScope must not reapply
+	// them on top.
+	built.hasAppliedPrefs = true
+	built.baseTextScale = 1
 
 	defaultThemeMu.Lock()
 	defer defaultThemeMu.Unlock()
@@ -674,4 +718,10 @@ func themeRegistryCountForTest() int {
 	themeRegMu.RLock()
 	defer themeRegMu.RUnlock()
 	return len(themeByUI)
+}
+
+func themeSpecRegistryCountForTest() int {
+	themeRegMu.RLock()
+	defer themeRegMu.RUnlock()
+	return len(themeBySpec)
 }

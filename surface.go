@@ -92,7 +92,9 @@ type SurfaceOptions struct {
 	// Elevation selects the MD3E tonal surface tier and Key/Ambient drop shadows.
 	Elevation tokens.ElevationLevel
 	// TonalElevation optionally overrides the tonal elevation step used when
-	// Color is unset (or mixed via SurfaceTint when TonalTint is true).
+	// Color is unset (or mixed via SurfaceTint when TonalTint is true). A
+	// non-zero value may raise or lower the tone independently of Elevation's
+	// shadows.
 	TonalElevation tokens.ElevationLevel
 	// TonalTint mixes SurfaceTint onto an explicit Color using the active elevation's TintRatio.
 	TonalTint bool
@@ -162,7 +164,9 @@ func resolveSurfaceShape(th *Theme, opt SurfaceOptions) resolvedSurfaceShape {
 
 func resolveSurfaceBackground(th *Theme, opt SurfaceOptions) ui.Color {
 	tonalLevel := opt.Elevation
-	if opt.TonalElevation > tonalLevel {
+	// A non-zero TonalElevation overrides the shadow elevation in either
+	// direction: callers may want Level3 shadows over a Level1 tone.
+	if opt.TonalElevation > tokens.Level0 {
 		tonalLevel = opt.TonalElevation
 	}
 	if opt.Color.A == 0 {
@@ -215,6 +219,11 @@ func Surface(c *ui.Context, opts ...SurfaceOptions) ui.Element {
 	if geom.poly != nil {
 		poly := geom.poly
 		bw := opt.BorderWidth
+		if opt.Clip {
+			// ui clips children to boxes only; the polygon's own corners are
+			// painted above, and this keeps content inside its bounds.
+			el.Clip()
+		}
 		el.Draw(func(p *ui.Painter, r ui.Rect) {
 			if r.W <= 0 || r.H <= 0 {
 				return
