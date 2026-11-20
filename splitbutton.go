@@ -89,6 +89,7 @@ func SplitButton(c *ui.Context, label string, opts ...SplitButtonOptions) (group
 	}
 
 	th := CurrentTheme(c)
+	o.Size = normalizeSizeTier(o.Size)
 	spec := tierSpec(o.Size)
 	rtl := c.Direction() == ui.RightToLeft
 	outer := restingRadius(spec, ButtonShapeRound)

@@ -379,8 +379,12 @@ func TestRangeSliderDragCrossingAndKeyboard(t *testing.T) {
 	kb.Key(0, ui.KeyHome)
 	kb.Advance(time.Millisecond)
 	maxInfo = buttonInfo(t, kb, ui.RoleSlider, "Max")
-	if maxInfo.Now != low || maxInfo.Min != 0 || maxInfo.Max != 100 {
-		t.Fatalf("access range Min %v Max %v Now %v, want 0 100 %v", maxInfo.Min, maxInfo.Max, maxInfo.Now, low)
+	minInfo = buttonInfo(t, kb, ui.RoleSlider, "Min")
+	if maxInfo.Now != low || maxInfo.Min != low || maxInfo.Max != 100 {
+		t.Fatalf("Max access range Min %v Max %v Now %v, want %v 100 %v", maxInfo.Min, maxInfo.Max, maxInfo.Now, low, low)
+	}
+	if minInfo.Min != 0 || minInfo.Max != high {
+		t.Fatalf("Min access range %v..%v, want 0..%v", minInfo.Min, minInfo.Max, high)
 	}
 
 	// A press on the track beside the handles drags the nearer one.
@@ -629,5 +633,126 @@ func TestSliderExitTransitionSnapshotAndValidChildHandles(t *testing.T) {
 	tt.Advance(300 * time.Millisecond)
 	if tt.FramePending() {
 		t.Fatal("slider exit transition should converge with zero pending frames")
+	}
+}
+
+func TestSliderDragOutsideReleaseUnlocksThumbAndIndicator(t *testing.T) {
+	th := ThemeFromSeed(ui.Hex("#6750A4"))
+	val := 50.0
+	tt := sliderCanvas(th, func(c *ui.Context) {
+		Slider(c, &val, 0, 100, SliderOptions{Label: "Volume"})
+	})
+	b := buttonInfo(t, tt, ui.RoleSlider, "Volume").Bounds
+	cx, cy := sliderX(b, 0.5), b.Y+b.H/2
+
+	tt.Press(cx, cy)
+	tt.Move(cx+30, cy+120)
+	// Release outside the slider hit box; must still clear held/engaged state.
+	tt.Release(cx+30, cy+120)
+	tt.Move(2, 2)
+	tt.Advance(400 * time.Millisecond)
+	if tt.FramePending() {
+		t.Fatal("slider did not settle after outside release")
+	}
+	if _, ok := tt.Find(sliderValueText(val, 0, nil)); ok {
+		t.Fatal("value indicator remained open after pointer released outside slider")
+	}
+	// Verify thumb returned to resting width (~4 DIP, not narrow 2 DIP engaged).
+	tx := sliderX(b, sliderFraction(val, 0, 100))
+	if w := thumbWidthOnRow(t, tt, ui.Rect{X: tx - 10, Y: cy - 4, W: 20, H: 8}, th.Colors.Primary); w < 3 {
+		t.Fatalf("thumb width = %d px after outside release, want resting ~4 DIP", w)
+	}
+}
+
+func TestSliderNaNBoundsAndNarrowBoxSafety(t *testing.T) {
+	nan64 := math.NaN()
+	nan32 := float32(math.NaN())
+	inf32 := float32(math.Inf(1))
+	val := nan64
+	low, high := math.Inf(1), math.NaN()
+
+	tt := sliderCanvas(nil, func(c *ui.Context) {
+		ui.Column(c).Width(16).Gap(8).Children(func() {
+			Slider(c, &val, 0, 100, SliderOptions{
+				Label:       "NaN",
+				Step:        nan64,
+				TrackHeight: nan32,
+				ThumbHeight: inf32,
+			})
+			RangeSlider(c, &low, &high, 0, 100, RangeSliderOptions{
+				Label:       "NaNRange",
+				Step:        math.Inf(1),
+				TrackHeight: nan32,
+				ThumbHeight: nan32,
+			})
+		})
+	})
+	if math.IsNaN(val) || val != 0 {
+		t.Fatalf("Slider did not sanitize NaN value: %v", val)
+	}
+	if math.IsNaN(low) || math.IsNaN(high) || low > high || low < 0 || high > 100 {
+		t.Fatalf("RangeSlider produced invalid sanitized values: low=%v high=%v", low, high)
+	}
+	// Focus inside a narrow box (W <= 2*sliderPad) so value indicator checks guard cleanly.
+	tt.Key(0, ui.KeyTab)
+	tt.Advance(300 * time.Millisecond)
+}
+
+func TestRangeSliderClampOrderAndCoincidentCenterDragLTRAndRTL(t *testing.T) {
+	// 1. Out-of-bounds clamp must clamp to [lo, hi] BEFORE enforcing low <= high.
+	low, high := 150.0, 120.0
+	ttClamp := sliderCanvas(nil, func(c *ui.Context) {
+		RangeSlider(c, &low, &high, 0, 100, RangeSliderOptions{Label: "Clamp"})
+	})
+	if low != 100 || high != 100 {
+		t.Fatalf("out-of-bounds clamp gave low=%v high=%v, want 100 100", low, high)
+	}
+	_ = ttClamp
+
+	// 2. Coincident center drag in LTR: dragging left lowers Min; dragging right raises Max.
+	low, high = 50, 50
+	ltr := sliderCanvas(nil, func(c *ui.Context) {
+		RangeSlider(c, &low, &high, 0, 100, RangeSliderOptions{Label: "CoincidentLTR"})
+	})
+	gb := buttonInfo(t, ltr, ui.RoleGroup, "CoincidentLTR").Bounds
+	cx, cy := sliderX(gb, 0.5), gb.Y+gb.H/2
+	ltr.Press(cx, cy)
+	ltr.Move(cx-50, cy)
+	ltr.Release(cx-50, cy)
+	if low >= 50 || high != 50 {
+		t.Fatalf("LTR left drag from coincident center gave low=%v high=%v, want low<50 high=50", low, high)
+	}
+
+	low, high = 50, 50
+	ltr.Frame()
+	ltr.Press(cx, cy)
+	ltr.Move(cx+50, cy)
+	ltr.Release(cx+50, cy)
+	if low != 50 || high <= 50 {
+		t.Fatalf("LTR right drag from coincident center gave low=%v high=%v, want low=50 high>50", low, high)
+	}
+
+	// 3. Coincident center drag in RTL: dragging left raises Max; dragging right lowers Min.
+	low, high = 50, 50
+	rtl := sliderCanvas(nil, func(c *ui.Context) {
+		RangeSlider(c, &low, &high, 0, 100, RangeSliderOptions{Label: "CoincidentRTL"})
+	})
+	rtl.SetDirection(ui.RightToLeft)
+	rgb := buttonInfo(t, rtl, ui.RoleGroup, "CoincidentRTL").Bounds
+	rcx, rcy := sliderX(rgb, 0.5), rgb.Y+rgb.H/2
+	rtl.Press(rcx, rcy)
+	rtl.Move(rcx-50, rcy)
+	rtl.Release(rcx-50, rcy)
+	if low != 50 || high <= 50 {
+		t.Fatalf("RTL left drag from coincident center gave low=%v high=%v, want low=50 high>50", low, high)
+	}
+
+	low, high = 50, 50
+	rtl.Frame()
+	rtl.Press(rcx, rcy)
+	rtl.Move(rcx+50, rcy)
+	rtl.Release(rcx+50, rcy)
+	if low >= 50 || high != 50 {
+		t.Fatalf("RTL right drag from coincident center gave low=%v high=%v, want low<50 high=50", low, high)
 	}
 }

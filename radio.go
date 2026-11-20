@@ -269,7 +269,7 @@ func RadioGroup(c *ui.Context, fn func(), opts ...RadioGroupOptions) ui.Element 
 		o = opts[0]
 	}
 
-	el := ui.RadioGroup(c, fn)
+	el := ui.RadioGroup(c, func() {}).DimDisabled(false)
 	if o.Label != "" {
 		el.Label(o.Label)
 	}
@@ -280,6 +280,9 @@ func RadioGroup(c *ui.Context, fn func(), opts ...RadioGroupOptions) ui.Element 
 	}
 	if o.Disabled {
 		el.Disabled(true)
+	}
+	if fn != nil {
+		el.Children(fn)
 	}
 	return el
 }

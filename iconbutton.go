@@ -109,6 +109,7 @@ func IconButton(c *ui.Context, label string, icon IconDraw, opts ...IconButtonOp
 	}
 
 	th := CurrentTheme(c)
+	o.Size = normalizeSizeTier(o.Size)
 	spec := tierSpec(o.Size)
 	w := iconWidthOf(o.Size, o.Width)
 	rest := actionRadius(w, spec, o.Shape, false)
@@ -184,6 +185,7 @@ func ToggleIconButton(c *ui.Context, on *bool, label string, icon IconDraw, opts
 	}
 
 	th := CurrentTheme(c)
+	o.Size = normalizeSizeTier(o.Size)
 	spec := tierSpec(o.Size)
 	w := iconWidthOf(o.Size, o.Width)
 	// The base is the element that takes the key: build it first.

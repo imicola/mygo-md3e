@@ -331,3 +331,43 @@ func iconInkCenter(t *testing.T, tt *ui.Tester, box ui.Rect, col ui.Color) float
 	}
 	return float32(sum) / float32(n)
 }
+
+func TestInputChipAncestorDisabledPropagation(t *testing.T) {
+	th := ThemeFromSeed(ui.Hex("#6750A4"))
+	var clicks, removes int
+	tt := chipCanvas(th, func(c *ui.Context) {
+		ui.Row(c).Disabled(true).DimDisabled(false).Children(func() {
+			InputChip(c, "Tag", InputChipOptions{
+				OnClick:  func() { clicks++ },
+				OnRemove: func() { removes++ },
+			})
+		})
+	})
+
+	ttDirect := chipCanvas(th, func(c *ui.Context) {
+		InputChip(c, "Tag", InputChipOptions{
+			Disabled: true,
+			OnClick:  func() {},
+			OnRemove: func() {},
+		})
+	})
+
+	body := chipBox(t, tt, ui.RoleButton, "Tag")
+	rm := buttonInfo(t, tt, ui.RoleButton, "Remove Tag")
+	if !body.Disabled || !rm.Disabled {
+		t.Fatalf("ancestor-disabled InputChip buttons should be disabled: body=%v remove=%v", body.Disabled, rm.Disabled)
+	}
+	tt.ClickAt(body.Bounds.X+body.Bounds.W/2, body.Bounds.Y+body.Bounds.H/2)
+	tt.ClickAt(rm.Bounds.X+rm.Bounds.W/2, rm.Bounds.Y+rm.Bounds.H/2)
+	if clicks != 0 || removes != 0 {
+		t.Fatalf("disabled InputChip triggered callbacks: clicks=%d removes=%d", clicks, removes)
+	}
+	// Pixel comparison: ancestor-disabled outline matches standalone disabled InputChip outline
+	// without double-dimming the container.
+	directBody := chipBox(t, ttDirect, ui.RoleButton, "Tag")
+	gotTop := tt.Image().RGBAAt(int(body.Bounds.X+body.Bounds.W/2), int(body.Bounds.Y))
+	wantTop := ttDirect.Image().RGBAAt(int(directBody.Bounds.X+directBody.Bounds.W/2), int(directBody.Bounds.Y))
+	if absColorDiff(gotTop, wantTop) > 6 {
+		t.Fatalf("ancestor-disabled InputChip top outline %+v != standalone disabled %+v", gotTop, wantTop)
+	}
+}

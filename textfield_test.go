@@ -499,10 +499,9 @@ func TestTextFieldDisabledAndReduceMotion(t *testing.T) {
 	rm.SetPreferences(ui.Preferences{ReduceMotion: true})
 	rmInfo := buttonInfo(t, rm, ui.RoleTextField, "Email")
 	rm.ClickAt(rmInfo.Bounds.X+20, rmInfo.Bounds.Y+12)
-	if !rm.FramePending() {
-		// A Snap animation still asks for one frame to reach its target.
+	if rm.FramePending() {
+		t.Fatal("ReduceMotion field should converge on the first frame without pending frames")
 	}
-	rm.Frame()
 	rm.Advance(100 * time.Millisecond)
 	if rm.FramePending() {
 		t.Fatal("ReduceMotion field should not ask for animation frames")
@@ -602,5 +601,86 @@ func TestTextFieldSiblingAndDynamicKeys(t *testing.T) {
 	list.Type("world")
 	if items[1].text != "world" || items[0].text != "hello" {
 		t.Fatalf("reordered text areas edited the wrong items: %q %q", items[0].text, items[1].text)
+	}
+}
+
+func TestTextFieldUTF16CounterErrorSupportAndTrailingKey(t *testing.T) {
+	// 1. Non-BMP emoji counts as 2 UTF-16 code units, matching MaxLength.
+	emojiVal := "😀"
+	tt := fieldCanvas(nil, func(c *ui.Context) {
+		TextField(c, &emojiVal, TextFieldOptions{
+			Label:            "Emoji",
+			MaxLength:        2,
+			CharacterCounter: true,
+			Error:            true,
+			SupportingText:   "Use work email",
+			Prefix:           "$",
+			TrailingIcon:     mdicon.Clear.Draw,
+			TrailingLabel:    "Clear",
+			OnTrailing:       func() { emojiVal = "" },
+		})
+	})
+	if _, ok := tt.Find("2/2"); !ok {
+		t.Fatal("expected UTF-16 character counter \"2/2\" for astral emoji")
+	}
+
+	// 2. Error=true with empty ErrorMessage keeps SupportingText as accessible description.
+	info := buttonInfo(t, tt, ui.RoleTextField, "Emoji")
+	if !info.Invalid || !strings.Contains(info.Description, "Use work email") {
+		t.Fatalf("expected invalid=true and supporting Description, got invalid=%v desc=%q", info.Invalid, info.Description)
+	}
+
+	// 3. Focusing Trailing button then activating OnTrailing clears value and removes Prefix/Suffix:
+	// Trailing must retain focus because it is keyed explicitly.
+	tt.Key(0, ui.KeyTab)
+	for !tt.Focused("Clear") {
+		tt.Key(0, ui.KeyTab)
+	}
+	emojiVal = ""
+	tt.Frame()
+	if !tt.Focused("Clear") {
+		t.Fatal("TextField trailing button lost focus when affix disappeared")
+	}
+}
+
+func TestTextFieldTextScaleAndNarrowLabelTruncation(t *testing.T) {
+	thBig := ThemeFromSeed(ui.Hex("#6750A4"), ThemeOptions{TextScale: 1.5, ReduceMotion: true})
+	val := ""
+	ttBig := fieldCanvas(thBig, func(c *ui.Context) {
+		ui.Column(c).Width(240).Children(func() {
+			TextField(c, &val, TextFieldOptions{
+				Label:          "Email",
+				SupportingText: "Helper",
+				Variant:        TextFieldOutlined,
+			})
+		})
+	})
+	scaledField, bigInfo := fieldRect(t, ttBig, "Email", textFieldHeight*1.5)
+	if bigInfo.Bounds.H <= 24 {
+		t.Fatalf("scaled TextField input did not expand for TextScale 1.5: h=%v", bigInfo.Bounds.H)
+	}
+	if !topEdgeHas(ttBig, scaledField.X+60, scaledField.Y, thBig.Colors.Outline, 70) {
+		t.Fatalf("expected scaled outlined border at height %v (y=%v)", textFieldHeight*1.5, scaledField.Y)
+	}
+	if !topEdgeHas(ttBig, scaledField.X+60, scaledField.Y+scaledField.H-1, thBig.Colors.Outline, 70) {
+		t.Fatalf("expected scaled outlined bottom border at height %v", scaledField.H)
+	}
+
+	// Narrow outlined TextField truncates long label with ellipsis cleanly inside bounds.
+	ttNarrow := fieldCanvas(nil, func(c *ui.Context) {
+		ui.Column(c).Width(100).Children(func() {
+			TextField(c, &val, TextFieldOptions{
+				Label:        "Very Long Descriptive Field Label",
+				Variant:      TextFieldOutlined,
+				TrailingIcon: mdicon.Search.Draw,
+			})
+		})
+	})
+	field, _ := fieldRect(t, ttNarrow, "Very Long Descriptive Field Label", textFieldHeight)
+	th := ThemeFromSeed(ui.Hex("#6750A4"))
+	// Zero label ink outside the right boundary of the narrow field box.
+	outside := ui.Rect{X: field.X + field.W + 2, Y: field.Y - 12, W: 140, H: field.H + 20}
+	if n, _, _ := inkIn(ttNarrow, outside, th.Colors.OnSurfaceVariant, 70); n > 0 {
+		t.Fatalf("narrow TextField label spilled outside bounds: %d ink pixels to the right", n)
 	}
 }

@@ -2,7 +2,7 @@ package md3e
 
 import (
 	"fmt"
-	"unicode/utf8"
+	"unicode/utf16"
 
 	"github.com/egoist/mygo/ui"
 
@@ -99,10 +99,9 @@ type TextFieldOptions struct {
 // c.Key on the TextField or TextArea stays on the outer element while the
 // stateful input base keeps its own stable identity in that row. Sibling
 // fields may share the key: each input sits under its own field row.
-type textFieldInputKey struct{}
-
-// TextField animation channels.
 type (
+	textFieldInputKey     struct{}
+	textFieldTrailingKey  struct{}
 	textFieldLabelKey     struct{}
 	textFieldIndicatorKey struct{}
 )
@@ -165,10 +164,11 @@ func buildTextField(c *ui.Context, value *string, multiline bool, o TextFieldOpt
 	cs := th.Colors
 	rtl := c.Direction() == ui.RightToLeft
 	outlined := o.Variant == TextFieldOutlined
+	scaleUp := max(float32(1), th.EffectiveTextScale())
 
-	outer := ui.Column(c).Shrink(0)
+	outer := ui.Column(c).Shrink(0).DimDisabled(false)
 	if outlined {
-		outer.Padding(textFieldOuterTop, 0, 0, 0)
+		outer.Padding(textFieldOuterTop*scaleUp, 0, 0, 0)
 	}
 	disabled := o.Disabled || outer.IsDisabled()
 
@@ -179,13 +179,13 @@ func buildTextField(c *ui.Context, value *string, multiline bool, o TextFieldOpt
 		variationInk = contentInk
 	}
 
-	fieldH := float32(textFieldHeight)
+	fieldH := float32(textFieldHeight) * scaleUp
 	if multiline {
 		fieldH = o.Height
 		if fieldH <= 0 {
-			fieldH = textAreaHeight
+			fieldH = textAreaHeight * scaleUp
 		}
-		fieldH = max(fieldH, textFieldHeight)
+		fieldH = max(fieldH, float32(textFieldHeight)*scaleUp)
 	}
 
 	var (
@@ -213,7 +213,7 @@ func buildTextField(c *ui.Context, value *string, multiline bool, o TextFieldOpt
 			field.Radius(textFieldRadius, textFieldRadius, 0, 0)
 		}
 		if multiline {
-			field.Padding(textFieldIconSize, 0, 8, 0)
+			field.Padding(textFieldIconSize*scaleUp, 0, 8*scaleUp, 0)
 		}
 		field.PaddingStart(textFieldPad).PaddingEnd(textFieldPad)
 		// Affixes show while the field is focused or holds text. The focus is
@@ -261,11 +261,13 @@ func buildTextField(c *ui.Context, value *string, multiline bool, o TextFieldOpt
 				input.Label(name)
 			}
 			if o.Error {
-				// aria-invalid first, and the message as the field's error
-				// relation, so assistive technology reads why.
+				// aria-invalid first, and the error or fallback supporting description
+				// relation so assistive technology always receives context.
 				input.Invalid(true)
 				if o.ErrorMessage != "" {
 					input.Error(o.ErrorMessage)
+				} else if o.SupportingText != "" {
+					input.Description(o.SupportingText)
 				}
 			} else if o.SupportingText != "" {
 				input.Description(o.SupportingText)
@@ -277,7 +279,7 @@ func buildTextField(c *ui.Context, value *string, multiline bool, o TextFieldOpt
 			if o.TrailingIcon != nil {
 				if o.OnTrailing != nil {
 					hasTrailing = true
-					trailing = ui.ButtonBase(c).
+					trailing = ui.ButtonBase(c.Key(textFieldTrailingKey{})).
 						DimDisabled(false).
 						FocusRing(false).
 						Size(40, 40).
@@ -359,6 +361,10 @@ func buildTextField(c *ui.Context, value *string, multiline bool, o TextFieldOpt
 	}
 	label := o.Label
 	style := labelStyle
+	hasEndIcon := o.TrailingIcon != nil
+	isErr := o.Error
+	restCenterOffset := float32(textFieldHeight) * scaleUp / 2
+	floatOffset := 12 * scaleUp
 	field.Draw(func(p *ui.Painter, r ui.Rect) {
 		if r.W <= 0 || r.H <= 0 {
 			return
@@ -367,15 +373,39 @@ func buildTextField(c *ui.Context, value *string, multiline bool, o TextFieldOpt
 			radii := [4]float32{textFieldRadius, textFieldRadius, 0, 0}
 			p.FillRadii(ui.Rect{X: r.X, Y: r.Y, W: r.W, H: r.H}, radii, bg)
 		}
-		w, _ := p.MeasureText(0, labelSpan(label, labelColor, style))
 		sc := 1 - (1-textFieldFloatScale)*labelT
 		anchor := r.X + labelInset
 		if rtl {
 			anchor = r.X + r.W - labelInset
 		}
+		floatCenter := r.Y + floatOffset
 		if outlined {
-			if label != "" && labelT > 0.001 {
-				notchW := w*sc + 2*textFieldNotchPad*labelT
+			floatCenter = r.Y
+		}
+
+		var drawLabel string
+		var labelW float32
+		var clipR ui.Rect
+		if label != "" {
+			restEndInset := float32(textFieldPad)
+			if hasEndIcon {
+				restEndInset += textFieldIconSize + textFieldGap
+			}
+			endInset := restEndInset + (float32(textFieldPad)-restEndInset)*clampF32(labelT, 0, 1)
+			maxLabelW := max(0, r.W-labelInset-endInset)
+			drawLabel, labelW = fitTextFieldLabel(p, label, labelColor, style, maxLabelW, sc)
+			clipX := anchor
+			if rtl {
+				clipX = r.X + endInset
+			}
+			clipY := min(r.Y, floatCenter) - style.LineHeight - 4
+			clipH := max(r.H, restCenterOffset+style.LineHeight) + style.LineHeight*2 + 8
+			clipR = ui.Rect{X: clipX, Y: clipY, W: maxLabelW + 1, H: clipH}
+		}
+
+		if outlined {
+			if drawLabel != "" && labelT > 0.001 {
+				notchW := labelW*sc + 2*textFieldNotchPad*labelT
 				var notchStart, notchEnd float32
 				if rtl {
 					notchEnd = anchor + textFieldNotchPad*labelT
@@ -384,13 +414,19 @@ func buildTextField(c *ui.Context, value *string, multiline bool, o TextFieldOpt
 					notchStart = anchor - textFieldNotchPad*labelT
 					notchEnd = notchStart + notchW
 				}
-				if path := outlinedFieldPath(r, textFieldRadius, notchStart, notchEnd); path != nil {
-					p.StrokePath(path, outlinedWidth(o.Error, focused), borderInk)
+				notchStart = max(notchStart, r.X+textFieldRadius)
+				notchEnd = min(notchEnd, r.X+r.W-textFieldRadius)
+				if notchEnd > notchStart {
+					if path := outlinedFieldPath(r, textFieldRadius, notchStart, notchEnd); path != nil {
+						p.StrokePath(path, outlinedWidth(isErr, focused), borderInk)
+					} else {
+						p.Stroke(r, borderInk, textFieldRadius, outlinedWidth(isErr, focused))
+					}
 				} else {
-					p.Stroke(r, borderInk, textFieldRadius, outlinedWidth(o.Error, focused))
+					p.Stroke(r, borderInk, textFieldRadius, outlinedWidth(isErr, focused))
 				}
 			} else {
-				p.Stroke(r, borderInk, textFieldRadius, outlinedWidth(o.Error, focused))
+				p.Stroke(r, borderInk, textFieldRadius, outlinedWidth(isErr, focused))
 			}
 		} else {
 			indicator := cs.OnSurfaceVariant
@@ -398,7 +434,7 @@ func buildTextField(c *ui.Context, value *string, multiline bool, o TextFieldOpt
 				indicator = cs.OnSurface.Alpha(float32(tokens.DisabledContentOpacity))
 			}
 			h := float32(1)
-			if !o.Error {
+			if !isErr {
 				p.Fill(ui.Rect{X: r.X, Y: r.Y + r.H - h, W: r.W, H: h}, indicator, 0)
 				if indicatorT > 0.001 {
 					activeW := r.W * indicatorT
@@ -417,12 +453,8 @@ func buildTextField(c *ui.Context, value *string, multiline bool, o TextFieldOpt
 				p.Fill(ui.Rect{X: r.X, Y: r.Y + r.H - h, W: r.W, H: h}, disabledContent(disabled, cs.Error), 0)
 			}
 		}
-		if label != "" {
-			floatCenter := r.Y + 12
-			if outlined {
-				floatCenter = r.Y
-			}
-			drawTextFieldLabel(p, r, label, labelColor, style, labelT, anchor, floatCenter, rtl)
+		if drawLabel != "" {
+			drawTextFieldLabel(p, r, drawLabel, labelW, labelColor, style, labelT, anchor, floatCenter, restCenterOffset, clipR, rtl)
 		}
 	})
 
@@ -434,7 +466,7 @@ func buildTextField(c *ui.Context, value *string, multiline bool, o TextFieldOpt
 		}
 		counter := ""
 		if o.CharacterCounter && o.MaxLength > 0 {
-			counter = fmt.Sprintf("%d/%d", utf8.RuneCountInString(*value), o.MaxLength)
+			counter = fmt.Sprintf("%d/%d", utf16Len(*value), o.MaxLength)
 		}
 		if o.Error && o.ErrorMessage != "" {
 			text = o.ErrorMessage
@@ -445,7 +477,7 @@ func buildTextField(c *ui.Context, value *string, multiline bool, o TextFieldOpt
 		}
 		outer.Children(func() {
 			row := ui.Row(c).
-				Height(textFieldSupportH).
+				Height(textFieldSupportH*scaleUp).
 				PaddingX(textFieldPad).
 				Gap(textFieldGap).
 				Margin(textFieldSupportGap, 0, 0, 0).
@@ -484,18 +516,60 @@ func labelSpan(text string, ink ui.Color, style TypeStyleMetrics) ui.Span {
 	}
 }
 
+func utf16Len(s string) int {
+	n := 0
+	for _, r := range s {
+		if rl := utf16.RuneLen(r); rl > 0 {
+			n += rl
+		} else {
+			n++
+		}
+	}
+	return n
+}
+
+func fitTextFieldLabel(p *ui.Painter, text string, ink ui.Color, style TypeStyleMetrics, maxScaledW, sc float32) (string, float32) {
+	if text == "" || !(maxScaledW > 0) || sc <= 0 {
+		return "", 0
+	}
+	w, _ := p.MeasureText(0, labelSpan(text, ink, style))
+	if w*sc <= maxScaledW {
+		return text, w
+	}
+	ellW, _ := p.MeasureText(0, labelSpan("…", ink, style))
+	if ellW*sc > maxScaledW {
+		return "", 0
+	}
+	runes := []rune(text)
+	lo, hi := 0, len(runes)
+	best := "…"
+	bestW := ellW
+	for lo <= hi {
+		mid := (lo + hi) / 2
+		cand := string(runes[:mid]) + "…"
+		cw, _ := p.MeasureText(0, labelSpan(cand, ink, style))
+		if cw*sc <= maxScaledW {
+			best = cand
+			bestW = cw
+			lo = mid + 1
+		} else {
+			hi = mid - 1
+		}
+	}
+	return best, bestW
+}
+
 // drawTextFieldLabel paints a field's floating label at progress t, anchored at
 // anchor (the content start, or its right edge right to left). floatCenter is
 // where the label's middle rests when floated: inside the top of a filled
 // field, or on the border of an outlined one.
-func drawTextFieldLabel(p *ui.Painter, r ui.Rect, text string, ink ui.Color, style TypeStyleMetrics, t, anchor, floatCenter float32, rtl bool) {
-	if style.LineHeight <= 0 {
+func drawTextFieldLabel(p *ui.Painter, r ui.Rect, text string, w float32, ink ui.Color, style TypeStyleMetrics, t, anchor, floatCenter, restCenterOffset float32, clipR ui.Rect, rtl bool) {
+	if style.LineHeight <= 0 || text == "" {
 		return
 	}
-	w, _ := p.MeasureText(0, labelSpan(text, ink, style))
 	t = clampF32(t, 0, 1.1)
 	sc := 1 - (1-textFieldFloatScale)*t
-	restCenter := r.Y + 28
+	restCenter := r.Y + restCenterOffset
 	y0 := restCenter - style.LineHeight/2
 	y1 := floatCenter - style.LineHeight*sc/2
 	y := y0 + (y1-y0)*t
@@ -503,9 +577,16 @@ func drawTextFieldLabel(p *ui.Painter, r ui.Rect, text string, ink ui.Color, sty
 	if rtl {
 		x = anchor - w*sc
 	}
-	p.Transform(ui.Scaling(sc, sc), x, y, func() {
-		p.RichText(x, y, 0, labelSpan(text, ink, style))
-	})
+	paintLabel := func() {
+		p.Transform(ui.Scaling(sc, sc), x, y, func() {
+			p.RichText(x, y, 0, labelSpan(text, ink, style))
+		})
+	}
+	if clipR.W > 0 && clipR.H > 0 {
+		p.Clip(clipR, 0, paintLabel)
+		return
+	}
+	paintLabel()
 }
 
 // outlinedWidth returns a text field border's stroke width: 2 DIP while

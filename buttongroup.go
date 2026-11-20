@@ -124,6 +124,7 @@ func buttonGroupOptions(opts []ButtonGroupOptions) ButtonGroupOptions {
 
 func buildButtonGroup(c *ui.Context, items []ButtonGroupItem, o ButtonGroupOptions, isActive func(i int) bool, choose func(i int), act func(i int)) ui.Element {
 	th := CurrentTheme(c)
+	o.Size = normalizeSizeTier(o.Size)
 	spec := tierSpec(o.Size)
 	rtl := c.Direction() == ui.RightToLeft
 	selectable := choose != nil

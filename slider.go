@@ -58,12 +58,9 @@ type SliderOptions struct {
 
 // AnimateTo channels and locals of a slider.
 type (
-	sliderDragKey       struct{}
 	sliderThumbWidthKey struct{}
 	sliderHaloKey       struct{}
 	sliderIndicatorKey  struct{}
-
-	sliderDragState struct{ held bool }
 
 	sliderPaint struct {
 		value       float64
@@ -108,13 +105,19 @@ func Slider(c *ui.Context, value *float64, lo, hi float64, opts ...SliderOptions
 	if value == nil {
 		panic("md3e: Slider requires a non-nil *float64")
 	}
-	if !(hi > lo) {
-		panic("md3e: Slider requires hi > lo")
+	if math.IsNaN(lo) || math.IsInf(lo, 0) || math.IsNaN(hi) || math.IsInf(hi, 0) || !(hi > lo) {
+		panic("md3e: Slider requires finite hi > lo")
 	}
 	var o SliderOptions
 	if len(opts) == 1 {
 		o = opts[0]
 	}
+
+	step := o.Step
+	if math.IsNaN(step) || math.IsInf(step, 0) || step <= 0 {
+		step = 0
+	}
+	*value = clampRangeValue(*value, lo, hi)
 
 	th := CurrentTheme(c)
 	cs := th.Colors
@@ -126,8 +129,8 @@ func Slider(c *ui.Context, value *float64, lo, hi float64, opts ...SliderOptions
 		Height(sliderHeight).
 		MinWidth(sliderDefaultWidth).
 		PaddingX(sliderPad)
-	if o.Step > 0 {
-		el.Step(o.Step)
+	if step > 0 {
+		el.Step(step)
 	}
 	if o.Label != "" {
 		el.Label(o.Label)
@@ -135,22 +138,9 @@ func Slider(c *ui.Context, value *float64, lo, hi float64, opts ...SliderOptions
 	disabled := o.Disabled || el.IsDisabled()
 	el.Disabled(o.Disabled)
 
-	st := ui.Local(el, sliderDragKey{}, func() sliderDragState { return sliderDragState{} })
-	el.ObserveInput(func(ev ui.InputEvent) {
-		if disabled {
-			return
-		}
-		switch ev.Kind {
-		case ui.InputPointerDown:
-			if ev.Button == 0 {
-				st.held = true
-			}
-		case ui.InputPointerUp:
-			if ev.Button == 0 {
-				st.held = false
-			}
-		}
-	})
+	btn, ok := el.PressedButton()
+	_, _, dragging := el.Dragged()
+	held := !disabled && ((ok && btn == 0) || dragging)
 
 	spatial := th.Animation(motion.FastSpatial)
 	effects := th.Animation(motion.FastEffects)
@@ -173,18 +163,18 @@ func Slider(c *ui.Context, value *float64, lo, hi float64, opts ...SliderOptions
 	}
 
 	trackH := o.TrackHeight
-	if trackH <= 0 {
+	if math.IsNaN(float64(trackH)) || math.IsInf(float64(trackH), 0) || !(trackH > 0) {
 		trackH = sliderTrackHeight
 	}
 	trackH = clampF32(trackH, 4, sliderHeight-8)
 	thumbH := o.ThumbHeight
-	if thumbH <= 0 {
+	if math.IsNaN(float64(thumbH)) || math.IsInf(float64(thumbH), 0) || !(thumbH > 0) {
 		thumbH = sliderThumbHeight
 	}
 	thumbH = clampF32(thumbH, 8, sliderHeight)
 
 	focused := el.FocusVisible()
-	engaged := !disabled && (st.held || focused)
+	engaged := !disabled && (held || focused)
 	thumbTarget := float32(sliderThumbWidth)
 	if engaged {
 		thumbTarget = sliderThumbPressed
@@ -194,7 +184,7 @@ func Slider(c *ui.Context, value *float64, lo, hi float64, opts ...SliderOptions
 	haloTarget := float32(0)
 	switch {
 	case disabled:
-	case st.held, el.Pressed():
+	case held, el.Pressed():
 		haloTarget = float32(0.10)
 	case focused:
 		haloTarget = float32(0.10)
@@ -208,7 +198,7 @@ func Slider(c *ui.Context, value *float64, lo, hi float64, opts ...SliderOptions
 		value:       *value,
 		lo:          lo,
 		hi:          hi,
-		step:        o.Step,
+		step:        step,
 		centered:    o.Centered,
 		rtl:         rtl,
 		trackH:      trackH,
@@ -228,13 +218,13 @@ func Slider(c *ui.Context, value *float64, lo, hi float64, opts ...SliderOptions
 	})
 
 	if indicator > 0.02 {
-		if b := el.Bounds(); b.W > 0 {
+		if b := el.Bounds(); b.W > 2*sliderPad {
 			f := sliderFraction(*value, lo, hi)
 			if rtl {
 				f = 1 - f
 			}
 			tx := b.X + sliderPad + (b.W-2*sliderPad)*f
-			text := sliderValueText(*value, o.Step, o.FormatLabel)
+			text := sliderValueText(*value, step, o.FormatLabel)
 			showValueIndicator(c, th, text, tx, b.Y, indicator)
 		}
 	}
@@ -243,8 +233,14 @@ func Slider(c *ui.Context, value *float64, lo, hi float64, opts ...SliderOptions
 
 // sliderFraction returns (v-lo)/(hi-lo) clamped to 0..1.
 func sliderFraction(v, lo, hi float64) float32 {
-	if hi <= lo {
+	if math.IsNaN(v) || math.IsNaN(lo) || math.IsNaN(hi) || math.IsInf(lo, 0) || math.IsInf(hi, 0) || !(hi > lo) {
 		return 0
+	}
+	if v <= lo {
+		return 0
+	}
+	if v >= hi {
+		return 1
 	}
 	return clampF32(float32((v-lo)/(hi-lo)), 0, 1)
 }
@@ -510,15 +506,25 @@ func RangeSlider(c *ui.Context, low, high *float64, lo, hi float64, opts ...Rang
 	if low == nil || high == nil {
 		panic("md3e: RangeSlider requires non-nil *float64 handles")
 	}
-	if !(hi > lo) {
-		panic("md3e: RangeSlider requires hi > lo")
+	if math.IsNaN(lo) || math.IsInf(lo, 0) || math.IsNaN(hi) || math.IsInf(hi, 0) || !(hi > lo) {
+		panic("md3e: RangeSlider requires finite hi > lo")
 	}
 	var o RangeSliderOptions
 	if len(opts) == 1 {
 		o = opts[0]
 	}
 
-	*low, *high = math.Max(lo, math.Min(*low, *high)), math.Min(hi, math.Max(*low, *high))
+	step := o.Step
+	if math.IsNaN(step) || math.IsInf(step, 0) || step <= 0 {
+		step = 0
+	}
+
+	l := clampRangeValue(*low, lo, hi)
+	h := clampRangeValue(*high, lo, hi)
+	if l > h {
+		l = h
+	}
+	*low, *high = l, h
 
 	th := CurrentTheme(c)
 	cs := th.Colors
@@ -538,7 +544,6 @@ func RangeSlider(c *ui.Context, low, high *float64, lo, hi float64, opts ...Rang
 
 	minName := labelOr(o.MinLabel, "Min")
 	maxName := labelOr(o.MaxLabel, "Max")
-	step := o.Step
 	keyStep := step
 	if keyStep <= 0 {
 		keyStep = (hi - lo) / 100
@@ -553,69 +558,96 @@ func RangeSlider(c *ui.Context, low, high *float64, lo, hi float64, opts ...Rang
 
 	drags := ui.Local(el, rangeDragKey{}, func() rangeDragState { return rangeDragState{knob: -1} })
 	if !disabled {
-		var lowDrag, highDrag bool
+		var ldx, hdx, cdx float32
+		var lowDrag, highDrag, containerDrag bool
 		if lowEl.Valid() {
-			_, _, lowDrag = lowEl.Dragged()
+			ldx, _, lowDrag = lowEl.Dragged()
 		}
 		if highEl.Valid() {
-			_, _, highDrag = highEl.Dragged()
+			hdx, _, highDrag = highEl.Dragged()
 		}
-		dx, _, containerDrag := el.Dragged()
-		switch {
-		case lowDrag:
-			drags.knob = 0
-		case highDrag:
-			drags.knob = 1
-		case !containerDrag:
+		cdx, _, containerDrag = el.Dragged()
+		anyDrag := lowDrag || highDrag || containerDrag
+		dragDX := cdx
+		if lowDrag {
+			dragDX = ldx
+		} else if highDrag {
+			dragDX = hdx
+		}
+		if !anyDrag {
 			drags.knob = -1
-		}
-		if drags.knob >= 0 || containerDrag {
-			if b := el.Bounds(); b.W > 0 {
-				px, _, _ := el.PointerPosition()
-				contentW := b.W - 2*sliderPad
-				if contentW > 0 {
-					f := clampF32((px-sliderPad)/contentW, 0, 1)
+		} else if b := el.Bounds(); b.W > 2*sliderPad {
+			px, _, _ := el.PointerPosition()
+			contentW := b.W - 2*sliderPad
+			f := clampF32((px-sliderPad)/contentW, 0, 1)
+			if rtl {
+				f = 1 - f
+			}
+			pv := lo + float64(f)*(hi-lo)
+			if drags.knob < 0 {
+				if *low == *high {
+					// When both handles coincide, highEl overlays lowEl in z-order. Do not
+					// let highEl blindly preempt the drag; decide by drag direction first.
+					delta := dragDX
 					if rtl {
-						f = 1 - f
+						delta = -delta
 					}
-					pv := lo + float64(f)*(hi-lo)
-					if containerDrag && !lowDrag && !highDrag && drags.knob < 0 {
-						// The handle nearest the pointer, not crossing the other;
-						// on equal values the drag's direction picks one, so the
-						// pair can always be pulled apart, right to left too.
-						if *low == *high {
-							delta := dx
-							if rtl {
-								delta = -dx
-							}
-							switch {
-							case delta < 0:
-								drags.knob = 0
-							case delta > 0:
-								drags.knob = 1
-							}
-						} else if math.Abs(pv-*low) <= math.Abs(pv-*high) {
+					switch {
+					case delta < 0:
+						if *low > lo {
 							drags.knob = 0
-						} else {
+						}
+					case delta > 0:
+						if *high < hi {
 							drags.knob = 1
 						}
-						if drags.knob == 0 && lowEl.Valid() {
-							lowEl.Focus(ui.FocusOptions{PreventScroll: true})
-						} else if drags.knob == 1 && highEl.Valid() {
-							highEl.Focus(ui.FocusOptions{PreventScroll: true})
+					case !lowDrag && !highDrag && containerDrag:
+						if pv < *low {
+							drags.knob = 0
+						} else if pv > *high {
+							drags.knob = 1
 						}
 					}
-					switch drags.knob {
-					case 0:
-						*low = clampRangeValue(snapRangeValue(pv, lo, hi, step), lo, *high)
-					case 1:
-						*high = clampRangeValue(snapRangeValue(pv, lo, hi, step), *low, hi)
+				} else {
+					switch {
+					case lowDrag:
+						drags.knob = 0
+					case highDrag:
+						drags.knob = 1
+					case math.Abs(pv-*low) <= math.Abs(pv-*high):
+						drags.knob = 0
+					default:
+						drags.knob = 1
 					}
 				}
+				if drags.knob == 0 && lowEl.Valid() {
+					lowEl.Focus(ui.FocusOptions{PreventScroll: true})
+				} else if drags.knob == 1 && highEl.Valid() {
+					highEl.Focus(ui.FocusOptions{PreventScroll: true})
+				}
+			}
+			switch drags.knob {
+			case 0:
+				*low = clampRangeValue(snapRangeValue(pv, lo, hi, step), lo, *high)
+			case 1:
+				*high = clampRangeValue(snapRangeValue(pv, lo, hi, step), *low, hi)
 			}
 		}
 	} else {
 		drags.knob = -1
+	}
+
+	if lowEl.Valid() {
+		lf := sliderFraction(*low, lo, hi)
+		lowEl.StartPercent(lf * 100).
+			MarginStart(-sliderHitWidth * lf).
+			Range(lo, *high, *low)
+	}
+	if highEl.Valid() {
+		hf := sliderFraction(*high, lo, hi)
+		highEl.StartPercent(hf * 100).
+			MarginStart(-sliderHitWidth * hf).
+			Range(*low, hi, *high)
 	}
 
 	spatial := th.Animation(motion.FastSpatial)
@@ -665,12 +697,12 @@ func RangeSlider(c *ui.Context, low, high *float64, lo, hi float64, opts ...Rang
 	}
 
 	trackH := o.TrackHeight
-	if trackH <= 0 {
+	if math.IsNaN(float64(trackH)) || math.IsInf(float64(trackH), 0) || !(trackH > 0) {
 		trackH = sliderTrackHeight
 	}
 	trackH = clampF32(trackH, 4, sliderHeight-8)
 	thumbH := o.ThumbHeight
-	if thumbH <= 0 {
+	if math.IsNaN(float64(thumbH)) || math.IsInf(float64(thumbH), 0) || !(thumbH > 0) {
 		thumbH = sliderThumbHeight
 	}
 	thumbH = clampF32(thumbH, 8, sliderHeight)
@@ -702,7 +734,7 @@ func RangeSlider(c *ui.Context, low, high *float64, lo, hi float64, opts ...Rang
 	})
 
 	if indicator > 0.02 && activeKnob >= 0 {
-		if b := el.Bounds(); b.W > 0 {
+		if b := el.Bounds(); b.W > 2*sliderPad {
 			v := *high
 			if activeKnob == 0 {
 				v = *low
@@ -712,7 +744,7 @@ func RangeSlider(c *ui.Context, low, high *float64, lo, hi float64, opts ...Rang
 				f = 1 - f
 			}
 			tx := b.X + sliderPad + (b.W-2*sliderPad)*f
-			text := sliderValueText(v, o.Step, o.FormatLabel)
+			text := sliderValueText(v, step, o.FormatLabel)
 			showValueIndicator(c, th, text, tx, b.Y, indicator)
 		}
 	}
@@ -737,7 +769,7 @@ func rangeThumb(c *ui.Context, name string, value *float64, lo, hi, from, to, st
 		FocusRing(false).
 		Role(ui.RoleSlider).
 		Label(name).
-		Range(lo, hi, *value).
+		Range(from, to, *value).
 		Step(step)
 
 	back, forth := ui.KeyLeft, ui.KeyRight
@@ -881,7 +913,10 @@ func drawThumbFocus(p *ui.Painter, cx, cy, thumbW, thumbH float32, ink ui.Color)
 // snapRangeValue snaps v to lo and its multiples of step, as ui's sliders do,
 // leaving v alone for a step of zero.
 func snapRangeValue(v, lo, hi, step float64) float64 {
-	if step <= 0 {
+	if math.IsNaN(v) {
+		return lo
+	}
+	if math.IsNaN(step) || math.IsInf(step, 0) || step <= 0 {
 		return clampRangeValue(v, lo, hi)
 	}
 	v = lo + math.Round((v-lo)/step)*step
@@ -893,7 +928,7 @@ func snapRangeValue(v, lo, hi, step float64) float64 {
 
 // clampRangeValue limits v to the closed interval lo..hi.
 func clampRangeValue(v, lo, hi float64) float64 {
-	if v < lo {
+	if math.IsNaN(v) || v < lo {
 		return lo
 	}
 	if v > hi {

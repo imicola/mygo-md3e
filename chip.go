@@ -338,10 +338,10 @@ func InputChip(c *ui.Context, label string, opts ...InputChipOptions) ui.Element
 	th := CurrentTheme(c)
 	cs := th.Colors
 	rtl := c.Direction() == ui.RightToLeft
-	disabled := o.Disabled
+	outer := ui.Row(c).Height(chipHeight).Shrink(0).DimDisabled(false)
+	disabled := o.Disabled || outer.IsDisabled()
 
 	pal := chipPaletteOf(th, o.Elevated, false, disabled)
-	outer := ui.Row(c).Height(chipHeight).Shrink(0)
 	if pal.container.A > 0 {
 		outer.Background(pal.container)
 	}

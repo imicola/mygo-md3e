@@ -298,6 +298,11 @@ type SearchAppBarOptions struct {
 	OnSubmitted func(query string)
 }
 
+type (
+	searchClearKey    struct{}
+	searchTrailingKey struct{ index int }
+)
+
 // searchBarHeight is the height of a SearchAppBar, in DIP.
 const searchBarHeight = 56
 
@@ -403,7 +408,7 @@ func SearchAppBar(c *ui.Context, query *string, opts ...SearchAppBarOptions) ui.
 		submitted := input.Submitted()
 
 		if *query != "" {
-			clear := ui.ButtonBase(c).
+			clear := ui.ButtonBase(c.Key(searchClearKey{})).
 				DimDisabled(false).
 				FocusRing(false).
 				Size(appBarIconSize, appBarIconSize).
@@ -423,7 +428,7 @@ func SearchAppBar(c *ui.Context, query *string, opts ...SearchAppBarOptions) ui.
 		}
 		for i := range o.Trailing {
 			action := &o.Trailing[i]
-			appBarIconSide(c, th, action.Label, action.Icon, action.OnClick, o.Disabled)
+			appBarIconSide(c.Key(searchTrailingKey{index: i}), th, action.Label, action.Icon, action.OnClick, o.Disabled)
 		}
 
 		if changed && o.OnChanged != nil {

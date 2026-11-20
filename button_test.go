@@ -431,3 +431,35 @@ func TestButtonElevatedShadows(t *testing.T) {
 		t.Fatal("elevated button did not settle after release")
 	}
 }
+
+func TestButtonOutOfRangeSizeTierNormalizesToXS(t *testing.T) {
+	if role := buttonTypeRole(tokens.SizeTier(99)); role != tokens.LabelLarge {
+		t.Fatalf("buttonTypeRole(99) = %v, want LabelLarge", role)
+	}
+	if role := buttonTypeRole(tokens.SizeTier(-1)); role != tokens.LabelLarge {
+		t.Fatalf("buttonTypeRole(-1) = %v, want LabelLarge", role)
+	}
+	if gap := iconLabelGap(tokens.SizeTier(99)); gap != 8 {
+		t.Fatalf("iconLabelGap(99) = %v, want 8", gap)
+	}
+
+	tt := ui.NewTester(func(c *ui.Context) {
+		ThemeScope(c, nil, func() {
+			ui.Column(c).Size(240, 160).Padding(16).Gap(8).Children(func() {
+				Button(c, "Same", ButtonOptions{Size: tokens.SizeXS, Label: "XSRef"})
+				Button(c, "Same", ButtonOptions{Size: tokens.SizeTier(99), Label: "InvalidBig"})
+				Button(c, "Same", ButtonOptions{Size: tokens.SizeTier(-1), Label: "InvalidNeg"})
+			})
+		})
+	}, 240, 160)
+
+	xs := buttonInfo(t, tt, ui.RoleButton, "XSRef")
+	big := buttonInfo(t, tt, ui.RoleButton, "InvalidBig")
+	neg := buttonInfo(t, tt, ui.RoleButton, "InvalidNeg")
+	if big.Bounds.H != xs.Bounds.H || neg.Bounds.H != xs.Bounds.H {
+		t.Fatalf("invalid tier heights (%v, %v) != SizeXS (%v)", big.Bounds.H, neg.Bounds.H, xs.Bounds.H)
+	}
+	if big.Bounds.W != xs.Bounds.W || neg.Bounds.W != xs.Bounds.W {
+		t.Fatalf("invalid tier widths (%v, %v) != SizeXS (%v) — label typography mismatch", big.Bounds.W, neg.Bounds.W, xs.Bounds.W)
+	}
+}

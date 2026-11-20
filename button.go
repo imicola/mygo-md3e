@@ -100,6 +100,7 @@ func Button(c *ui.Context, label string, opts ...ButtonOptions) ui.Element {
 	}
 
 	th := CurrentTheme(c)
+	o.Size = normalizeSizeTier(o.Size)
 	spec := tierSpec(o.Size)
 	rest := restingRadius(spec, o.Shape)
 
@@ -223,13 +224,19 @@ func buttonPaletteOf(th *Theme, v ButtonVariant, disabled bool) buttonColors {
 	}
 }
 
+// normalizeSizeTier maps out-of-range SizeTier values to tokens.SizeXS so
+// container geometry, spacing, and typography stay consistent.
+func normalizeSizeTier(t tokens.SizeTier) tokens.SizeTier {
+	if t < tokens.SizeXS || t > tokens.SizeXL {
+		return tokens.SizeXS
+	}
+	return t
+}
+
 // tierSpec returns the geometry of t, falling back to SizeXS for a tier
 // outside SizeXS..SizeXL.
 func tierSpec(t tokens.SizeTier) tokens.SizeSpec {
-	if t < tokens.SizeXS || t > tokens.SizeXL {
-		return tokens.SizeXS.Spec()
-	}
-	return t.Spec()
+	return normalizeSizeTier(t).Spec()
 }
 
 // restingRadius returns the idle corner radius of shape at spec. Round is a
@@ -245,7 +252,7 @@ func restingRadius(spec tokens.SizeSpec, shape ButtonShape) float32 {
 
 // buttonTypeRole returns the MD3E type role of the tier's label.
 func buttonTypeRole(t tokens.SizeTier) tokens.TypeRole {
-	switch t {
+	switch normalizeSizeTier(t) {
 	case tokens.SizeXS, tokens.SizeS:
 		return tokens.LabelLarge
 	case tokens.SizeM:
@@ -260,7 +267,7 @@ func buttonTypeRole(t tokens.SizeTier) tokens.TypeRole {
 // iconLabelGap returns the space between an icon and the label of a tier, in
 // DIP: 8 up to the medium tier, 12 for large and 16 for extra large.
 func iconLabelGap(t tokens.SizeTier) float32 {
-	switch t {
+	switch normalizeSizeTier(t) {
 	case tokens.SizeL:
 		return 12
 	case tokens.SizeXL:

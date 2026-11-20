@@ -630,3 +630,50 @@ func TestSelectionReduceMotion(t *testing.T) {
 		t.Fatalf("ReduceMotion radio dot %+v is not Primary", px)
 	}
 }
+
+func TestRadioGroupDisabledPropagationAndColors(t *testing.T) {
+	th := ThemeFromSeed(ui.Hex("#6750A4"))
+	th.ReduceMotion = true
+
+	// Compare standalone disabled selected Radio vs Radio inside disabled RadioGroup vs ancestor disabled.
+	vStandalone := "a"
+	ttStandalone := selectionCanvas(th, func(c *ui.Context) {
+		Radio(c, &vStandalone, "a", "OptA", RadioOptions{Disabled: true})
+	})
+	saInfo := buttonInfo(t, ttStandalone, ui.RoleRadio, "OptA")
+	wantCol := ttStandalone.Image().RGBAAt(int(saInfo.Bounds.X+20), int(saInfo.Bounds.Y+20))
+
+	checkGroup := func(name string, useAncestor bool) {
+		t.Run(name, func(t *testing.T) {
+			choice := "a"
+			tt := selectionCanvas(th, func(c *ui.Context) {
+				wrap := ui.Column(c)
+				if useAncestor {
+					wrap.Disabled(true).DimDisabled(false)
+				}
+				wrap.Children(func() {
+					RadioGroup(c, func() {
+						Radio(c, &choice, "a", "OptA")
+						Radio(c, &choice, "b", "OptB")
+					}, RadioGroupOptions{Label: "Modes", Disabled: !useAncestor})
+				})
+			})
+			aInfo := buttonInfo(t, tt, ui.RoleRadio, "OptA")
+			bInfo := buttonInfo(t, tt, ui.RoleRadio, "OptB")
+			if !aInfo.Disabled || !bInfo.Disabled {
+				t.Fatalf("expected radios disabled: a=%v b=%v", aInfo.Disabled, bInfo.Disabled)
+			}
+			tt.ClickAt(bInfo.Bounds.X+bInfo.Bounds.W/2, bInfo.Bounds.Y+bInfo.Bounds.H/2)
+			if choice != "a" {
+				t.Fatalf("clicking disabled group radio changed choice to %q", choice)
+			}
+			gotCol := tt.Image().RGBAAt(int(aInfo.Bounds.X+20), int(aInfo.Bounds.Y+20))
+			if absColorDiff(gotCol, wantCol) > 12 {
+				t.Fatalf("group-disabled radio pixel %+v != standalone disabled radio %+v", gotCol, wantCol)
+			}
+		})
+	}
+
+	checkGroup("group-option", false)
+	checkGroup("ancestor-disabled", true)
+}

@@ -676,3 +676,33 @@ func TestSearchAppBarInputClearAndSubmit(t *testing.T) {
 		t.Fatal("search app bar left frames pending")
 	}
 }
+
+func TestSearchAppBarClearDisappearPreservesTrailingFocus(t *testing.T) {
+	query := "abc"
+	tt := ui.NewTester(func(c *ui.Context) {
+		ThemeScope(c, nil, func() {
+			SearchAppBar(c, &query, SearchAppBarOptions{
+				Trailing: []AppBarAction{
+					{Label: "Voice", Icon: mdicon.Search.Draw},
+				},
+			})
+		})
+	}, 400, 96)
+
+	// Tab to "Clear search", then Tab once more to "Voice".
+	tt.Key(0, ui.KeyTab)
+	for !tt.Focused("Voice") {
+		tt.Key(0, ui.KeyTab)
+	}
+	if !tt.Focused("Voice") {
+		t.Fatal("failed to focus trailing Voice action")
+	}
+
+	// Clearing the query removes the Clear button immediately before Voice;
+	// Voice must keep its focus instead of losing identity on sibling shift.
+	query = ""
+	tt.Frame()
+	if !tt.Focused("Voice") {
+		t.Fatal("SearchAppBar trailing button lost focus when Clear button disappeared")
+	}
+}

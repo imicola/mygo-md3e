@@ -114,15 +114,16 @@ func FABMenu(c *ui.Context, items []FABMenuItem, opts ...FABMenuOptions) ui.Elem
 		open = ui.Local(trigger, fabMenuOpenKey{}, func() bool { return false })
 	}
 	handle := ui.Local(trigger, fabMenuHandleKey{}, func() ui.Handle { return ui.Handle{} })
-	trigger.Bind(handle).HasPopup(ui.PopupMenu).Expanded(*open)
-
-	if o.Disabled {
+	disabled := o.Disabled || trigger.IsDisabled()
+	if disabled {
 		*open = false
 	}
-	if trigger.Clicked() && !o.Disabled {
+	trigger.Bind(handle).HasPopup(ui.PopupMenu).Expanded(*open)
+
+	if trigger.Clicked() && !disabled {
 		*open = !*open
 	}
-	if !*open {
+	if !*open || disabled {
 		return trigger
 	}
 

@@ -466,3 +466,34 @@ func TestFABMenuEscapeAndReduceMotion(t *testing.T) {
 		t.Fatal("Escape did not return the focus to the trigger")
 	}
 }
+
+func TestFABMenuAncestorDisabledClosesAndOmitsOverlay(t *testing.T) {
+	open := true
+	parentDisabled := true
+	itemClicks := 0
+	tt := ui.NewTester(func(c *ui.Context) {
+		ThemeScope(c, nil, func() {
+			ui.Row(c).Size(320, 320).Padding(24).Disabled(parentDisabled).Children(func() {
+				FABMenu(c, []FABMenuItem{
+					{Label: "Upload", Icon: mdicon.Edit.Draw, OnClick: func() { itemClicks++ }},
+					{Label: "Share", Icon: mdicon.Add.Draw, OnClick: func() { itemClicks++ }},
+				}, FABMenuOptions{Label: "Actions", Icon: mdicon.Add.Draw, Open: &open})
+			})
+		})
+	}, 320, 320)
+
+	if open {
+		t.Fatal("expected FABMenu Open state to close when ancestor is disabled")
+	}
+	if _, ok := tt.Find("Upload"); ok {
+		t.Fatal("disabled ancestor should prevent FABMenu overlay items from rendering")
+	}
+	trigger := buttonInfo(t, tt, ui.RoleButton, "Actions")
+	if !trigger.Disabled || trigger.Expanded {
+		t.Fatalf("trigger access disabled=%v expanded=%v, want true false", trigger.Disabled, trigger.Expanded)
+	}
+	tt.ClickAt(trigger.Bounds.X+trigger.Bounds.W/2, trigger.Bounds.Y+trigger.Bounds.H/2)
+	if open || itemClicks != 0 {
+		t.Fatalf("clicking disabled trigger opened menu: open=%v clicks=%d", open, itemClicks)
+	}
+}
