@@ -243,7 +243,7 @@
     - 测试覆盖拖动滑块、左右/Home/End 键盘步进、RangeSlider 两端拇指不越界交叉、停靠点与气泡显示隐藏动画收敛、RTL 方向值增减反转、无障碍 `Range` 值断言。
   - **Commit**：`feat(slider): [T5.2] implement Expressive Slider and RangeSlider with gap, stops, and value indicator`
 
-- [ ] **T5.3：实现 Assist / Filter / Input / Suggestion Chips**
+- [x] **T5.3：实现 Assist / Filter / Input / Suggestion Chips**
   - **交付物**：`chip.go`、`chip_test.go`
   - **核心能力**：
     - 四种 MD3E Chip：`AssistChip`、`FilterChip`（选中态勾选图标入场、容器背景色与圆角切换）、`InputChip`（可附带头像与可点击关闭按钮 `×`）、`SuggestionChip`；
