@@ -252,7 +252,7 @@
     - 测试覆盖 FilterChip 选中态切换与勾选绘制、InputChip 点击主体与点击删除按钮的独立命中区分、Disabled 拦截与无障碍名称/选中态验证。
   - **Commit**：`feat(chip): [T5.3] implement Assist, Filter, Input, and Suggestion Chips`
 
-- [ ] **T5.4：实现 Expressive TextField & TextArea（Filled / Outlined）**
+- [x] **T5.4：实现 Expressive TextField & TextArea（Filled / Outlined）**
   - **交付物**：`textfield.go`、`textfield_test.go`
   - **核心能力**：
     - 基于 `ui.TextInputBase` / `ui.TextAreaBase` 构建；
