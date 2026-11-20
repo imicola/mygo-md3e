@@ -328,7 +328,7 @@
     - 测试覆盖点击切换 `*selected` 更新与回调触发、NavigationRail 折叠↔展开宽度动画与选项选择、Modal Drawer 遮罩点击/Escape/拖拽关闭与焦点管理。
   - **Commit**：`feat(navigation): [T7.2] implement NavigationBar, expandable NavigationRail, and NavigationDrawer`
 
-- [ ] **T7.3：实现 Primary/Secondary Tabs 与 Expressive Carousel**
+- [x] **T7.3：实现 Primary/Secondary Tabs 与 Expressive Carousel**
   - **交付物**：`tabs.go`、`carousel.go`、`tabs_carousel_test.go`
   - **核心能力**：
     - `PrimaryTabs` & `SecondaryTabs`（基于 `ui.TabsBase`）：Primary 带底部圆角指示条且支持“指示条跟随位置平滑滑动”（通过保存前一选中几何位置做弹簧过渡）与图标+标签；Secondary 贴底全宽线；支持固定等分与横向可滚动溢出标签；
