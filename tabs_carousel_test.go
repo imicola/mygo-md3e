@@ -492,3 +492,80 @@ func TestScrollableTabsIndicatorScrollsAndClips(t *testing.T) {
 		}
 	}
 }
+
+// TestDisabledAncestorTabsCarouselAndNarrowSnap checks ancestor-disabled tabs
+// paint the single-dimmed MD3E disabled indicator, narrow carousels initialize
+// without jumping to window width, penultimate snaps don't jump to the end,
+// and disabling clears carousel interaction state.
+func TestDisabledAncestorTabsCarouselAndNarrowSnap(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor)
+	cs := th.Colors
+	selTab := 0
+	tabTT := containerCanvas(th, func(c *ui.Context) {
+		ui.Box(c).Disabled(true).DimDisabled(false).Children(func() {
+			PrimaryTabs(c, []TabItem{{Label: "One"}, {Label: "Two"}}, TabsOptions{
+				Selected: &selTab,
+				Label:    "DisabledTabs",
+			}).Width(320)
+		})
+	})
+	tabTT.Advance(time.Second)
+	one := tabInfo(t, tabTT, "One")
+	if !one.Disabled {
+		t.Fatal("ancestor-disabled tab does not read as disabled")
+	}
+	wantInd := cs.OnSurface.Alpha(float32(tokens.DisabledContentOpacity)).Over(cs.Surface)
+	indPx := tabTT.Image().RGBAAt(int(one.Bounds.X+one.Bounds.W/2), int(one.Bounds.Y+one.Bounds.H)-2)
+	if colorMatches(indPx, cs.Primary, 12) {
+		t.Fatalf("ancestor-disabled tab indicator still painted Primary %+v", indPx)
+	}
+	if !colorMatches(indPx, wantInd, 12) {
+		t.Fatalf("ancestor-disabled tab indicator = %+v, want %+v", indPx, rgbOf(wantInd))
+	}
+
+	// Narrow carousel (width 280 inside a 640 window) jumps cleanly to 280
+	// proportions on its first laid-out frame and allows penultimate focus.
+	cIdx := 0
+	carTT := containerCanvas(th, func(c *ui.Context) {
+		Carousel(c, carouselItems(4), CarouselOptions{
+			Index:  &cIdx,
+			Layout: CarouselHero,
+			Height: 180,
+		}).Width(280)
+	})
+	carTT.Frame()
+	a := buttonInfo(t, carTT, ui.RoleButton, "A")
+	wantW := carouselItemWidth(CarouselHero, 0, 280)
+	if absF32(a.Bounds.W-wantW) > 1 {
+		t.Fatalf("narrow carousel slide A width = %.1f on first laid-out pass, want %.1f", a.Bounds.W, wantW)
+	}
+	// Penultimate index 2 should settle cleanly on index 2 rather than snapping to 3.
+	cIdx = 2
+	carTT.Frame()
+	carTT.Advance(2 * time.Second)
+	if cIdx != 2 {
+		t.Fatalf("penultimate carousel index snapped to %d, want 2", cIdx)
+	}
+
+	// Ancestor-disabled carousel clears active state and refuses clicks/drags.
+	disIdx := 0
+	disCar := containerCanvas(th, func(c *ui.Context) {
+		ui.Box(c).Disabled(true).DimDisabled(false).Children(func() {
+			Carousel(c, carouselItems(4), CarouselOptions{
+				Index:  &disIdx,
+				Layout: CarouselHero,
+				Height: 180,
+			}).Width(480)
+		})
+	})
+	disCar.Advance(500 * time.Millisecond)
+	slideB := buttonInfo(t, disCar, ui.RoleButton, "B")
+	if !slideB.Disabled {
+		t.Fatal("ancestor-disabled carousel slide does not read as disabled")
+	}
+	disCar.ClickAt(slideB.Bounds.X+15, slideB.Bounds.Y+20)
+	disCar.Advance(500 * time.Millisecond)
+	if disIdx != 0 {
+		t.Fatalf("ancestor-disabled carousel changed index to %d", disIdx)
+	}
+}

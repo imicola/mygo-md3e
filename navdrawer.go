@@ -52,9 +52,14 @@ const (
 	navDrawerItemHeight     = 56
 	navDrawerIconSize       = 24
 	navDrawerSwipeThreshold = 72
+	navDrawerDragSlop       = 6
 )
 
 type navDrawerOpenKey struct{}
+
+type navDrawerStateKey struct{}
+
+type navDrawerShowKey struct{}
 
 type navDrawerWidthKey struct{}
 
@@ -65,6 +70,19 @@ type navDrawerOffsetKey struct{}
 type navDrawerSelectKey struct{}
 
 type navDrawerItemKey struct{ i int }
+
+type navDrawerState struct {
+	shown      bool
+	appeared   bool
+	exitOffset float32
+}
+
+type navDrawerDragState struct {
+	dragging bool
+	offset   float32
+	travel   float32
+	suppress bool
+}
 
 // NavigationDrawer builds a Material Design 3 Expressive navigation drawer: a
 // vertical panel of destinations with optional section titles, dividers, count
@@ -90,10 +108,7 @@ func NavigationDrawer(c *ui.Context, items []NavigationDrawerItem, opts ...Navig
 	if len(opts) == 1 {
 		o = opts[0]
 	}
-	width := o.Width
-	if !(width > 0) {
-		width = navDrawerWidth
-	}
+	width := sanitizePositiveF32(o.Width, navDrawerWidth)
 	th := CurrentTheme(c)
 	label := o.Label
 	if label == "" {
@@ -105,34 +120,96 @@ func NavigationDrawer(c *ui.Context, items []NavigationDrawerItem, opts ...Navig
 	return inlineNavigationDrawer(c, th, items, o, width, label)
 }
 
-// modalNavigationDrawer builds the overlay drawer.
+// modalNavigationDrawer builds the overlay drawer with enter/exit slide
+// motion and scrim fade, plus horizontal swipe-to-dismiss across the panel
+// and its destinations.
 func modalNavigationDrawer(c *ui.Context, th *Theme, items []NavigationDrawerItem, o NavigationDrawerOptions, width float32, label string) ui.Element {
 	anchor := ui.Box(c).Size(0, 0)
 	open := o.Open
 	if open == nil {
 		open = ui.Local(anchor, navDrawerOpenKey{}, func() bool { return false })
 	}
+	st := ui.Local(anchor, navDrawerStateKey{}, func() navDrawerState { return navDrawerState{} })
+	drag := ui.Local(anchor, navDrawerDragKey{}, func() navDrawerDragState { return navDrawerDragState{} })
+
 	// A disabled drawer leaves the caller's open state alone: re-enabling it
 	// brings the drawer back as it was, rather than silently closing it.
-	if o.Disabled || anchor.IsDisabled() || !*open {
+	if o.Disabled || anchor.IsDisabled() {
+		*st = navDrawerState{}
+		*drag = navDrawerDragState{}
 		return anchor
 	}
+	if !*open && !st.shown {
+		*st = navDrawerState{}
+		*drag = navDrawerDragState{}
+		return anchor
+	}
+	if *open {
+		if !st.shown {
+			*drag = navDrawerDragState{}
+			st.exitOffset = 0
+		}
+		st.shown = true
+		st.exitOffset = 0
+	}
+
+	exiting := !*open
+	reduce := th.ReduceMotion || c.Preferences().ReduceMotion
+	var show float32
+	switch {
+	case *open && !st.appeared:
+		st.appeared = true
+		if reduce {
+			show = anchor.Jump(navDrawerShowKey{}, 1)
+		} else {
+			anchor.Jump(navDrawerShowKey{}, 0)
+			show = 0
+			c.Invalidate()
+		}
+	case exiting && reduce:
+		st.shown, st.appeared = false, false
+		st.exitOffset = 0
+		*drag = navDrawerDragState{}
+		c.Invalidate()
+		return anchor
+	case exiting:
+		show = animateValue(anchor, navDrawerShowKey{}, 0, th.Animation(motion.FastSpatial), false)
+		if anchor.Arrived(navDrawerShowKey{}) || (anchor.Settled(navDrawerShowKey{}) && show <= 0.001) {
+			st.shown, st.appeared = false, false
+			st.exitOffset = 0
+			*drag = navDrawerDragState{}
+			c.Invalidate()
+			return anchor
+		}
+	default:
+		show = animateValue(anchor, navDrawerShowKey{}, 1, th.Animation(motion.FastSpatial), false)
+	}
+
 	rtl := c.Direction() == ui.RightToLeft
 	cs := th.Colors
 	scrim := cs.Scrim
 	if scrim.A == 0 {
 		scrim = ui.RGB(0, 0, 0)
 	}
+	sign := float32(-1)
+	if rtl {
+		sign = 1
+	}
 
 	ui.Overlay(c, func() {
 		back := ui.Row(c).Absolute().Left(0).Top(0).Right(0).Bottom(0).
-			Background(scrim.Alpha(0.32)).
-			Justify(ui.Start).
-			Modal()
+			Background(scrim.Alpha(0.32 * clampF32(show, 0, 1))).
+			Justify(ui.Start)
+		if !exiting {
+			back.Modal()
+		}
+		back.IgnoreInput(exiting).AccessHidden(exiting)
+
 		back.Children(func() {
 			panel := ui.Column(c).
 				Width(width).
 				FillHeight().
+				DimDisabled(false).
 				Background(SurfaceColorForElevation(th, tokens.Level1)).
 				Role(ui.RoleDialog).
 				Label(label)
@@ -144,34 +221,55 @@ func modalNavigationDrawer(c *ui.Context, th *Theme, items []NavigationDrawerIte
 			}
 			panel.Disabled(o.Disabled)
 
-			sign := float32(-1)
-			if rtl {
-				sign = 1
-			}
-			drag := ui.Local(panel, navDrawerDragKey{}, func() float32 { return 0 })
-			var offset float32
-			reduce := th.ReduceMotion || c.Preferences().ReduceMotion
-			if dx, _, ok := panel.Dragged(); ok {
-				// Follow the pointer both ways, dragging out and back, but
-				// clamp movement past the open baseline so the panel never
-				// drifts away from the drawer's edge.
-				*drag += dx
-				if *drag*sign < 0 {
-					*drag = 0
+			drag.dragging = false
+			if !exiting {
+				if dx, _, ok := panel.Dragged(); ok {
+					drag.dragging = true
+					drag.offset += dx
+					drag.travel += absF32(dx)
+					if drag.travel >= navDrawerDragSlop {
+						drag.suppress = true
+					}
 				}
-				offset = panel.Jump(navDrawerOffsetKey{}, *drag)
+			}
+
+			panel.Children(func() {
+				navDrawerContent(c, th, items, o, drag, exiting)
+			})
+
+			var liveOffset float32
+			dismissTriggered := false
+			if !exiting && drag.dragging {
+				if drag.offset*sign < 0 {
+					drag.offset = 0
+				}
+				liveOffset = panel.Jump(navDrawerOffsetKey{}, drag.offset)
+				if absF32(drag.offset) >= navDrawerSwipeThreshold {
+					st.exitOffset = liveOffset
+					*open = false
+					*drag = navDrawerDragState{}
+					dismissTriggered = true
+					c.Invalidate()
+				}
 			} else {
-				offset = animateValue(panel, navDrawerOffsetKey{}, 0, th.Animation(motion.FastSpatial), reduce)
-				*drag = 0
+				drag.offset = 0
+				drag.travel = 0
+				drag.suppress = false
+				if !exiting {
+					liveOffset = animateValue(panel, navDrawerOffsetKey{}, 0, th.Animation(motion.FastSpatial), reduce)
+				}
 			}
-			if absF32(*drag) >= navDrawerSwipeThreshold {
-				*open = false
+
+			showClamped := clampF32(show, 0, 1)
+			var tx float32
+			if exiting || dismissTriggered {
+				tx = st.exitOffset + sign*(1-showClamped)*max(width-absF32(st.exitOffset), 0)
+			} else {
+				tx = liveOffset + sign*(1-showClamped)*width
 			}
-			panel.Translate(offset, 0)
+			panel.Translate(tx, 0)
 
-			navDrawerContent(c, th, items, o)
-
-			if panel.PressedOutside() || back.OverlayShortcut(0, ui.KeyEscape) {
+			if !exiting && !dismissTriggered && (panel.PressedOutside() || back.OverlayShortcut(0, ui.KeyEscape)) {
 				*open = false
 			}
 		})
@@ -182,6 +280,7 @@ func modalNavigationDrawer(c *ui.Context, th *Theme, items []NavigationDrawerIte
 // inlineNavigationDrawer builds the dismissible drawer in the layout.
 func inlineNavigationDrawer(c *ui.Context, th *Theme, items []NavigationDrawerItem, o NavigationDrawerOptions, width float32, label string) ui.Element {
 	root := ui.Column(c).
+		DimDisabled(false).
 		FillHeight().
 		Clip().
 		Background(SurfaceColorForElevation(th, tokens.Level1)).
@@ -202,6 +301,9 @@ func inlineNavigationDrawer(c *ui.Context, th *Theme, items []NavigationDrawerIt
 		target = width
 	}
 	openWidth := animateWithTheme(root, th, navDrawerWidthKey{}, target, motion.DefaultSpatial)
+	if openWidth < 0 {
+		openWidth = 0
+	}
 	root.Width(openWidth)
 	root.Disabled(o.Disabled)
 
@@ -210,37 +312,40 @@ func inlineNavigationDrawer(c *ui.Context, th *Theme, items []NavigationDrawerIt
 	// contents leave the focus order and the access tree entirely.
 	if *open || openWidth > 0.5 {
 		root.Children(func() {
-			navDrawerContent(c, th, items, o)
+			navDrawerContent(c, th, items, o, nil, false)
 		})
 	}
 	return root
 }
 
-// navDrawerContent builds the drawer's section titles, dividers and
+// navDrawerContent builds the drawer's scrollable section titles, dividers and
 // destinations into the current parent.
-func navDrawerContent(c *ui.Context, th *Theme, items []NavigationDrawerItem, o NavigationDrawerOptions) {
+func navDrawerContent(c *ui.Context, th *Theme, items []NavigationDrawerItem, o NavigationDrawerOptions, drag *navDrawerDragState, exiting bool) {
 	cs := th.Colors
-	list := ui.Column(c).FillWidth().Padding(12).Gap(4)
-	list.Children(func() {
-		lastSection := ""
-		for i := range items {
-			item := &items[i]
-			if item.Section != "" && item.Section != lastSection {
-				if lastSection != "" {
-					Divider(c, DividerOptions{Inset: 16})
+	scroll := ui.Scroll(c).Grow(1).FillWidth().Scrollbars(false)
+	scroll.Children(func() {
+		list := ui.Column(c).FillWidth().Padding(12).Gap(4).FocusGroup(ui.Vertical)
+		list.Children(func() {
+			lastSection := ""
+			for i := range items {
+				item := &items[i]
+				if item.Section != "" && item.Section != lastSection {
+					if lastSection != "" {
+						Divider(c, DividerOptions{Inset: 16})
+					}
+					label := ui.Text(c, item.Section).NoWrap()
+					applyTypeStyleWithTheme(th, label, tokens.LabelSmall)
+					label.TextColor(cs.OnSurfaceVariant).Padding(16, 8, 4, 8)
+					lastSection = item.Section
 				}
-				label := ui.Text(c, item.Section).NoWrap()
-				applyTypeStyleWithTheme(th, label, tokens.LabelSmall)
-				label.TextColor(cs.OnSurfaceVariant).Padding(16, 8, 4, 8)
-				lastSection = item.Section
+				navDrawerDestination(c, th, item, i, o, drag, exiting)
 			}
-			navDrawerDestination(c, th, item, i, o)
-		}
+		})
 	})
 }
 
 // navDrawerDestination builds one destination of a drawer.
-func navDrawerDestination(c *ui.Context, th *Theme, item *NavigationDrawerItem, i int, o NavigationDrawerOptions) {
+func navDrawerDestination(c *ui.Context, th *Theme, item *NavigationDrawerItem, i int, o NavigationDrawerOptions, drag *navDrawerDragState, exiting bool) {
 	cs := th.Colors
 	c.Key(navDrawerItemKey{i: i})
 	el := ui.ButtonBase(c).
@@ -261,7 +366,18 @@ func navDrawerDestination(c *ui.Context, th *Theme, item *NavigationDrawerItem, 
 	if selected {
 		target = 1
 	}
-	pill := animateWithTheme(el, th, navDrawerSelectKey{}, target, motion.DefaultSpatial)
+	pill := animateWithTheme(el, th, navDrawerSelectKey{}, target, motion.DefaultEffects)
+
+	if !exiting && drag != nil {
+		if dx, _, ok := el.Dragged(); ok {
+			drag.dragging = true
+			drag.offset += dx
+			drag.travel += absF32(dx)
+			if drag.travel >= navDrawerDragSlop {
+				drag.suppress = true
+			}
+		}
+	}
 
 	base := SurfaceColorForElevation(th, tokens.Level1)
 	selectedBg := cs.SecondaryContainer
@@ -279,8 +395,12 @@ func navDrawerDestination(c *ui.Context, th *Theme, item *NavigationDrawerItem, 
 		labelInk = iconInk
 	}
 	bg := base
-	if selectedBg.A > 0 && pill > 0.001 {
-		bg = base.Mix(selectedBg, clampF32(pill, 0, 1))
+	if p := clampF32(pill, 0, 1); p > 0.001 {
+		if disabled {
+			bg = cs.OnSurface.Alpha(float32(tokens.DisabledContainerOpacity) * p)
+		} else if selectedBg.A > 0 {
+			bg = base.Mix(selectedBg, p)
+		}
 	}
 	el.Disabled(item.Disabled).AccessSelected(selected).Background(bg).TextColor(labelInk)
 
@@ -295,7 +415,8 @@ func navDrawerDestination(c *ui.Context, th *Theme, item *NavigationDrawerItem, 
 			badge.TextColor(labelInk)
 		}
 	})
-	if el.Clicked() && !disabled {
+	suppressClick := drag != nil && drag.suppress
+	if el.Clicked() && !disabled && !suppressClick && !exiting {
 		if o.Selected != nil {
 			*o.Selected = i
 		}

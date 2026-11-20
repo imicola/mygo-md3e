@@ -74,6 +74,7 @@ func NavigationRail(c *ui.Context, destinations []NavigationDestination, opts ..
 	}
 
 	root := ui.Column(c).
+		DimDisabled(false).
 		FillHeight().
 		Clip().
 		Background(SurfaceColorForElevation(th, tokens.Level1)).
@@ -127,7 +128,7 @@ func navRailDestination(c *ui.Context, th *Theme, cs tokens.ColorScheme, dest *N
 	if selected {
 		target = 1
 	}
-	indicator := animateWithTheme(el, th, navRailIndicatorKey{}, target, motion.FastSpatial)
+	indicator := animateWithTheme(el, th, navRailIndicatorKey{}, target, motion.FastEffects)
 
 	iconInk := cs.OnSurfaceVariant
 	labelInk := cs.OnSurfaceVariant
@@ -141,35 +142,44 @@ func navRailDestination(c *ui.Context, th *Theme, cs tokens.ColorScheme, dest *N
 	}
 	el.Disabled(dest.Disabled).AccessSelected(selected)
 
+	pillAlpha := clampF32(indicator, 0, 1)
+	pillColor := cs.SecondaryContainer.Alpha(pillAlpha)
+	if disabled {
+		pillColor = cs.OnSurface.Alpha(float32(tokens.DisabledContainerOpacity) * pillAlpha)
+	}
+
 	if expanded {
 		el.Row().AlignItems(ui.Center).PaddingStart(16).PaddingEnd(12).Gap(12).Radius(navRailItemHeight / 2)
+		el.Draw(func(p *ui.Painter, r ui.Rect) {
+			if indicator <= 0.001 || r.W <= 0 || r.H <= 0 {
+				return
+			}
+			box := ui.Rect{X: r.X, Y: r.Y + (r.H-navRailItemHeight)/2, W: r.W, H: navRailItemHeight}
+			radius := box.H / 2
+			p.FillRadii(box, [4]float32{radius, radius, radius, radius}, pillColor)
+		})
 	} else {
 		el.Column().Justify(ui.Center).AlignItems(ui.Center)
 	}
 
-	el.Draw(func(p *ui.Painter, r ui.Rect) {
-		if indicator <= 0.001 || r.W <= 0 || r.H <= 0 {
-			return
-		}
-		alpha := clampF32(indicator, 0, 1)
-		box := r
-		if expanded {
-			box = ui.Rect{X: r.X, Y: r.Y + (r.H-navRailItemHeight)/2, W: r.W, H: navRailItemHeight}
-		} else {
-			w := max(r.W, navRailItemHeight)
-			box = ui.Rect{
-				X: r.X + (r.W-w)/2,
-				Y: r.Y + (r.H-navRailIndicatorHigh)/2,
-				W: w,
-				H: navRailIndicatorHigh,
-			}
-		}
-		radius := box.H / 2
-		p.FillRadii(box, [4]float32{radius, radius, radius, radius}, cs.SecondaryContainer.Alpha(alpha))
-	})
-
 	el.Children(func() {
-		badgedIcon(c, dest, navRailIconSize, iconInk)
+		if expanded {
+			badgedIcon(c, dest, navRailIconSize, iconInk)
+		} else {
+			ui.Box(c).Size(navRailItemHeight, navRailIndicatorHigh).Shrink(0).Center().
+				Draw(func(p *ui.Painter, r ui.Rect) {
+					if indicator <= 0.001 || r.W <= 0 || r.H <= 0 {
+						return
+					}
+					w := min(r.W, navRailItemHeight)
+					box := ui.Rect{X: r.X + (r.W-w)/2, Y: r.Y, W: w, H: r.H}
+					radius := box.H / 2
+					p.FillRadii(box, [4]float32{radius, radius, radius, radius}, pillColor)
+				}).
+				Children(func() {
+					badgedIcon(c, dest, navRailIconSize, iconInk)
+				})
+		}
 		txt := ui.Text(c, dest.Label).NoWrap()
 		if expanded {
 			applyTypeStyleWithTheme(th, txt, tokens.LabelLarge)

@@ -44,10 +44,8 @@ func Divider(c *ui.Context, opts ...DividerOptions) ui.Element {
 		o = opts[0]
 	}
 	th := CurrentTheme(c)
-	thickness := o.Thickness
-	if !(thickness > 0) {
-		thickness = 1
-	}
+	thickness := sanitizePositiveF32(o.Thickness, 1)
+	inset := sanitizeNonNegF32(o.Inset)
 	col := o.Color
 	if col.A == 0 {
 		col = th.Colors.OutlineVariant
@@ -67,10 +65,12 @@ func Divider(c *ui.Context, opts ...DividerOptions) ui.Element {
 	}
 
 	if o.Vertical {
-		if o.Inset > 0 {
-			// Padding the box the line fills insets both ends; a margin on a
-			// stretched line would not shorten it.
-			el := ui.Box(c).Width(thickness).Shrink(0).FillHeight().PaddingY(o.Inset)
+		top := sanitizeNonNegF32(o.StartInset) + inset
+		bottom := sanitizeNonNegF32(o.EndInset) + inset
+		if top > 0 || bottom > 0 {
+			// Padding the box the line fills insets both vertical ends; a
+			// margin on a stretched line would not shorten it.
+			el := ui.Box(c).Width(thickness).Shrink(0).FillHeight().Padding(top, 0, bottom, 0)
 			el.Children(func() {
 				inner := ui.Box(c).Width(thickness).FillHeight().Background(col).Role(ui.RoleSeparator)
 				if o.Label != "" {
@@ -88,10 +88,10 @@ func Divider(c *ui.Context, opts ...DividerOptions) ui.Element {
 
 	// A line's logical insets pad the box it fills, which a bare fill would
 	// ignore; the box itself carries the separator's role and paint.
-	start := o.StartInset + o.Inset
-	end := o.EndInset + o.Inset
-	if start != 0 || end != 0 {
-		el := ui.Box(c).Height(thickness).FillWidth().PaddingStart(start).PaddingEnd(end)
+	start := sanitizeNonNegF32(o.StartInset) + inset
+	end := sanitizeNonNegF32(o.EndInset) + inset
+	if start > 0 || end > 0 {
+		el := ui.Box(c).Height(thickness).Shrink(0).FillWidth().PaddingStart(start).PaddingEnd(end)
 		el.Children(func() {
 			inner := ui.Box(c).Height(thickness).FillWidth().Background(col).Role(ui.RoleSeparator)
 			if o.Label != "" {
@@ -100,7 +100,7 @@ func Divider(c *ui.Context, opts ...DividerOptions) ui.Element {
 		})
 		return el
 	}
-	el := ui.Box(c).Height(thickness).FillWidth().Background(col).Role(ui.RoleSeparator)
+	el := ui.Box(c).Height(thickness).Shrink(0).FillWidth().Background(col).Role(ui.RoleSeparator)
 	if o.Label != "" {
 		el.Label(o.Label)
 	}

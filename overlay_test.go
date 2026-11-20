@@ -7,6 +7,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"mygo-md3e/internal/mdicon"
+	"mygo-md3e/tokens"
 )
 
 // alertCanvas builds a trigger and an alert over the container canvas.
@@ -700,5 +701,55 @@ func TestAlertAndSheetExitEdgeCases(t *testing.T) {
 	}
 	if tt.FramePending() {
 		t.Fatal("exited AlertDialog keeps asking for frames")
+	}
+}
+
+// TestMenuDisabledConsistencyAndTokens checks pre-disabled menu items on open,
+// disabled ContextMenu suppression, and MD3E disabled trigger tokens.
+func TestMenuDisabledConsistencyAndTokens(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor)
+	cs := th.Colors
+	ctxOpen := false
+	ctxTT := containerCanvas(th, func(c *ui.Context) {
+		target := Button(c, "Host")
+		ContextMenu(c, target, []MenuItem{{Label: "Secret"}}, MenuOptions{
+			Open:     &ctxOpen,
+			Label:    "Host menu",
+			Disabled: true,
+		})
+	})
+	ctxTT.RightClick("Host")
+	ctxTT.Frame()
+	if _, ok := ctxTT.AccessByRole(ui.RoleMenu, "Host menu"); ok {
+		t.Fatal("disabled ContextMenu opened")
+	}
+
+	// Disabled MenuButton paints MD3E DisabledContainerOpacity instead of SurfaceContainerHighest.
+	btnTT := containerCanvas(th, func(c *ui.Context) {
+		MenuButton(c, "More", mdicon.MoreVert.Draw, []MenuItem{{Label: "A"}}, MenuOptions{Disabled: true})
+	})
+	btnTT.Frame()
+	btnInfo, _ := btnTT.AccessByRole(ui.RoleMenuButton, "More")
+	wantBtnBg := cs.OnSurface.Alpha(float32(tokens.DisabledContainerOpacity)).Over(canvasRGB)
+	gotPx := btnTT.Image().RGBAAt(int(btnInfo.Bounds.X+6), int(btnInfo.Bounds.Y+btnInfo.Bounds.H/2))
+	if !colorMatches(gotPx, wantBtnBg, 10) {
+		t.Fatalf("disabled MenuButton fill = %+v, want %+v", gotPx, rgbOf(wantBtnBg))
+	}
+
+	// Frame-1 open menu must skip a disabled item cleanly on keyboard navigation.
+	firstClicked, secondClicked := 0, 0
+	menuTT := containerCanvas(th, func(c *ui.Context) {
+		DropdownMenu(c, "Pick", []MenuItem{
+			{Label: "Disabled First", Disabled: true, OnClick: func() { firstClicked++ }},
+			{Label: "Enabled Second", OnClick: func() { secondClicked++ }},
+		}, MenuOptions{Label: "Pick menu"})
+	})
+	menuTT.Click("Pick")
+	menuTT.Advance(300 * time.Millisecond)
+	menuTT.Key(0, ui.KeyDown)
+	menuTT.Key(0, ui.KeyEnter)
+	menuTT.Advance(500 * time.Millisecond)
+	if firstClicked != 0 || secondClicked != 1 {
+		t.Fatalf("menu keyboard skipped disabled = (%d, %d), want (0, 1)", firstClicked, secondClicked)
 	}
 }

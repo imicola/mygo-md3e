@@ -139,6 +139,8 @@ type rippleState struct {
 	pointerHeld    bool
 	sawPressedTrue bool
 	allowWaves     bool
+	hasDrawOver    bool
+	hoverHook      func(p *ui.Painter, now time.Time, hovered bool)
 
 	halo haloFadeState
 }
@@ -242,6 +244,7 @@ func attachOverlayFeedbackWithTheme(th *Theme, el ui.Element, withRipple bool, o
 	}
 	thReduceMotion := th.ReduceMotion
 	st.allowWaves = withRipple && !thReduceMotion
+	st.hasDrawOver = true
 
 	ink := opt.Color
 	if ink.A == 0 {
@@ -290,12 +293,18 @@ func attachOverlayFeedbackWithTheme(th *Theme, el ui.Element, withRipple bool, o
 		if opt.Disabled || el.IsDisabled() {
 			st.clearTransient()
 			st.halo.reset()
+			if st.hoverHook != nil {
+				st.hoverHook(p, p.Now(), false)
+			}
 			return
 		}
 
 		reduceMotion := thReduceMotion || p.Preferences().ReduceMotion
 		now := p.Now()
 		hovered := el.Hovered()
+		if st.hoverHook != nil {
+			st.hoverHook(p, now, hovered)
+		}
 		pressed := el.Pressed()
 		focused := el.FocusVisible()
 

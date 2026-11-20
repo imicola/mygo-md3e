@@ -1,6 +1,7 @@
 package md3e
 
 import (
+	"strings"
 	"time"
 
 	"github.com/egoist/mygo/ui"
@@ -48,7 +49,12 @@ func PlainTooltip(c *ui.Context, anchor ui.Element, text string, opts ...PlainTo
 	if desc == "" {
 		desc = text
 	}
-	anchor.Description(desc)
+	if desc != "" {
+		anchor.Description(desc)
+	}
+	if strings.TrimSpace(text) == "" {
+		return anchor
+	}
 	ui.TooltipBase(c, anchor, func(tip ui.Element) {
 		tip.Padding(4, 8).Radius(4).MaxWidth(240).
 			Background(bg).TextColor(ink)
@@ -104,10 +110,67 @@ type richTooltipKey struct{}
 type richTooltipState struct {
 	open         bool
 	suppress     bool
-	hoverSince   time.Time
-	leaveAt      time.Time
+	anchorHover  bool
+	anchorFocus  bool
 	panelHovered bool
 	panelFocused bool
+	hoverSince   time.Time
+	leaveAt      time.Time
+	delay        time.Duration
+	srv          ui.Services
+}
+
+func (s *richTooltipState) stepHover(p *ui.Painter, now time.Time) {
+	if !s.open {
+		if !s.anchorHover && !s.anchorFocus && !s.panelHovered && !s.panelFocused {
+			s.suppress = false
+			s.hoverSince = time.Time{}
+			return
+		}
+		if s.suppress || !s.anchorHover {
+			s.hoverSince = time.Time{}
+			return
+		}
+		if s.delay < 0 {
+			s.open = true
+			s.hoverSince = time.Time{}
+			s.leaveAt = time.Time{}
+			s.srv.Invalidate()
+			return
+		}
+		if s.hoverSince.IsZero() {
+			s.hoverSince = now
+			p.After(s.delay)
+			return
+		}
+		if elapsed := now.Sub(s.hoverSince); elapsed >= s.delay {
+			s.open = true
+			s.hoverSince = time.Time{}
+			s.leaveAt = time.Time{}
+			s.srv.Invalidate()
+			return
+		} else {
+			p.After(s.delay - elapsed)
+		}
+		return
+	}
+	if s.anchorHover || s.anchorFocus || s.panelHovered || s.panelFocused {
+		s.leaveAt = time.Time{}
+		return
+	}
+	if s.leaveAt.IsZero() {
+		s.leaveAt = now
+		p.After(richTooltipLeaveGrace)
+		return
+	}
+	elapsed := now.Sub(s.leaveAt)
+	if elapsed >= richTooltipLeaveGrace {
+		s.open = false
+		s.leaveAt = time.Time{}
+		s.srv.Invalidate()
+		return
+	}
+	p.After(richTooltipLeaveGrace - elapsed)
 }
 
 // RichTooltip shows a Material Design 3 rich tooltip beside anchor: a title, a
@@ -140,45 +203,39 @@ func RichTooltip(c *ui.Context, anchor ui.Element, opts ...RichTooltipOptions) u
 	}
 
 	st := ui.Local(anchor, richTooltipKey{}, func() richTooltipState { return richTooltipState{} })
-	now := c.Now()
-	hovering := anchor.Hovered()
-	focused := anchor.Focused() || anchor.FocusWithin()
+	st.srv = c.Services()
+	st.delay = delay
+	st.anchorFocus = anchor.FocusVisible()
 
-	// A dismissed tooltip stays dismissed until the pointer and the focus have
-	// both left it, as Base UI's and MyGo's tooltips do.
-	if !hovering && !focused && !st.panelHovered && !st.panelFocused {
-		st.suppress = false
-		st.hoverSince = time.Time{}
-	}
-	if !st.open && !st.suppress {
-		switch {
-		case focused:
+	// Check focus opening synchronously during build so keyboard Tab brings
+	// the tooltip up immediately on the same frame without waiting a paint pass.
+	if !st.open {
+		st.panelHovered = false
+		st.panelFocused = false
+		if !st.anchorHover && !st.anchorFocus {
+			st.suppress = false
+			st.hoverSince = time.Time{}
+		} else if !st.suppress && st.anchorFocus {
 			st.open = true
 			st.hoverSince = time.Time{}
-		case hovering:
-			if delay < 0 {
-				st.open = true
-			} else if st.hoverSince.IsZero() {
-				st.hoverSince = now
-				c.After(delay)
-			} else if now.Sub(st.hoverSince) >= delay {
-				st.open = true
-			}
-		default:
-			st.hoverSince = time.Time{}
+			st.leaveAt = time.Time{}
 		}
 	}
-	if st.open {
-		if hovering || focused || st.panelHovered || st.panelFocused {
-			st.leaveAt = time.Time{}
-		} else if st.leaveAt.IsZero() {
-			// Give the pointer a moment to cross the gap onto the panel.
-			st.leaveAt = now
-			c.After(richTooltipLeaveGrace)
-		} else if now.Sub(st.leaveAt) >= richTooltipLeaveGrace {
-			st.open = false
-			st.leaveAt = time.Time{}
+
+	rs := ui.Local(anchor, rippleLocalKey{}, func() rippleState { return rippleState{} })
+	if rs.hasDrawOver {
+		rs.hoverHook = func(p *ui.Painter, now time.Time, hovered bool) {
+			st.anchorHover = hovered
+			st.stepHover(p, now)
 		}
+	} else {
+		anchor.DrawOver(func(p *ui.Painter, r ui.Rect) {
+			if r.W <= 0 || r.H <= 0 {
+				return
+			}
+			st.anchorHover = !anchor.IsDisabled() && anchor.Hovered()
+			st.stepHover(p, p.Now())
+		})
 	}
 
 	if st.open {
@@ -189,24 +246,46 @@ func RichTooltip(c *ui.Context, anchor ui.Element, opts ...RichTooltipOptions) u
 				}
 				st.open = false
 				st.suppress = true
+				st.hoverSince = time.Time{}
+				st.leaveAt = time.Time{}
 			})
 		})
 		if panel.Valid() {
 			panel.AttachTo(anchor, ui.AnchorTopStart, ui.AnchorBottomStart).
 				Margin(0, 0, 8, 0).AttachEdgeMargin(8)
-			st.panelHovered = panel.Hovered()
 			st.panelFocused = panel.FocusWithin()
+			panel.DrawOver(func(p *ui.Painter, r ui.Rect) {
+				if r.W <= 0 || r.H <= 0 {
+					return
+				}
+				st.panelHovered = panel.Hovered()
+				st.stepHover(p, p.Now())
+			})
 			if panel.Dismissed() {
 				st.open = false
 				st.suppress = true
+				st.panelHovered = false
+				st.panelFocused = false
+				st.hoverSince = time.Time{}
+				st.leaveAt = time.Time{}
+			} else if !st.anchorHover && !st.anchorFocus && !st.panelHovered && !st.panelFocused {
+				now := c.Now()
+				if st.leaveAt.IsZero() {
+					st.leaveAt = now
+					c.After(richTooltipLeaveGrace)
+				} else if now.Sub(st.leaveAt) >= richTooltipLeaveGrace {
+					st.open = false
+					st.leaveAt = time.Time{}
+				} else {
+					c.After(richTooltipLeaveGrace - now.Sub(st.leaveAt))
+				}
+			} else {
+				st.leaveAt = time.Time{}
 			}
 		} else {
 			st.panelHovered = false
 			st.panelFocused = false
 		}
-	} else {
-		st.panelHovered = false
-		st.panelFocused = false
 	}
 	return anchor
 }
@@ -214,15 +293,12 @@ func RichTooltip(c *ui.Context, anchor ui.Element, opts ...RichTooltipOptions) u
 // buildRichTooltipPanel styles a rich tooltip's popover panel and builds its
 // text and action.
 func buildRichTooltipPanel(c *ui.Context, th *Theme, panel ui.Element, o RichTooltipOptions, onAction func()) {
-	width := o.Width
-	if !(width > 0) {
-		width = richTooltipDefaultWidth
-	}
+	width := sanitizePositiveF32(o.Width, richTooltipDefaultWidth)
 	bg := th.Colors.SurfaceContainer
 	if bg.A == 0 {
 		bg = SurfaceColorForElevation(th, tokens.Level2)
 	}
-	panel.Width(width).Padding(16).Radius(th.Shapes.Radius(tokens.ShapeMedium)).
+	panel.Width(width).Padding(16).Gap(6).Radius(th.Shapes.Radius(tokens.ShapeMedium)).
 		Background(bg).TextColor(th.Colors.OnSurface).
 		Role(ui.RoleGroup)
 	label := o.Label

@@ -210,8 +210,8 @@ func TestRichTooltipEscape(t *testing.T) {
 	}
 }
 
-// TestRichTooltipTabReachesAction checks keyboard focus opens the tooltip and
-// Tab moves into its action.
+// TestRichTooltipTabReachesAction checks mouse click does not pop the rich
+// tooltip, while keyboard Tab opens it immediately and reaches its action.
 func TestRichTooltipTabReachesAction(t *testing.T) {
 	th := ThemeFromSeed(DefaultSeedColor)
 	tt := feedbackCanvas(th, func(c *ui.Context) {
@@ -223,12 +223,71 @@ func TestRichTooltipTabReachesAction(t *testing.T) {
 	})
 	tt.Click("Details")
 	tt.Frame()
+	if tt.HasText("Archive") {
+		t.Fatal("mouse click opened the rich tooltip instead of keyboard focus")
+	}
+	tt.ClickAt(5, 5)
+	tt.Key(0, ui.KeyTab)
+	tt.Frame()
 	if !tt.HasText("Archive") {
-		t.Fatal("focus does not show the rich tooltip at once")
+		t.Fatal("keyboard Tab focus does not show the rich tooltip at once")
 	}
 	tt.Key(0, ui.KeyTab)
 	if !tt.Focused("Archive") {
 		t.Fatal("Tab does not reach the rich tooltip's action")
+	}
+}
+
+// TestRichTooltipHoverGapAndNoEarlyOpen checks hovering off before Delay does not
+// open the tooltip, while crossing the gap from anchor to panel keeps it open.
+func TestRichTooltipHoverGapAndNoEarlyOpen(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor)
+	clicked := 0
+	tt := feedbackCanvas(th, func(c *ui.Context) {
+		RichTooltip(c, Button(c, "Info"), RichTooltipOptions{
+			Title: "More info",
+			Body:  "Detailed explanation.",
+			Action: &RichTooltipAction{
+				Label:   "Open",
+				OnClick: func() { clicked++ },
+			},
+		})
+	})
+	info, ok := tt.AccessByRole(ui.RoleButton, "Info")
+	if !ok {
+		t.Fatal("Info button missing")
+	}
+	cx, cy := center(info.Bounds)
+	tt.Move(cx, cy)
+	tt.Advance(200 * time.Millisecond)
+	tt.Move(5, 5)
+	tt.Advance(600 * time.Millisecond)
+	if tt.HasText("Detailed explanation.") {
+		t.Fatal("rich tooltip opened after pointer left before Delay")
+	}
+
+	tt.Move(cx, cy)
+	tt.Advance(700 * time.Millisecond)
+	if !tt.HasText("Detailed explanation.") {
+		t.Fatal("rich tooltip did not open after Delay")
+	}
+	act, ok := tt.AccessByRole(ui.RoleButton, "Open")
+	if !ok {
+		t.Fatal("Open action missing")
+	}
+	ax, ay := center(act.Bounds)
+	// Cross the gap quickly (< 120ms) onto the action panel and confirm it stays open.
+	tt.Move(cx, cy+info.Bounds.H/2+4)
+	tt.Advance(40 * time.Millisecond)
+	tt.Move(ax, ay)
+	tt.Advance(300 * time.Millisecond)
+	if !tt.HasText("Detailed explanation.") {
+		t.Fatal("rich tooltip closed even after pointer moved onto the panel")
+	}
+	tt.ClickAt(ax, ay)
+	tt.Advance(300 * time.Millisecond)
+	if clicked != 1 {
+		t.Fatalf("rich tooltip action ran %d times, want 1", clicked)
 	}
 }
 

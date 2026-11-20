@@ -109,7 +109,8 @@ func buildTabs(c *ui.Context, items []TabItem, opts []TabsOptions, primary bool)
 		label = "Tabs"
 	}
 
-	root := ui.Column(c).FillWidth().Height(tabsHeight)
+	root := ui.Column(c).FillWidth().Height(tabsHeight).DimDisabled(false)
+	root.Disabled(o.Disabled)
 	selected := o.Selected
 	if selected == nil {
 		selected = ui.Local(root, tabsSelectedKey{}, func() int { return 0 })
@@ -126,7 +127,7 @@ func buildTabs(c *ui.Context, items []TabItem, opts []TabsOptions, primary bool)
 
 	buildList := func() {
 		tabs = ui.TabsBase(c, selected, len(items))
-		tabs.List.Label(label).Height(tabsHeight)
+		tabs.List.DimDisabled(false).Label(label).Height(tabsHeight)
 		if !o.Scrollable {
 			tabs.List.FillWidth()
 		}
@@ -135,6 +136,7 @@ func buildTabs(c *ui.Context, items []TabItem, opts []TabsOptions, primary bool)
 				item := &items[i]
 				c.Key(tabsTabKey{i: i})
 				tab := tabs.Tab(i).
+					DimDisabled(false).
 					Height(tabsHeight).
 					PaddingX(tabsPaddingX).
 					Gap(tabsIconGap).
@@ -180,6 +182,7 @@ func buildTabs(c *ui.Context, items []TabItem, opts []TabsOptions, primary bool)
 	if o.Scrollable {
 		root.Children(func() {
 			scroll := ui.ScrollHorizontal(c).
+				DimDisabled(false).
 				Height(tabsHeight).
 				FillWidth().
 				Scrollbars(false)
@@ -238,7 +241,7 @@ func buildTabs(c *ui.Context, items []TabItem, opts []TabsOptions, primary bool)
 	}
 
 	disabledInk := cs.Primary
-	if o.Disabled {
+	if o.Disabled || tabs.List.IsDisabled() || tabEls[*selected].IsDisabled() {
 		disabledInk = cs.OnSurface.Alpha(float32(tokens.DisabledContentOpacity))
 	}
 	if !primary && cs.OutlineVariant.A > 0 {

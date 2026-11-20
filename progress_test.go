@@ -401,3 +401,69 @@ func TestProgressAncestorDisabledUsesDisabledTokens(t *testing.T) {
 		t.Fatalf("disabled ring paints %d content and %d container pixels", active, track)
 	}
 }
+
+// TestProgressGeometrySmoothTrackSmallValueAndWrapContinuity checks smooth
+// wavy tracks, circular small values, ReduceMotion linear band visibility, and
+// wrap continuity across the 1800ms cycle boundary.
+func TestProgressGeometrySmoothTrackSmallValueAndWrapContinuity(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor)
+	cs := th.Colors
+	track := cs.SurfaceContainerHighest
+	if track.A == 0 {
+		track = cs.SurfaceVariant
+	}
+
+	// Circular wavy track uses zero amplitude (same smooth track as non-wavy)
+	// even at determinate values near zero; 0.01 paints a minimal active dot.
+	tt := progressCanvas(th, func(c *ui.Context) {
+		ui.Row(c).Gap(24).Children(func() {
+			CircularWavyProgress(c, 0, ProgressOptions{Label: "ZeroWave", Size: 64})
+			CircularWavyProgress(c, 0.01, ProgressOptions{Label: "TinyWave", Size: 64})
+		})
+	})
+	zeroInfo := progressInfo(t, tt, "ZeroWave")
+	tinyInfo := progressInfo(t, tt, "TinyWave")
+	img := tt.Image()
+	if _, activeZero := progressInk(img, zeroInfo.Bounds, 'a', cs.Primary, track); activeZero != 0 {
+		t.Fatalf("value=0 circular wavy painted %d active pixels, want 0", activeZero)
+	}
+	if _, activeTiny := progressInk(img, tinyInfo.Bounds, 'a', cs.Primary, track); activeTiny < 4 {
+		t.Fatalf("value=0.01 circular wavy painted %d active pixels, want visible start dot", activeTiny)
+	}
+
+	// Indeterminate circular ring rotation across progressCycle (1800ms) must
+	// change continuously instead of jumping 180 degrees.
+	ringTT := progressCanvas(th, func(c *ui.Context) {
+		CircularWavyProgress(c, -1, ProgressOptions{Label: "ContinuousRing", Size: 64})
+	})
+	ringInfo := progressInfo(t, ringTT, "ContinuousRing")
+	ringTT.Advance(900 * time.Millisecond)
+	midA := ringTT.Image()
+	ringTT.Advance(20 * time.Millisecond)
+	midB := ringTT.Image()
+	midDiff := indicatorBoxDiff(midA, midB, ringInfo.Bounds)
+
+	ringTT.Advance(progressCycle - 920*time.Millisecond - 10*time.Millisecond)
+	beforeWrap := ringTT.Image()
+	ringTT.Advance(20 * time.Millisecond)
+	afterWrap := ringTT.Image()
+	wrapDiff := indicatorBoxDiff(beforeWrap, afterWrap, ringInfo.Bounds)
+	if wrapDiff > max(120, midDiff*2) {
+		t.Fatalf("circular indeterminate jumped across 1800ms cycle wrap (%d pixels vs mid-cycle %d)", wrapDiff, midDiff)
+	}
+
+	// ReduceMotion indeterminate linear bar still renders a centered active band.
+	rmTh := ThemeFromSeed(DefaultSeedColor, ThemeOptions{ReduceMotion: true})
+	rmTT := progressCanvas(rmTh, func(c *ui.Context) {
+		LinearWavyProgress(c, -1, ProgressOptions{Label: "RMBar"})
+	})
+	rmInfo := progressInfo(t, rmTT, "RMBar")
+	rmInk, rmCount := progressInk(rmTT.Image(), rmInfo.Bounds, 'a', rmTh.Colors.Primary, track)
+	if rmCount < 20 {
+		t.Fatalf("ReduceMotion indeterminate linear painted only %d active pixels", rmCount)
+	}
+	mid := (rmInk.X + rmInk.W/2) - rmInfo.Bounds.X
+	if absF32(mid-rmInfo.Bounds.W/2) > rmInfo.Bounds.W*0.15 {
+		t.Fatalf("ReduceMotion indeterminate linear band centered at %.1f of %.1f, want centered", mid, rmInfo.Bounds.W)
+	}
+}

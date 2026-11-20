@@ -228,7 +228,7 @@ func TestModalNavigationDrawerDisabledKeepsOpenState(t *testing.T) {
 
 			disabled = false
 			tt.Frame()
-			tt.Advance(300 * time.Millisecond)
+			tt.Advance(600 * time.Millisecond)
 			if _, ok := tt.AccessByRole(ui.RoleDialog, "Drawer"); !ok {
 				t.Fatal("re-enabling does not restore the open drawer")
 			}
@@ -371,7 +371,7 @@ func TestModalNavigationDrawerClosesOnScrimEscapeAndDrag(t *testing.T) {
 		if err := tt.Click("Menu"); err != nil {
 			t.Fatalf("clicking Menu: %v", err)
 		}
-		tt.Advance(300 * time.Millisecond)
+		tt.Advance(600 * time.Millisecond)
 		info, ok := tt.AccessByRole(ui.RoleDialog, "Drawer")
 		if !ok {
 			t.Fatal("the modal drawer is not a dialog in the access tree")
@@ -380,7 +380,7 @@ func TestModalNavigationDrawerClosesOnScrimEscapeAndDrag(t *testing.T) {
 	}
 	closeDrawer := func(what string) {
 		t.Helper()
-		tt.Advance(300 * time.Millisecond)
+		tt.Advance(600 * time.Millisecond)
 		if _, ok := tt.AccessByRole(ui.RoleDialog, "Drawer"); ok {
 			t.Fatalf("%s does not close the drawer", what)
 		}
@@ -457,7 +457,7 @@ func TestModalNavigationDrawerRTLDrag(t *testing.T) {
 	if err := tt.Click("Menu"); err != nil {
 		t.Fatalf("clicking Menu: %v", err)
 	}
-	tt.Advance(300 * time.Millisecond)
+	tt.Advance(600 * time.Millisecond)
 	info, ok := tt.AccessByRole(ui.RoleDialog, "Drawer")
 	if !ok {
 		t.Fatal("the modal drawer is not a dialog in the access tree")
@@ -469,7 +469,7 @@ func TestModalNavigationDrawerRTLDrag(t *testing.T) {
 	tt.Press(x, y)
 	tt.Move(x+120, y)
 	tt.Release(x+120, y)
-	tt.Advance(300 * time.Millisecond)
+	tt.Advance(600 * time.Millisecond)
 	if _, ok := tt.AccessByRole(ui.RoleDialog, "Drawer"); ok {
 		t.Fatal("a rightward drag does not close the right-to-left drawer")
 	}
@@ -603,5 +603,137 @@ func TestNavigationDrawerDisabled(t *testing.T) {
 	tt.Advance(300 * time.Millisecond)
 	if selected != 3 {
 		t.Fatalf("the disabled drawer chose %d", selected)
+	}
+}
+
+// TestNavDisabledSelectedPillAndCollapsedRailGeometry checks disabled selected
+// destinations paint DisabledContainerOpacity instead of SecondaryContainer and
+// that the collapsed rail indicator wraps only its icon slot without clipping
+// the label or exceeding item width.
+func TestNavDisabledSelectedPillAndCollapsedRailGeometry(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor)
+	cs := th.Colors
+
+	barSel := 0
+	bar := navigationCanvas(th, 480, 320, func(c *ui.Context) {
+		ui.Column(c).FillHeight().Justify(ui.End).Children(func() {
+			NavigationBar(c, []NavigationDestination{
+				{Label: "Home", Icon: mdicon.Add.Draw},
+				{Label: "Search", Icon: mdicon.Search.Draw},
+			}, NavigationBarOptions{Selected: &barSel, Label: "Bar", Disabled: true})
+		})
+	})
+	bar.Advance(400 * time.Millisecond)
+	home := tabInfo(t, bar, "Home")
+	barBg := SurfaceColorForElevation(th, tokens.Level2)
+	wantBarPill := cs.OnSurface.Alpha(float32(tokens.DisabledContainerOpacity)).Over(barBg)
+	barImg := bar.Image()
+	barPx := barImg.RGBAAt(int(home.Bounds.X+home.Bounds.W/2-22), int(home.Bounds.Y+28))
+	if colorMatches(barPx, cs.SecondaryContainer, 14) {
+		t.Fatalf("disabled selected bar pill still painted bright SecondaryContainer %+v", barPx)
+	}
+	if !colorMatches(barPx, wantBarPill, 14) {
+		t.Fatalf("disabled selected bar pill = %+v, want %+v", barPx, rgbOf(wantBarPill))
+	}
+
+	// Collapsed rail pill sits over the top icon slot (width <= 56, height 32)
+	// and never paints SecondaryContainer into the label band below it.
+	railSel := 0
+	rail := navigationCanvas(th, 600, 400, func(c *ui.Context) {
+		ui.Row(c).FillHeight().Children(func() {
+			NavigationRail(c, []NavigationDestination{
+				{Label: "Home", Icon: mdicon.Add.Draw},
+				{Label: "Search", Icon: mdicon.Search.Draw},
+			}, NavigationRailOptions{Selected: &railSel, Label: "Rail"})
+		})
+	})
+	rail.Advance(400 * time.Millisecond)
+	railHome := tabInfo(t, rail, "Home")
+	railImg := rail.Image()
+	iconY := int(railHome.Bounds.Y + 14)
+	labelY := int(railHome.Bounds.Y + railHome.Bounds.H - 6)
+	railPx := railImg.RGBAAt(int(railHome.Bounds.X+8), iconY)
+	if !colorMatches(railPx, cs.SecondaryContainer, 14) {
+		t.Fatalf("collapsed rail icon pill pixel = %+v, want SecondaryContainer %+v", railPx, rgbOf(cs.SecondaryContainer))
+	}
+	labelBandPx := railImg.RGBAAt(int(railHome.Bounds.X+6), labelY)
+	if colorMatches(labelBandPx, cs.SecondaryContainer, 14) {
+		t.Fatalf("collapsed rail pill leaked into label band at y=%d", labelY)
+	}
+}
+
+// TestModalDrawerItemSwipeAndScroll checks horizontal swipe-to-dismiss initiated
+// over a destination item suppresses click selection and closes, and long
+// drawer lists scroll cleanly.
+func TestModalDrawerItemSwipeAndScroll(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor)
+	open := false
+	selected := 0
+	changed := 0
+	var items []NavigationDrawerItem
+	for i := 0; i < 16; i++ {
+		items = append(items, NavigationDrawerItem{
+			Label: "Item " + string(rune('A'+i)),
+			Icon:  mdicon.Star.Draw,
+		})
+	}
+	tt := navigationCanvas(th, 600, 320, func(c *ui.Context) {
+		NavigationDrawer(c, items, NavigationDrawerOptions{
+			Modal:    true,
+			Open:     &open,
+			Selected: &selected,
+			Changed:  func(int) { changed++ },
+			Label:    "Drawer",
+		})
+		ui.Box(c).Size(600, 320).Justify(ui.Center).AlignItems(ui.Center).Children(func() {
+			if Button(c, "Menu").Clicked() {
+				open = true
+			}
+		})
+	})
+	tt.Click("Menu")
+	tt.Advance(600 * time.Millisecond)
+	if _, ok := tt.AccessByRole(ui.RoleDialog, "Drawer"); !ok {
+		t.Fatal("drawer did not open")
+	}
+	itemB := tabInfo(t, tt, "Item B")
+	// Dragging leftward starting directly on "Item B" closes the drawer without
+	// clicking/selecting Item B.
+	x, y := itemB.Bounds.X+itemB.Bounds.W/2, itemB.Bounds.Y+itemB.Bounds.H/2
+	tt.Press(x, y)
+	tt.Move(x-100, y)
+	tt.Release(x-100, y)
+	tt.Advance(600 * time.Millisecond)
+	if open {
+		t.Fatal("horizontal swipe starting on destination item did not close modal drawer")
+	}
+	if _, ok := tt.AccessByRole(ui.RoleDialog, "Drawer"); ok {
+		t.Fatal("swiped modal drawer still present in access tree")
+	}
+	if selected != 0 || changed != 0 {
+		t.Fatalf("item swipe also triggered selection (%d, changed=%d)", selected, changed)
+	}
+	if tt.FramePending() {
+		t.Fatal("swiped modal drawer keeps requesting frames")
+	}
+
+	// Reopen and verify vertical scrolling moves off-screen items into view.
+	tt.Click("Menu")
+	tt.Advance(600 * time.Millisecond)
+	firstBefore := tabInfo(t, tt, "Item A").Bounds
+	dlg, _ := tt.AccessByRole(ui.RoleDialog, "Drawer")
+	if firstBefore.X < dlg.Bounds.X || firstBefore.X >= dlg.Bounds.X+dlg.Bounds.W || firstBefore.W <= 0 || firstBefore.H <= 0 {
+		t.Fatalf("drawer item not laid out inside dialog panel: item=%+v dlg=%+v", firstBefore, dlg.Bounds)
+	}
+	tt.Wheel(dlg.Bounds.X+100, dlg.Bounds.Y+160, 0, -240)
+	tt.Advance(400 * time.Millisecond)
+	firstAfter := tabInfo(t, tt, "Item A").Bounds
+	if firstAfter.Y >= firstBefore.Y {
+		tt.Wheel(dlg.Bounds.X+100, dlg.Bounds.Y+160, 0, 240)
+		tt.Advance(400 * time.Millisecond)
+		firstAfter = tabInfo(t, tt, "Item A").Bounds
+	}
+	if absF32(firstAfter.Y-firstBefore.Y) < 1 {
+		t.Fatalf("drawer list did not scroll vertically (y stayed at %.1f, before=%.1f)", firstAfter.Y, firstBefore.Y)
 	}
 }

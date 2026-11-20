@@ -95,6 +95,7 @@ func NavigationBar(c *ui.Context, destinations []NavigationDestination, opts ...
 	}
 
 	bar := ui.Row(c).
+		DimDisabled(false).
 		Height(navBarHeight).
 		FillWidth().
 		Background(SurfaceColorForElevation(th, tokens.Level2)).
@@ -148,15 +149,20 @@ func navBarDestination(c *ui.Context, th *Theme, cs tokens.ColorScheme, dest *Na
 	showLabel := o.Labels == NavigationLabelsAlways ||
 		(o.Labels == NavigationLabelsSelectedOnly && selected)
 	el.Children(func() {
-		ui.Box(c).Size(navBarIndicatorWide, navBarIndicatorHigh).Shrink(0).
+		ui.Box(c).Size(navBarIndicatorWide, navBarIndicatorHigh).Shrink(0).Center().
 			Draw(func(p *ui.Painter, r ui.Rect) {
 				if indicator <= 0.001 || r.W <= 0 || r.H <= 0 {
 					return
 				}
+				alpha := clampF32(indicator, 0, 1)
 				scale := min(indicator, 1.1)
 				w := r.W * scale
 				box := ui.Rect{X: r.X + (r.W-w)/2, Y: r.Y, W: w, H: r.H}
-				p.FillRadii(box, [4]float32{r.H / 2, r.H / 2, r.H / 2, r.H / 2}, cs.SecondaryContainer.Alpha(clampF32(indicator, 0, 1)))
+				pill := cs.SecondaryContainer.Alpha(alpha)
+				if disabled {
+					pill = cs.OnSurface.Alpha(float32(tokens.DisabledContainerOpacity) * alpha)
+				}
+				p.FillRadii(box, [4]float32{r.H / 2, r.H / 2, r.H / 2, r.H / 2}, pill)
 			}).
 			Children(func() {
 				badgedIcon(c, dest, navBarIconSize, iconInk)

@@ -103,14 +103,8 @@ func Card(c *ui.Context, content func(), opts ...CardOptions) ui.Element {
 	cs := th.Colors
 
 	interactive := o.Clickable || o.OnClick != nil
-	rest := o.Radius
-	if !(rest > 0) {
-		rest = th.Shapes.Radius(tokens.ShapeMedium)
-	}
-	padding := o.Padding
-	if !(padding > 0) {
-		padding = 16
-	}
+	rest := sanitizePositiveF32(o.Radius, th.Shapes.Radius(tokens.ShapeMedium))
+	padding := sanitizePositiveF32(o.Padding, 16)
 
 	var el ui.Element
 	if interactive {
@@ -119,6 +113,7 @@ func Card(c *ui.Context, content func(), opts ...CardOptions) ui.Element {
 	} else {
 		el = ui.Column(c).DimDisabled(false)
 	}
+	el.Disabled(o.Disabled)
 	disabled := o.Disabled || el.IsDisabled()
 
 	bg, border, elevation := cardPalette(th, o.Variant, disabled)
@@ -139,9 +134,6 @@ func Card(c *ui.Context, content func(), opts ...CardOptions) ui.Element {
 	}
 	radius := animateWithTheme(el, th, cardCornerKey{}, target, motion.FastSpatial)
 
-	if interactive {
-		el.Disabled(o.Disabled)
-	}
 	el.Padding(padding).Radius(radius)
 	if bg.A > 0 {
 		el.Background(bg)

@@ -500,3 +500,75 @@ func TestInteractiveCardStacksChildrenVertically(t *testing.T) {
 		t.Fatalf("card OnClick ran %d times, want 1", clicks)
 	}
 }
+
+// TestCardListDividerDisabledConsistencyAndInsets checks non-interactive
+// disabled cards/list items expose disabled semantics, disabled lists don't
+// double-dim, and Divider honors vertical insets and Shrink(0).
+func TestCardListDividerDisabledConsistencyAndInsets(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor)
+	cs := th.Colors
+	tt := containerCanvas(th, func(c *ui.Context) {
+		Card(c, func() {
+			ui.Text(c, "Static disabled card")
+		}, CardOptions{Variant: CardFilled, Label: "StaticCard", Disabled: true})
+		List(c, []ListItem{
+			{Headline: "Row One", Disabled: true},
+		}, ListOptions{Label: "PlainList"})
+		ui.Column(c).Height(60).Width(160).Children(func() {
+			Divider(c, DividerOptions{Label: "HDiv"})
+			ui.Box(c).Height(80).FillWidth()
+		})
+		ui.Row(c).Height(40).Children(func() {
+			Divider(c, DividerOptions{
+				Vertical:   true,
+				StartInset: 6,
+				EndInset:   10,
+				Thickness:  2,
+				Label:      "VDiv",
+			})
+		})
+	})
+	tt.Frame()
+
+	var cardInfo ui.AccessInfo
+	foundCard := false
+	for _, info := range tt.AccessAll() {
+		if info.Name == "StaticCard" {
+			cardInfo = info
+			foundCard = true
+			break
+		}
+	}
+	if !foundCard {
+		t.Fatal("StaticCard missing from access tree")
+	}
+	if !cardInfo.Disabled {
+		t.Fatal("non-interactive Disabled Card does not expose Disabled=true")
+	}
+	rowInfo := listItemInfo(t, tt, "Row One")
+	if !rowInfo.Disabled {
+		t.Fatal("non-interactive Disabled ListItem does not expose Disabled=true")
+	}
+	hdiv, ok := tt.AccessByRole(ui.RoleSeparator, "HDiv")
+	if !ok {
+		t.Fatal("horizontal divider missing")
+	}
+	if hdiv.Bounds.H < 0.9 {
+		t.Fatalf("horizontal divider shrank to height %.2f", hdiv.Bounds.H)
+	}
+	vdiv, ok := tt.AccessByRole(ui.RoleSeparator, "VDiv")
+	if !ok {
+		t.Fatal("vertical divider missing")
+	}
+	if absF32(vdiv.Bounds.H-(40-6-10)) > 0.5 || absF32(vdiv.Bounds.W-2) > 0.5 {
+		t.Fatalf("vertical divider bounds = %+v, want width 2 height 24", vdiv.Bounds)
+	}
+
+	// Verify disabled list row container paints single-dimmed DisabledContainerOpacity (0.12)
+	// over canvasRGB without stacked DimDisabled attenuation.
+	wantRowBg := cs.OnSurface.Alpha(float32(tokens.DisabledContainerOpacity)).Over(canvasRGB)
+	rowPx := tt.Image().RGBAAt(int(rowInfo.Bounds.X+4), int(rowInfo.Bounds.Y+rowInfo.Bounds.H/2))
+	if !colorMatches(rowPx, wantRowBg, 10) {
+		t.Fatalf("disabled list row background = %+v, want %+v", rowPx, rgbOf(wantRowBg))
+	}
+}

@@ -85,23 +85,40 @@ func DropdownMenu(c *ui.Context, label string, items []MenuItem, opts ...MenuOpt
 		o = opts[0]
 	}
 	th := CurrentTheme(c)
+	cs := th.Colors
 	buildTrigger := func(open *bool, grow bool) ui.Element {
+		if o.Disabled && *open {
+			*open = false
+		}
 		m := ui.MenuBase(c, open)
-		trigger := m.Trigger.Height(menuTriggerHeight).PaddingX(16).Gap(8).
-			Radius(menuTriggerRadius).Label(label).Disabled(o.Disabled).
-			TextColor(th.Colors.OnSurface)
+		trigger := m.Trigger.DimDisabled(false).
+			Height(menuTriggerHeight).PaddingX(16).Gap(8).
+			Radius(menuTriggerRadius).Label(label).Disabled(o.Disabled)
+		disabled := o.Disabled || trigger.IsDisabled()
+		if disabled && *open {
+			*open = false
+			c.Invalidate()
+		}
+		ink := cs.OnSurface
+		chevronInk := cs.OnSurfaceVariant
+		if disabled {
+			ink = cs.OnSurface.Alpha(float32(tokens.DisabledContentOpacity))
+			chevronInk = ink
+		}
+		trigger.TextColor(ink)
 		if grow {
 			trigger.Grow(1)
 		}
 		attachRippleWithTheme(th, trigger, StateLayerOptions{
-			Color:    th.Colors.OnSurface,
+			Color:    ink,
 			Radius:   menuTriggerRadius,
-			Disabled: o.Disabled || trigger.IsDisabled(),
+			Disabled: disabled,
 		})
 		trigger.Children(func() {
 			txt := ui.Text(c, label).NoWrap()
 			applyTypeStyleWithTheme(th, txt, tokens.LabelLarge)
-			drawIconBox(c, mdicon.ChevronDown.Draw, 18, th.Colors.OnSurfaceVariant)
+			txt.TextColor(ink)
+			drawIconBox(c, mdicon.ChevronDown.Draw, 18, chevronInk)
 		})
 		m.Popup(func(panel ui.Element) {
 			styleMenuPanel(th, panel, o)
@@ -112,7 +129,7 @@ func DropdownMenu(c *ui.Context, label string, items []MenuItem, opts ...MenuOpt
 	if o.Open != nil {
 		return buildTrigger(o.Open, false)
 	}
-	wrap := ui.Row(c).Shrink(0)
+	wrap := ui.Row(c).Shrink(0).DimDisabled(false)
 	open := ui.Local(wrap, menuOpenKey{}, func() bool { return false })
 	wrap.Children(func() {
 		trigger := buildTrigger(open, true)
@@ -138,20 +155,35 @@ func MenuButton(c *ui.Context, label string, icon IconDraw, items []MenuItem, op
 		panic("md3e: MenuButton requires an accessibility label")
 	}
 	th := CurrentTheme(c)
+	cs := th.Colors
 	buildTrigger := func(open *bool) ui.Element {
+		if o.Disabled && *open {
+			*open = false
+		}
 		m := ui.MenuBase(c, open)
-		trigger := m.Trigger.Size(menuTriggerHeight, menuTriggerHeight).
+		trigger := m.Trigger.DimDisabled(false).
+			Size(menuTriggerHeight, menuTriggerHeight).
 			Radius(menuTriggerHeight / 2).
-			Background(th.Colors.SurfaceContainerHighest).
-			TextColor(th.Colors.OnSurfaceVariant).
 			Label(label).Disabled(o.Disabled)
+		disabled := o.Disabled || trigger.IsDisabled()
+		if disabled && *open {
+			*open = false
+			c.Invalidate()
+		}
+		bg := cs.SurfaceContainerHighest
+		ink := cs.OnSurfaceVariant
+		if disabled {
+			bg = cs.OnSurface.Alpha(float32(tokens.DisabledContainerOpacity))
+			ink = cs.OnSurface.Alpha(float32(tokens.DisabledContentOpacity))
+		}
+		trigger.Background(bg).TextColor(ink)
 		attachRippleWithTheme(th, trigger, StateLayerOptions{
-			Color:    th.Colors.OnSurfaceVariant,
+			Color:    ink,
 			Radius:   menuTriggerHeight / 2,
-			Disabled: o.Disabled || trigger.IsDisabled(),
+			Disabled: disabled,
 		})
 		trigger.Children(func() {
-			drawIconBox(c, icon, 24, th.Colors.OnSurfaceVariant)
+			drawIconBox(c, icon, 24, ink)
 		})
 		m.Popup(func(panel ui.Element) {
 			styleMenuPanel(th, panel, o)
@@ -162,7 +194,7 @@ func MenuButton(c *ui.Context, label string, icon IconDraw, items []MenuItem, op
 	if o.Open != nil {
 		return buildTrigger(o.Open)
 	}
-	wrap := ui.Row(c).Shrink(0)
+	wrap := ui.Row(c).Shrink(0).DimDisabled(false)
 	open := ui.Local(wrap, menuOpenKey{}, func() bool { return false })
 	wrap.Children(func() {
 		trigger := buildTrigger(open)
@@ -194,6 +226,10 @@ func ContextMenu(c *ui.Context, target ui.Element, items []MenuItem, opts ...Men
 	if open == nil {
 		open = ui.Local(target, contextMenuOpenKey{}, func() bool { return false })
 	}
+	if o.Disabled || target.IsDisabled() {
+		*open = false
+		return target
+	}
 	m := ui.ContextMenuBase(c, target, open)
 	m.Popup(func(panel ui.Element) {
 		styleMenuPanel(th, panel, o)
@@ -204,7 +240,7 @@ func ContextMenu(c *ui.Context, target ui.Element, items []MenuItem, opts ...Men
 
 // styleMenuPanel paints the layered, large-cornered menu surface.
 func styleMenuPanel(th *Theme, panel ui.Element, o MenuOptions) {
-	if o.Width > 0 {
+	if isPositiveFiniteF32(o.Width) {
 		panel.Width(o.Width)
 	} else {
 		panel.MinWidth(menuPanelMinWidth)
@@ -227,27 +263,31 @@ func buildMenuItems(c *ui.Context, th *Theme, m ui.MenuParts, items []MenuItem, 
 			Divider(c, DividerOptions{Inset: menuPanelPadding})
 			continue
 		}
-		if len(item.Submenu) > 0 {
-			row := m.SubmenuItem()
-			styleMenuRow(c, th, row, item, true, false)
-			m.Submenu(row, func(panel ui.Element) {
-				styleMenuPanel(th, panel, MenuOptions{})
-				buildMenuItems(c, th, m, item.Submenu, level+1)
-			})
-			continue
-		}
-		var row ui.Element
-		if item.Radio {
-			row = m.RadioItem(item.Checked)
-		} else if item.Checkable {
-			row = m.CheckItem(item.Checked)
-		} else {
-			row = m.Item()
-		}
-		styleMenuRow(c, th, row, item, false, item.Radio)
-		if row.Clicked() && !item.Disabled && item.OnClick != nil {
-			item.OnClick()
-		}
+		c.Key(i)
+		slot := ui.Column(c).FillWidth().DimDisabled(false).Disabled(item.Disabled)
+		slot.Children(func() {
+			if len(item.Submenu) > 0 {
+				row := m.SubmenuItem()
+				styleMenuRow(c, th, row, item, true, false)
+				m.Submenu(row, func(panel ui.Element) {
+					styleMenuPanel(th, panel, MenuOptions{})
+					buildMenuItems(c, th, m, item.Submenu, level+1)
+				})
+				return
+			}
+			var row ui.Element
+			if item.Radio {
+				row = m.RadioItem(item.Checked)
+			} else if item.Checkable {
+				row = m.CheckItem(item.Checked)
+			} else {
+				row = m.Item()
+			}
+			styleMenuRow(c, th, row, item, false, item.Radio)
+			if row.Clicked() && !item.Disabled && item.OnClick != nil {
+				item.OnClick()
+			}
+		})
 	}
 }
 
@@ -275,7 +315,8 @@ func styleMenuRow(c *ui.Context, th *Theme, row ui.Element, item *MenuItem, chev
 		subInk = ink
 	}
 
-	row.Height(menuRowHeight).
+	row.DimDisabled(false).
+		Height(menuRowHeight).
 		PaddingY(8).PaddingX(12).
 		Radius(th.Shapes.Radius(tokens.ShapeSmall)).
 		Gap(12).

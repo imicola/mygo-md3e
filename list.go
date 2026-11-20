@@ -113,7 +113,7 @@ func List(c *ui.Context, items []ListItem, opts ...ListOptions) ui.Element {
 	if o.Segmented {
 		gap = listSegmentGap
 	}
-	root := ui.Column(c).Role(ui.RoleList).Gap(gap)
+	root := ui.Column(c).Role(ui.RoleList).Gap(gap).DimDisabled(false)
 	if o.Label != "" {
 		root.Label(o.Label)
 	}
@@ -145,7 +145,7 @@ func listRow(c *ui.Context, th *Theme, item *ListItem, i, n int, o ListOptions) 
 	if interactive {
 		row = ui.ButtonBase(c).DimDisabled(false).FocusRing(false).Role(ui.RoleListItem)
 	} else {
-		row = ui.Row(c).Role(ui.RoleListItem)
+		row = ui.Row(c).DimDisabled(false).Role(ui.RoleListItem)
 	}
 	disabled := o.Disabled || item.Disabled || row.IsDisabled()
 	selected := selectable && *o.Selected == i
@@ -164,12 +164,12 @@ func listRow(c *ui.Context, th *Theme, item *ListItem, i, n int, o ListOptions) 
 	case 3:
 		height = listThreeLineHeight
 	}
-	row.Height(height).FillWidth().PaddingX(listRowPadding).Gap(listSlotGap).AlignItems(ui.Center)
+	row.Height(height).FillWidth().PaddingX(listRowPadding).Gap(listSlotGap).AlignItems(ui.Center).
+		Disabled(item.Disabled)
 	if item.Headline != "" {
 		row.Label(item.Headline)
 	}
 	if interactive {
-		row.Disabled(item.Disabled)
 		row.AccessSelected(selected)
 	}
 

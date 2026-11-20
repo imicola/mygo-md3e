@@ -125,23 +125,19 @@ func Carousel(c *ui.Context, items []CarouselItem, opts ...CarouselOptions) ui.E
 	th := CurrentTheme(c)
 	cs := th.Colors
 	rtl := c.Direction() == ui.RightToLeft
+	reduce := th.ReduceMotion || c.Preferences().ReduceMotion
 
-	height := o.Height
-	if !(height > 0) {
-		height = carouselDefaultHeight
-	}
-	gap := o.Gap
-	if !(gap > 0) {
-		gap = carouselDefaultGap
-	}
+	height := sanitizePositiveF32(o.Height, carouselDefaultHeight)
+	gap := sanitizePositiveF32(o.Gap, carouselDefaultGap)
 	label := o.Label
 	if label == "" {
 		label = "Carousel"
 	}
 
-	root := ui.Column(c).FillWidth().Height(height).Clip().
+	root := ui.Column(c).FillWidth().Height(height).Clip().DimDisabled(false).
 		Role(ui.RoleGroup).Label(label)
 	root.Disabled(o.Disabled)
+	disabled := o.Disabled || root.IsDisabled()
 
 	index := o.Index
 	if index == nil {
@@ -154,12 +150,16 @@ func Carousel(c *ui.Context, items []CarouselItem, opts ...CarouselOptions) ui.E
 
 	size := ui.Local(root, carouselSizeKey{}, func() carouselSizeState { return carouselSizeState{} })
 	drag := ui.Local(root, carouselDragKey{}, func() carouselDragState { return carouselDragState{} })
+	if disabled {
+		drag.active, drag.dragged, drag.suppress = false, false, false
+	}
 	// -1 rather than the initial index: a carousel the caller starts on a
 	// later slide lines that slide up as it first lays out.
 	lastIndex := ui.Local(root, carouselLastKey{}, func() int { return -1 })
 	scrollState := ui.Local(root, carouselScrollKey{}, func() ui.ScrollState { return ui.ScrollState{} })
 
-	viewW := root.LayoutBounds().W
+	laidW := root.LayoutBounds().W
+	viewW := laidW
 	if viewW <= 0 {
 		if w, _ := c.Size(); w > 0 {
 			viewW = w
@@ -171,16 +171,17 @@ func Carousel(c *ui.Context, items []CarouselItem, opts ...CarouselOptions) ui.E
 	if size.viewW <= 0 {
 		size.viewW = 480
 	}
-	jump := false
-	if viewW > 0 && !size.init {
+	jump := !size.init
+	if laidW > 0 {
 		size.init = true
-		jump = true
+	} else {
+		c.Invalidate()
 	}
 
 	radius := th.Shapes.Radius(tokens.ShapeLarge)
 	base := SurfaceColorForElevation(th, tokens.Level1)
 	ink := cs.OnSurface
-	if o.Disabled {
+	if disabled {
 		ink = cs.OnSurface.Alpha(float32(tokens.DisabledContentOpacity))
 	}
 
@@ -193,11 +194,12 @@ func Carousel(c *ui.Context, items []CarouselItem, opts ...CarouselOptions) ui.E
 		// nearest slide the focus, which is then lined up with the strip's
 		// start, so the spring-animated widths and the snap place never argue.
 		viewport = ui.ScrollHorizontal(c).
+			DimDisabled(false).
 			TrackScroll(scrollState).
 			Scrollbars(false).
 			FillWidth().
 			FillHeight()
-		viewport.Disabled(o.Disabled)
+		viewport.Disabled(disabled)
 
 		viewport.Children(func() {
 			row := ui.Row(c).Gap(gap).AlignItems(ui.Stretch).FocusGroup(ui.Horizontal)
@@ -212,7 +214,9 @@ func Carousel(c *ui.Context, items []CarouselItem, opts ...CarouselOptions) ui.E
 
 					c.Key(carouselItemKey{i: i})
 					el := ui.Box(c).
+						DimDisabled(false).
 						Focusable().
+						Disabled(disabled).
 						Shrink(0).
 						Height(height).
 						ClipInset(0, 0, 0, 0, radius).
@@ -224,7 +228,7 @@ func Carousel(c *ui.Context, items []CarouselItem, opts ...CarouselOptions) ui.E
 					itemEls[i] = el
 					idx := i
 					el.HandleInput(func(ev ui.InputEvent) bool {
-						if o.Disabled {
+						if disabled {
 							return false
 						}
 						switch ev.Kind {
@@ -268,13 +272,12 @@ func Carousel(c *ui.Context, items []CarouselItem, opts ...CarouselOptions) ui.E
 						return false
 					})
 
-					widthTarget := target
-					var width float32
-					if jump {
-						width = el.Jump(carouselWidthKey{i: i}, widthTarget)
-					} else {
-						width = animateWithTheme(el, th, carouselWidthKey{i: i}, widthTarget, motion.DefaultSpatial)
+					if el.PressCanceled() {
+						drag.active, drag.dragged = false, false
 					}
+
+					widthTarget := target
+					width := animateValue(el, carouselWidthKey{i: i}, widthTarget, th.Animation(motion.DefaultSpatial), reduce || jump)
 					el.Width(width)
 
 					el.Children(func() {
@@ -292,8 +295,8 @@ func Carousel(c *ui.Context, items []CarouselItem, opts ...CarouselOptions) ui.E
 							txt.TextColor(ink)
 						})
 					})
-					attachRippleWithTheme(th, el, StateLayerOptions{Color: ink, Radius: radius, Disabled: o.Disabled})
-					if el.Clicked() && !o.Disabled {
+					attachRippleWithTheme(th, el, StateLayerOptions{Color: ink, Radius: radius, Disabled: disabled})
+					if el.Clicked() && !disabled {
 						pressed = i
 					}
 				}
@@ -304,7 +307,7 @@ func Carousel(c *ui.Context, items []CarouselItem, opts ...CarouselOptions) ui.E
 	// Pan the strip from the pointer's place in the viewport, which does not
 	// move with the content, and let go of the drag as a pan once it passes the
 	// threshold.
-	if drag.active && !o.Disabled && viewport.Valid() {
+	if drag.active && !disabled && viewport.Valid() {
 		if x, _, _ := viewport.PointerPosition(); drag.needStart {
 			drag.startX, drag.startPan = x, scrollState.X
 			drag.needStart = false
@@ -328,7 +331,7 @@ func Carousel(c *ui.Context, items []CarouselItem, opts ...CarouselOptions) ui.E
 	if suppress {
 		drag.suppress = false
 	}
-	if pressed >= 0 && !suppress {
+	if pressed >= 0 && !suppress && !disabled {
 		*index = pressed
 		drag.aligning = true
 		if o.Changed != nil {
@@ -351,13 +354,13 @@ func Carousel(c *ui.Context, items []CarouselItem, opts ...CarouselOptions) ui.E
 		}
 		drag.lastAlignX, drag.lastAlignIndex = scrollState.X, i
 		opts := ui.ScrollIntoViewOptions{Inline: ui.ScrollStart}
-		if !th.ReduceMotion {
+		if !reduce {
 			anim := th.Animation(motion.DefaultSpatial)
 			opts.Animation = &anim
 		}
 		itemEls[i].ScrollIntoView(opts)
 	}
-	if alignNow && !o.Disabled {
+	if alignNow && !disabled {
 		alignSlide(*index)
 	}
 
@@ -366,7 +369,7 @@ func Carousel(c *ui.Context, items []CarouselItem, opts ...CarouselOptions) ui.E
 	// scroll), and line a dragged strip up on its nearest slide. While a
 	// choice is being aligned this wait stays out of the way, so widths
 	// reallocating cannot bounce the focus back.
-	if viewport.Valid() {
+	if viewport.Valid() && !disabled {
 		if scrollState.X != drag.lastScroll {
 			drag.lastScroll = scrollState.X
 			drag.stable, drag.synced = 0, false
@@ -384,8 +387,7 @@ func Carousel(c *ui.Context, items []CarouselItem, opts ...CarouselOptions) ui.E
 			if drag.aligning {
 				drag.aligning = false
 			} else {
-				atEnd := scrollState.MaxX > 0 && scrollState.X >= scrollState.MaxX-1
-				nearest, startDist := carouselNearest(itemEls, viewport.LayoutBounds(), *index, rtl, atEnd)
+				nearest, startDist := carouselNearest(itemEls, viewport.LayoutBounds(), *index, rtl)
 				if nearest != *index {
 					*index = nearest
 					*lastIndex = nearest
@@ -443,13 +445,9 @@ func carouselItemWidth(layout CarouselLayout, dist int, viewW float32) float32 {
 }
 
 // carouselNearest returns the slide whose start is closest to the viewport's
-// start, or the last slide at the strip's end where it cannot line up any
-// further, and how far the focused slide's start is from the viewport's: a
+// start, and how far the focused slide's start is from the viewport's: a
 // settled strip has that distance at zero.
-func carouselNearest(items []ui.Element, viewport ui.Rect, focused int, rtl, atEnd bool) (int, float32) {
-	if atEnd {
-		focused = len(items) - 1
-	}
+func carouselNearest(items []ui.Element, viewport ui.Rect, focused int, rtl bool) (int, float32) {
 	best, bestDist := focused, float32(1e9)
 	var startDist float32
 	for i := range items {
@@ -468,9 +466,6 @@ func carouselNearest(items []ui.Element, viewport ui.Rect, focused int, rtl, atE
 		if i == focused {
 			startDist = d
 		}
-	}
-	if atEnd {
-		best = len(items) - 1
 	}
 	return best, startDist
 }
