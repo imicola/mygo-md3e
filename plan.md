@@ -189,7 +189,7 @@
     - 测试验证普通点击与 Toggle 选中切换时边界圆角变化、键盘 Space 切换、`Label` 无障碍命名强制可用、Narrow/Default/Wide 宽度差异准确。
   - **Commit**：`feat(iconbutton): [T4.2] implement Expressive IconButton and morphing ToggleIconButton`
 
-- [ ] **T4.3：实现 ButtonGroup（Connected / Standard）与 SplitButton**
+- [x] **T4.3：实现 ButtonGroup（Connected / Standard）与 SplitButton**
   - **交付物**：`buttongroup.go`、`splitbutton.go`、`buttongroup_test.go`、`splitbutton_test.go`
   - **核心能力**：
     - **ButtonGroup**：支持 `ButtonGroupStandard`（按压/选中按钮沿主轴弹性扩展，轻微挤压邻近按钮）与 `ButtonGroupConnected`（首项外侧圆角大、内部接缝小圆角、选中项切换全圆角）；支持单选/多选/动作组模式，键盘方向键焦点导航；
