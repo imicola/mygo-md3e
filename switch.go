@@ -216,9 +216,12 @@ func drawSwitch(p *ui.Painter, r ui.Rect, s switchPaint) {
 		p.Stroke(r, s.offBorder, radius, 2)
 	}
 
-	cx := r.X + 8 + switchThumbTravel*s.pos
+	// Off, the 16 DIP handle sits 8 DIP in from the track's end, so its center
+	// is 16 DIP from there; on, the 24 DIP handle travels 20 DIP to lie 4 DIP
+	// in, its center 36 from the start.
+	cx := r.X + 16 + switchThumbTravel*s.pos
 	if s.rtl {
-		cx = r.X + r.W - 8 - switchThumbTravel*s.pos
+		cx = r.X + r.W - 16 - switchThumbTravel*s.pos
 	}
 	if s.halo > 0.001 && s.haloInk.A > 0 {
 		h := float32(switchHaloDiameter) / 2

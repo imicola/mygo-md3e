@@ -2,6 +2,7 @@ package md3e
 
 import (
 	"image/color"
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -94,6 +95,10 @@ func TestSwitchClickSpaceAndThumbGeometry(t *testing.T) {
 	if offWidth < 12 || offWidth > 20 {
 		t.Fatalf("off thumb width %d, want about 16", offWidth)
 	}
+	offCenter := thumbCenterOnRow(t, tt, track, th.Colors.Outline)
+	if math.Abs(float64(offCenter-(track.X+16))) > 3 {
+		t.Fatalf("off thumb center %v, want the track's left start %v", offCenter, track.X+16)
+	}
 
 	cx := track.X + track.W/2
 	cy := track.Y + track.H/2
@@ -117,12 +122,19 @@ func TestSwitchClickSpaceAndThumbGeometry(t *testing.T) {
 	if onWidth < offWidth+4 {
 		t.Fatalf("on thumb width %d barely exceeds the off %d", onWidth, offWidth)
 	}
-	// The check mark is the track color cut out of the OnPrimary handle.
+	onCenter := thumbCenterOnRow(t, tt, track, th.Colors.OnPrimary)
+	if math.Abs(float64(onCenter-(track.X+36))) > 4 {
+		t.Fatalf("on thumb center %v, want the track's right end %v", onCenter, track.X+36)
+	}
+	// The check mark is the track color cut out of the OnPrimary handle. Its
+	// glyph is thin and antialiased, so any pixel of the inner handle window
+	// clearly darker than OnPrimary is its ink.
 	img := tt.Image()
 	checkInk := 0
 	for y := int(track.Y + 10); y < int(track.Y+22); y++ {
 		for x := int(track.X + 30); x < int(track.X+42); x++ {
-			if colorMatches(img.RGBAAt(x, y), th.Colors.Primary, 30) {
+			px := img.RGBAAt(x, y)
+			if int(px.R)+int(px.G)+int(px.B) < 650 {
 				checkInk++
 			}
 		}
@@ -432,6 +444,38 @@ func TestRadioSelectedDotAndDisabledPalette(t *testing.T) {
 	}
 }
 
+// TestRadioPressRipple checks the expanding press wave of the radio's 40 DIP
+// heat area: right after the press the wave darkens pixels at its origin while
+// pixels away from it keep only the hover layer, and it settles without frames.
+func TestRadioPressRipple(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor)
+	choice := "A"
+	tt := selectionCanvas(th, func(c *ui.Context) {
+		Radio(c, &choice, "A", "Alpha")
+		Radio(c, &choice, "B", "Beta")
+	})
+	info := buttonInfo(t, tt, ui.RoleRadio, "Beta")
+	cx, cy := checkboxSlotCenter(info.Bounds, false, radioTouchTarget)
+
+	// Hover where the press lands so the state layer is already at its hover
+	// opacity, then press: the wave alone darkens the pixels around its origin.
+	tt.Move(cx+16, cy)
+	tt.Advance(600 * time.Millisecond)
+	tt.Press(cx+16, cy)
+	near := tt.Image().RGBAAt(int(cx+18), int(cy))
+	far := tt.Image().RGBAAt(int(cx), int(cy))
+	nearSum := int(near.R) + int(near.G) + int(near.B)
+	farSum := int(far.R) + int(far.G) + int(far.B)
+	if farSum-nearSum < 10 {
+		t.Fatalf("press wave did not darken its origin: near %+v far %+v", near, far)
+	}
+	tt.Release(cx+16, cy)
+	tt.Advance(700 * time.Millisecond)
+	if tt.FramePending() {
+		t.Fatal("radio press wave did not settle")
+	}
+}
+
 // TestRadioGroupKeyboardAndDisabled checks the group's single Tab stop, arrow,
 // Home and End selection, the update of *selected and the access states.
 func TestRadioGroupKeyboardAndDisabled(t *testing.T) {
@@ -451,6 +495,14 @@ func TestRadioGroupKeyboardAndDisabled(t *testing.T) {
 	tt.Key(0, ui.KeyTab)
 	if !tt.Focused("Small") {
 		t.Fatal("Tab did not focus the chosen radio")
+	}
+	tt.Key(0, ui.KeyDown)
+	if choice != "Medium" {
+		t.Fatalf("Down chose %q, want Medium", choice)
+	}
+	tt.Key(0, ui.KeyUp)
+	if choice != "Small" {
+		t.Fatalf("Up chose %q, want Small", choice)
 	}
 	tt.Key(0, ui.KeyRight)
 	if choice != "Medium" {

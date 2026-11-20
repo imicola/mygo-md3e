@@ -1,6 +1,8 @@
 package md3e
 
 import (
+	"time"
+
 	"github.com/egoist/mygo/ui"
 
 	"mygo-md3e/motion"
@@ -15,6 +17,7 @@ const (
 	radioDotSize      = 10
 	radioTouchTarget  = 40
 	radioHaloDiameter = 40
+	radioRippleTime   = 320 * time.Millisecond
 )
 
 // RadioOptions configures Radio. The zero value is an enabled radio button
@@ -31,10 +34,22 @@ type RadioOptions struct {
 	TouchTarget float32
 }
 
-// AnimateTo channels of a radio button.
+// AnimateTo channels and locals of a radio button.
 type (
 	radioSelectKey struct{}
 	radioHaloKey   struct{}
+	radioRippleKey struct{}
+
+	// radioRippleState is the press wave of a radio's heat area: where it began
+	// in the touch target's DIPs, when, whether it still runs, and the row's
+	// size as the last build laid it out, which tells where the target sits.
+	radioRippleState struct {
+		active bool
+		ox, oy float32
+		start  time.Time
+		rowW   float32
+		rowH   float32
+	}
 )
 
 // Radio builds a Material Design 3 Expressive radio button over *selected,
@@ -62,6 +77,7 @@ func Radio[T comparable](c *ui.Context, selected *T, value T, label string, opts
 
 	th := CurrentTheme(c)
 	cs := th.Colors
+	rtl := c.Direction() == ui.RightToLeft
 
 	el := ui.RadioBase(c, selected, value).
 		DimDisabled(false).
@@ -117,15 +133,46 @@ func Radio[T comparable](c *ui.Context, selected *T, value T, label string, opts
 	halo := el.AnimateTo(radioHaloKey{}, haloTarget, effects)
 	haloInk := cs.OnSurfaceVariant
 
+	// Press waves start only in the ring's touch target, not on the label.
+	rp := ui.Local(el, radioRippleKey{}, func() radioRippleState { return radioRippleState{} })
+	if b := el.Bounds(); b.W > 0 {
+		rp.rowW, rp.rowH = b.W, b.H
+	}
+	if disabled {
+		rp.active = false
+	}
+	el.ObserveInput(func(ev ui.InputEvent) {
+		if disabled {
+			return
+		}
+		if ev.Kind != ui.InputPointerDown || ev.Button != 0 || rp.rowW <= 0 {
+			return
+		}
+		slotX := float32(0)
+		if rtl {
+			slotX = rp.rowW - target
+		}
+		slotY := (rp.rowH - target) / 2
+		if ev.X < slotX || ev.X > slotX+target || ev.Y < slotY || ev.Y > slotY+target {
+			return
+		}
+		rp.active = true
+		rp.ox = clampF32(ev.X-slotX, 0, target)
+		rp.oy = clampF32(ev.Y-slotY, 0, target)
+		rp.start = ev.Time
+	})
+
 	el.Children(func() {
 		ui.Box(c).Size(target, target).Shrink(0).Draw(func(p *ui.Painter, r ui.Rect) {
 			drawRadio(p, r, radioPaint{
-				sel:     clampF32(sel, 0, 1),
-				halo:    clampF32(halo, 0, 1),
-				haloInk: haloInk,
-				ringOff: ringOff,
-				ringOn:  ringOn,
-				dot:     dotInk,
+				sel:          clampF32(sel, 0, 1),
+				halo:         clampF32(halo, 0, 1),
+				haloInk:      haloInk,
+				ringOff:      ringOff,
+				ringOn:       ringOn,
+				dot:          dotInk,
+				ripple:       rp,
+				reduceMotion: th.ReduceMotion,
 			})
 		})
 		if label != "" {
@@ -137,22 +184,48 @@ func Radio[T comparable](c *ui.Context, selected *T, value T, label string, opts
 
 // radioPaint is one frame of a radio button's ring.
 type radioPaint struct {
-	sel     float32
-	halo    float32
-	haloInk ui.Color
-	ringOff ui.Color
-	ringOn  ui.Color
-	dot     ui.Color
+	sel          float32
+	halo         float32
+	haloInk      ui.Color
+	ringOff      ui.Color
+	ringOn       ui.Color
+	dot          ui.Color
+	ripple       *radioRippleState
+	reduceMotion bool
 }
 
-// drawRadio paints a radio button's state layer, ring and dot in its
-// touch-target square r.
+// drawRadio paints a radio button's state layer, press wave, ring and dot in
+// its touch-target square r.
 func drawRadio(p *ui.Painter, r ui.Rect, s radioPaint) {
 	if r.W <= 0 || r.H <= 0 {
 		return
 	}
 	cx, cy := r.X+r.W/2, r.Y+r.H/2
+	radius := r.W / 2
 	paintHalo(p, cx, cy, radioHaloDiameter/2, s.haloInk, s.halo)
+
+	if rp := s.ripple; rp != nil && rp.active && !s.reduceMotion {
+		elapsed := p.Now().Sub(rp.start)
+		if elapsed < 0 {
+			elapsed = 0
+		}
+		if elapsed >= radioRippleTime {
+			rp.active = false
+		} else {
+			t := float32(elapsed) / float32(radioRippleTime)
+			inv := 1 - t
+			grow := 1 - inv*inv*inv
+			waveR := 6 + (radius-6)*grow
+			alpha := float32(tokens.StatePressedOpacity) * 1.4 * inv
+			ox, oy := r.X+rp.ox, r.Y+rp.oy
+			clip := ui.Rect{X: cx - radius, Y: cy - radius, W: 2 * radius, H: 2 * radius}
+			p.Clip(clip, radius, func() {
+				p.Fill(ui.Rect{X: ox - waveR, Y: oy - waveR, W: 2 * waveR, H: 2 * waveR},
+					s.haloInk.Alpha(alpha), waveR)
+			})
+			p.After(16 * time.Millisecond)
+		}
+	}
 
 	ring := ui.Rect{X: cx - radioRingSize/2, Y: cy - radioRingSize/2, W: radioRingSize, H: radioRingSize}
 	p.Stroke(ring, s.ringOff.Mix(s.ringOn, s.sel), radioRingSize/2, radioRingWidth)
