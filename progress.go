@@ -133,6 +133,9 @@ func progressIndicator(c *ui.Context, kind progressIndicatorKind, value float64,
 	raw, indeterminate := normalizeProgressValue(value)
 	th := CurrentTheme(c)
 	cs := th.Colors
+	// A disabled ancestor also disables the indicator, which must show MD3E's
+	// disabled tokens rather than the enabled palette.
+	disabled := o.Disabled
 
 	thickness := o.Thickness
 	if !(thickness > 0) || math.IsNaN(float64(thickness)) || math.IsInf(float64(thickness), 0) {
@@ -147,10 +150,6 @@ func progressIndicator(c *ui.Context, kind progressIndicatorKind, value float64,
 	track := cs.SurfaceContainerHighest
 	if track.A == 0 {
 		track = cs.SurfaceVariant
-	}
-	if o.Disabled {
-		active = cs.OnSurface.Alpha(float32(tokens.DisabledContentOpacity))
-		track = cs.OnSurface.Alpha(float32(tokens.DisabledContainerOpacity))
 	}
 
 	var el ui.Element
@@ -174,6 +173,11 @@ func progressIndicator(c *ui.Context, kind progressIndicatorKind, value float64,
 		gap = clampF32(gap, 1, size/6)
 	}
 	el.Role(ui.RoleProgress).Disabled(o.Disabled)
+	disabled = disabled || el.IsDisabled()
+	if disabled {
+		active = cs.OnSurface.Alpha(float32(tokens.DisabledContentOpacity))
+		track = cs.OnSurface.Alpha(float32(tokens.DisabledContainerOpacity))
+	}
 	if o.Label != "" {
 		el.Label(o.Label)
 	}

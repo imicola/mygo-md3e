@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/egoist/mygo/ui"
+
+	"mygo-md3e/tokens"
 )
 
 // progressCanvas builds a 420x300 white canvas holding build's indicators in a
@@ -338,5 +340,64 @@ func TestProgressAccessAndBounds(t *testing.T) {
 	settle := progressInfo(t, tt, "Settle")
 	if math.Abs(settle.Now-0.25) > 1e-6 {
 		t.Fatalf("Settle reads %v, want 0.25", settle.Now)
+	}
+}
+
+// TestProgressAncestorDisabledUsesDisabledTokens checks that an indicator inside
+// a disabled container reads as disabled and paints the MD3E disabled tokens,
+// not Primary, even though its own Disabled option is false.
+func TestProgressAncestorDisabledUsesDisabledTokens(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor)
+	cs := th.Colors
+	wantActive := cs.OnSurface.Alpha(float32(tokens.DisabledContentOpacity)).Over(canvasRGB)
+	wantTrack := cs.OnSurface.Alpha(float32(tokens.DisabledContainerOpacity)).Over(canvasRGB)
+	tt := progressCanvas(th, func(c *ui.Context) {
+		// The container disables the indicators without ui's 0.5 dimming, so
+		// that the MD3E disabled tokens show at their own opacity.
+		ui.Column(c).Disabled(true).DimDisabled(false).FillWidth().Gap(24).Children(func() {
+			LinearProgress(c, 1, ProgressOptions{Label: "Off bar"})
+			CircularWavyProgress(c, 1, ProgressOptions{Label: "Off ring"})
+		})
+	})
+	bar := progressInfo(t, tt, "Off bar")
+	ring := progressInfo(t, tt, "Off ring")
+	tt.Advance(time.Second)
+	if tt.FramePending() {
+		t.Fatal("determinate disabled indicators keep asking for frames")
+	}
+	for _, info := range []ui.AccessInfo{bar, ring} {
+		if !info.Disabled {
+			t.Fatalf("%q under a disabled container does not read as disabled", info.Name)
+		}
+	}
+	img := tt.Image()
+	px := img.RGBAAt(int(bar.Bounds.X+bar.Bounds.W/2), int(bar.Bounds.Y+bar.Bounds.H/2))
+	if !colorMatches(px, wantActive, 18) {
+		t.Fatalf("disabled bar %+v is not the disabled content ink %+v", px, rgbOf(wantActive))
+	}
+	if colorMatches(px, cs.Primary, 18) {
+		t.Fatalf("disabled bar still paints Primary %+v", rgbOf(cs.Primary))
+	}
+	// The ring must be entirely in the disabled palette: its active arc is the
+	// disabled content ink and its track the disabled container ink.
+	active, track := 0, 0
+	for y := int(ring.Bounds.Y); y < int(ring.Bounds.Y+ring.Bounds.H); y++ {
+		for x := int(ring.Bounds.X); x < int(ring.Bounds.X+ring.Bounds.W); x++ {
+			got := img.RGBAAt(x, y)
+			switch {
+			case colorMatches(got, cs.Primary, 18):
+				t.Fatalf("disabled ring paints Primary %+v at (%d,%d)", rgbOf(cs.Primary), x, y)
+			case colorMatches(got, wantActive, 14):
+				active++
+			case colorMatches(got, wantTrack, 14):
+				track++
+			}
+		}
+	}
+	if active < 40 {
+		t.Fatalf("disabled ring paints only %d disabled-content pixels", active)
+	}
+	if track > 0 && active+track < 80 {
+		t.Fatalf("disabled ring paints %d content and %d container pixels", active, track)
 	}
 }

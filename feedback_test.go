@@ -367,3 +367,80 @@ func TestSnackbarDragDismissAndTheme(t *testing.T) {
 		t.Fatal("the snackbar host keeps asking for frames after a swipe")
 	}
 }
+
+// TestSnackbarCloseButtonAdvancesQueue checks the close button dismisses the
+// showing message, the next queued one follows, and closing the last one leaves
+// the host quiet.
+func TestSnackbarCloseButtonAdvancesQueue(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor)
+	state := &SnackbarState{}
+	state.Show(SnackbarOptions{Message: "First", ShowClose: true})
+	state.Show(SnackbarOptions{Message: "Second", ShowClose: true})
+	tt := feedbackCanvas(th, func(c *ui.Context) {
+		SnackbarHost(c, state)
+	})
+	tt.Frame()
+	tt.Advance(600 * time.Millisecond)
+	if !tt.HasText("First") {
+		t.Fatal("the first snackbar does not show")
+	}
+	if _, ok := tt.AccessByRole(ui.RoleButton, "Dismiss"); !ok {
+		t.Fatal("the close button is not a named button")
+	}
+	tt.Click("Dismiss")
+	tt.Frame()
+	tt.Advance(600 * time.Millisecond)
+	if tt.HasText("First") {
+		t.Fatal("the close button does not dismiss the showing snackbar")
+	}
+	if !tt.HasText("Second") {
+		t.Fatal("the queued snackbar does not follow a closed one")
+	}
+	tt.Click("Dismiss")
+	tt.Move(5, 5)
+	tt.Frame()
+	tt.Advance(time.Second)
+	if tt.HasText("Second") {
+		t.Fatal("the close button does not dismiss the last snackbar")
+	}
+	if tt.FramePending() {
+		t.Fatal("the snackbar host keeps asking for frames after its queue empties")
+	}
+}
+
+// TestSnackbarShortSwipeSpringsBack checks a drag let go below the threshold
+// neither dismisses the snackbar nor leaves it displaced or animating.
+func TestSnackbarShortSwipeSpringsBack(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor)
+	state := &SnackbarState{}
+	state.Show(SnackbarOptions{Message: "Keep me", Duration: 30 * time.Second})
+	tt := feedbackCanvas(th, func(c *ui.Context) {
+		SnackbarHost(c, state)
+	})
+	tt.Frame()
+	tt.Advance(600 * time.Millisecond)
+	before, ok := tt.AccessByRole(ui.RoleStatus, "Keep me")
+	if !ok {
+		t.Fatal("the snackbar is not a status in the access tree")
+	}
+	x, y := before.Bounds.X+8, before.Bounds.Y+before.Bounds.H/2
+	tt.Press(x, y)
+	tt.Move(x+snackbarSwipeThreshold/2, y)
+	tt.Release(x+snackbarSwipeThreshold/2, y)
+	tt.Move(5, 5)
+	tt.Frame()
+	tt.Advance(time.Second)
+	if !tt.HasText("Keep me") {
+		t.Fatal("a short swipe dismisses the snackbar")
+	}
+	if tt.FramePending() {
+		t.Fatal("the snackbar keeps animating after springing back")
+	}
+	after, ok := tt.AccessByRole(ui.RoleStatus, "Keep me")
+	if !ok {
+		t.Fatal("the snackbar left the access tree after springing back")
+	}
+	if absF32(after.Bounds.X-before.Bounds.X) > 1 {
+		t.Fatalf("the snackbar rests at x %.1f, want its original %.1f", after.Bounds.X, before.Bounds.X)
+	}
+}

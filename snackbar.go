@@ -122,6 +122,10 @@ type snackbarShowKey struct{}
 // snackbarSwipeKey is the Local holding a snackbar's horizontal drag offset.
 type snackbarSwipeKey struct{}
 
+// snackbarSwipeOffsetKey is the AnimateTo channel of a snackbar's horizontal
+// offset, which springs back to zero when a short drag is let go.
+type snackbarSwipeOffsetKey struct{}
+
 // SnackbarHost draws state's snackbars in a ui.Overlay, inheriting the active
 // ThemeScope, and returns a zero-size element that takes no room in its parent.
 // Place it anywhere in the view; one state has one host:
@@ -194,9 +198,14 @@ func SnackbarHost(c *ui.Context, state *SnackbarState) ui.Element {
 			// A horizontal drag past the threshold dismisses it; a shorter one
 			// springs back as it is let go.
 			swipe := ui.Local(sb, snackbarSwipeKey{}, func() float32 { return 0 })
+			var offset float32
 			if dx, _, ok := sb.Dragged(); ok {
 				*swipe += dx
+				// Track the pointer at once while dragging; the spring takes
+				// over from the last offset once it is released.
+				offset = sb.Jump(snackbarSwipeOffsetKey{}, *swipe)
 			} else {
+				offset = animateValue(sb, snackbarSwipeOffsetKey{}, 0, th.Animation(motion.FastSpatial), reduce)
 				*swipe = 0
 			}
 			if absF32(*swipe) >= snackbarSwipeThreshold {
@@ -218,7 +227,7 @@ func SnackbarHost(c *ui.Context, state *SnackbarState) ui.Element {
 				state.finish()
 				c.Invalidate()
 			}
-			sb.Opacity(show).Translate(*swipe, (1-show)*snackbarEnterOffset)
+			sb.Opacity(show).Translate(offset, (1-show)*snackbarEnterOffset)
 		})
 	})
 
@@ -271,19 +280,21 @@ func snackbarSurface(c *ui.Context, th *Theme, o SnackbarOptions, onAction, onCl
 			applyTypeStyleWithTheme(th, ui.Text(c, o.Message), tokens.BodyMedium)
 			actions := ui.Row(c).FillWidth().Justify(ui.End).Gap(4)
 			actions.Children(func() {
-				snackbarActions(c, th, o, actionInk, onAction, onClose)
+				snackbarActions(c, th, o, ink, actionInk, onAction, onClose)
 			})
 			return
 		}
 		msg := ui.Text(c, o.Message).Grow(1)
 		applyTypeStyleWithTheme(th, msg, tokens.BodyMedium)
-		snackbarActions(c, th, o, actionInk, onAction, onClose)
+		snackbarActions(c, th, o, ink, actionInk, onAction, onClose)
 	})
 	return sb
 }
 
 // snackbarActions builds the snackbar's optional action and close buttons.
-func snackbarActions(c *ui.Context, th *Theme, o SnackbarOptions, actionInk ui.Color, onAction, onClose func()) {
+// ink is the message's resolved contrast color, which the close button shares
+// so that a theme without the inverse roles still paints legible chrome.
+func snackbarActions(c *ui.Context, th *Theme, o SnackbarOptions, ink, actionInk ui.Color, onAction, onClose func()) {
 	if o.ActionLabel != "" {
 		act := ui.ButtonBase(c).Height(32).PaddingX(12).Radius(16).
 			FocusRing(false).DimDisabled(false).Label(o.ActionLabel)
@@ -301,11 +312,11 @@ func snackbarActions(c *ui.Context, th *Theme, o SnackbarOptions, actionInk ui.C
 	if o.ShowClose {
 		close := ui.ButtonBase(c).Size(32, 32).Radius(16).
 			FocusRing(false).DimDisabled(false).Label("Dismiss")
-		close.TextColor(th.Colors.InverseOnSurface)
-		attachRippleWithTheme(th, close, StateLayerOptions{Color: th.Colors.InverseOnSurface, Radius: 16})
+		close.TextColor(ink)
+		attachRippleWithTheme(th, close, StateLayerOptions{Color: ink, Radius: 16})
 		clicked := close.Clicked()
 		close.Children(func() {
-			drawIconBox(c, mdicon.Close.Draw, 18, th.Colors.InverseOnSurface)
+			drawIconBox(c, mdicon.Close.Draw, 18, ink)
 		})
 		if clicked {
 			onClose()
