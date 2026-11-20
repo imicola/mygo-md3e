@@ -168,7 +168,7 @@
 
 ## M4：行动类核心组件与工具栏
 
-- [ ] **T4.1：实现 Expressive Button（5 变体 × 5 尺寸 × 形态形变）**
+- [x] **T4.1：实现 Expressive Button（5 变体 × 5 尺寸 × 形态形变）**
   - **交付物**：`button.go`、`button_test.go`
   - **核心能力**：
     - 基于 `ui.ButtonBase` 构建，支持 `ButtonFilled`, `ButtonTonal`, `ButtonElevated`, `ButtonOutlined`, `ButtonText`；
