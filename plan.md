@@ -308,7 +308,7 @@
 
 ## M7：导航、列表、卡片与浮层组件
 
-- [ ] **T7.1：实现 Cards、Divider 与 Expressive Segmented List**
+- [x] **T7.1：实现 Cards、Divider 与 Expressive Segmented List**
   - **交付物**：`card.go`、`divider.go`、`list.go`、`container_test.go`
   - **核心能力**：
     - `ElevatedCard`、`FilledCard`、`OutlinedCard`（含可点击态涟漪/海拔浮起与不可点击容器态）；
