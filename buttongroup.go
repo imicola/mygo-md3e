@@ -153,7 +153,6 @@ func buildButtonGroup(c *ui.Context, items []ButtonGroupItem, o ButtonGroupOptio
 				Height(float32(spec.Height)).
 				PaddingX(pad).
 				Gap(iconLabelGap(o.Size)).
-				Disabled(o.Disabled || items[i].Disabled).
 				Label(items[i].Label)
 			pressed[i] = els[i].Pressed()
 		}
@@ -165,18 +164,24 @@ func buildButtonGroup(c *ui.Context, items []ButtonGroupItem, o ButtonGroupOptio
 		for i := range items {
 			item := &items[i]
 			el := els[i]
-			disabled := o.Disabled || item.Disabled
+			// A disabled ancestor also disables every segment.
+			disabled := o.Disabled || item.Disabled || el.IsDisabled()
 			active := isActive(i)
 			pal := groupSegmentPalette(th, o.Variant, selectable, active, disabled)
-			el.TextColor(pal.content)
+			el.Disabled(o.Disabled || item.Disabled).TextColor(pal.content)
 			if pal.container.A > 0 {
 				el.Background(pal.container)
 			}
 			if pal.border.A > 0 {
 				el.Border(1, pal.border)
 			}
-			if o.Kind == ButtonGroupStandard && pal.elevation > tokens.Level0 {
-				ApplyElevationShadows(th, el, pal.elevation)
+			elevation := pal.elevation
+			if pressed[i] && elevation > tokens.Level0 && elevation < tokens.Level5 {
+				// MD3E lifts a pressed Elevated segment one step.
+				elevation++
+			}
+			if o.Kind == ButtonGroupStandard && elevation > tokens.Level0 {
+				ApplyElevationShadows(th, el, elevation)
 			}
 			if selectable {
 				el.Checked(active)
@@ -204,7 +209,9 @@ func buildButtonGroup(c *ui.Context, items []ButtonGroupItem, o ButtonGroupOptio
 			}
 			if pressed[i] {
 				r := float32(spec.PressedRadius)
-				target = [4]float32{r, r, r, r}
+				for k := range target {
+					target[k] = min(target[k], r)
+				}
 			}
 			var radii [4]float32
 			for k := 0; k < 4; k++ {
@@ -299,8 +306,12 @@ func groupSegmentPalette(th *Theme, variant ButtonVariant, selectable, active, d
 		onSurface := th.Colors.OnSurface
 		content := onSurface.Alpha(float32(tokens.DisabledContentOpacity))
 		if !selectable || active {
-			if variant == ButtonOutlined {
+			switch variant {
+			case ButtonOutlined:
 				return buttonColors{content: content, border: onSurface.Alpha(float32(tokens.DisabledContainerOpacity))}
+			case ButtonText:
+				// A Text button has no container, disabled or not.
+				return buttonColors{content: content}
 			}
 			return buttonColors{
 				container: onSurface.Alpha(float32(tokens.DisabledContainerOpacity)),

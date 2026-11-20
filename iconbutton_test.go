@@ -3,6 +3,7 @@ package md3e
 import (
 	"fmt"
 	"image"
+	"image/color"
 	"math"
 	"testing"
 	"time"
@@ -35,6 +36,58 @@ func cornerFill(img *image.RGBA, b ui.Rect, span int) int {
 		}
 	}
 	return n
+}
+
+// TestIconButtonNilIconAndStandardTogglePalette checks that a nil icon draws
+// nothing instead of panicking, and that a Standard toggle's selected state
+// keeps its plain container and only turns the icon Primary.
+func TestIconButtonNilIconAndStandardTogglePalette(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor)
+
+	tt := ui.NewTester(func(c *ui.Context) {
+		ThemeScope(c, th, func() {
+			ui.Box(c).Size(240, 200).Background(canvasRGB).Padding(20).Children(func() {
+				IconButton(c, "Empty", nil, IconButtonOptions{Size: tokens.SizeS})
+				ToggleIconButton(c, new(bool), "Empty toggle", nil, ToggleIconButtonOptions{Size: tokens.SizeS})
+			})
+		})
+	}, 240, 200)
+	buttonInfo(t, tt, ui.RoleButton, "Empty")
+	buttonInfo(t, tt, ui.RoleToggleButton, "Empty toggle")
+
+	on := false
+	toggle := ui.NewTester(func(c *ui.Context) {
+		ThemeScope(c, th, func() {
+			ui.Box(c).Size(240, 160).Background(canvasRGB).Padding(20).Children(func() {
+				ToggleIconButton(c, &on, "Plain", mdicon.Star.Draw, ToggleIconButtonOptions{
+					Variant: IconButtonStandard,
+					Size:    tokens.SizeM,
+				})
+			})
+		})
+	}, 240, 160)
+
+	info := buttonInfo(t, toggle, ui.RoleToggleButton, "Plain")
+	cx, cy := center(info.Bounds)
+	toggle.ClickAt(cx, cy)
+	if !on {
+		t.Fatal("click did not flip the Standard toggle")
+	}
+	toggle.Move(5, 5)
+	toggle.Advance(600 * time.Millisecond)
+	if toggle.FramePending() {
+		t.Fatal("the selected toggle did not settle")
+	}
+	info = buttonInfo(t, toggle, ui.RoleToggleButton, "Plain")
+	if !info.Checked {
+		t.Fatal("assistive technology does not see the Standard toggle checked")
+	}
+	// The Standard selected state has no container: the canvas shows at the
+	// edge, unlike the Tonal fill.
+	edge := toggle.Image().RGBAAt(int(info.Bounds.X)+4, int(info.Bounds.Y+info.Bounds.H/2))
+	if edge != (color.RGBA{R: 255, G: 255, B: 255, A: 255}) {
+		t.Fatalf("Standard selected toggle painted a container: edge = %v", edge)
+	}
 }
 
 // TestIconButtonWidthsAndSizes checks the exact container geometry of every

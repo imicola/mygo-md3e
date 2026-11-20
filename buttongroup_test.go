@@ -2,6 +2,7 @@ package md3e
 
 import (
 	"image"
+	"image/color"
 	"math"
 	"testing"
 	"time"
@@ -35,6 +36,100 @@ func groupAccess(t *testing.T, tt *ui.Tester, label string) ui.AccessInfo {
 		t.Fatalf("button %q not in the access tree", label)
 	}
 	return info
+}
+
+// TestButtonGroupLargePressedSeam checks that pressing a large Connected
+// group's segment keeps its 8 DIP seam instead of inflating it to the 16 DIP
+// pressed radius.
+func TestButtonGroupLargePressedSeam(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor)
+	span := connectedInnerRadii
+	tt := ui.NewTester(func(c *ui.Context) {
+		ThemeScope(c, th, func() {
+			ui.Box(c).Size(900, 220).Background(canvasRGB).Padding(24).AlignItems(ui.Start).Children(func() {
+				ButtonGroupActions(c, groupItems, nil, ButtonGroupOptions{
+					Kind: ButtonGroupConnected,
+					Size: tokens.SizeL,
+				})
+			})
+		})
+	}, 900, 220)
+
+	copyBtn := groupAccess(t, tt, "Copy")
+	seam := func(b ui.Rect) int { return cornerFillAt(tt.Image(), int(b.X), int(b.Y), span) }
+	idle := seam(copyBtn.Bounds)
+
+	cx, cy := copyBtn.Bounds.X+copyBtn.Bounds.W/2, copyBtn.Bounds.Y+copyBtn.Bounds.H/2
+	tt.Move(cx, cy)
+	tt.Press(cx, cy)
+	tt.Advance(800 * time.Millisecond)
+	if got := seam(copyBtn.Bounds); got > idle+span*span/8 {
+		t.Fatalf("pressed seam corner fill %d grew from %d: the seam inflated", got, idle)
+	}
+	tt.Release(cx, cy)
+	tt.Move(5, 5)
+	tt.Advance(800 * time.Millisecond)
+	if tt.FramePending() {
+		t.Fatal("the large group did not settle after the press")
+	}
+}
+
+// TestButtonGroupElevatedPressLiftAndTextDisabled checks the Elevated segment's
+// Level1 to Level2 lift while pressed and that a disabled Text segment paints
+// no container.
+func TestButtonGroupElevatedPressLiftAndTextDisabled(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor)
+	tt := ui.NewTester(func(c *ui.Context) {
+		ThemeScope(c, th, func() {
+			ui.Box(c).Size(560, 200).Background(canvasRGB).Padding(20).AlignItems(ui.Start).Children(func() {
+				ButtonGroupActions(c, groupItems, nil, ButtonGroupOptions{
+					Variant: ButtonElevated,
+					Size:    tokens.SizeS,
+				})
+			})
+		})
+	}, 560, 200)
+
+	cut := groupAccess(t, tt, "Cut")
+	darkness := func(b ui.Rect) int {
+		dark := 0
+		x := int(b.X + b.W/2)
+		for dy := 1; dy <= 4; dy++ {
+			dark += 255 - int(tt.Image().RGBAAt(x, int(b.Y+b.H)+dy).R)
+		}
+		return dark
+	}
+	idle := darkness(cut.Bounds)
+	if idle == 0 {
+		t.Fatal("the elevated group cast no Level1 shadow")
+	}
+	cx, cy := cut.Bounds.X+cut.Bounds.W/2, cut.Bounds.Y+cut.Bounds.H/2
+	tt.Move(cx, cy)
+	tt.Press(cx, cy)
+	tt.Advance(700 * time.Millisecond)
+	if pressed := darkness(cut.Bounds); pressed <= idle {
+		t.Fatalf("pressed shadow darkness %d is not above the idle %d: no Level1 to Level2 lift", pressed, idle)
+	}
+	tt.Release(cx, cy)
+	tt.Move(5, 5)
+	tt.Advance(700 * time.Millisecond)
+
+	text := ui.NewTester(func(c *ui.Context) {
+		ThemeScope(c, th, func() {
+			ui.Box(c).Size(560, 160).Background(canvasRGB).Padding(20).AlignItems(ui.Start).Children(func() {
+				ButtonGroupActions(c, groupItems, nil, ButtonGroupOptions{
+					Variant:  ButtonText,
+					Size:     tokens.SizeS,
+					Disabled: true,
+				})
+			})
+		})
+	}, 560, 160)
+	disabled := groupAccess(t, text, "Cut")
+	px := text.Image().RGBAAt(int(disabled.Bounds.X+disabled.Bounds.W*0.15), int(disabled.Bounds.Y+disabled.Bounds.H/2))
+	if px != (color.RGBA{R: 255, G: 255, B: 255, A: 255}) {
+		t.Fatalf("disabled Text group segment painted a container: %v", px)
+	}
 }
 
 // TestButtonGroupStandardSqueeze checks that pressing a button of a Standard

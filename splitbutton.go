@@ -91,10 +91,6 @@ func SplitButton(c *ui.Context, label string, opts ...SplitButtonOptions) (group
 	th := CurrentTheme(c)
 	spec := tierSpec(o.Size)
 	rtl := c.Direction() == ui.RightToLeft
-	pal := buttonPaletteOf(th, o.Variant, o.Disabled)
-	// The action resolves its own palette: disabling it alone must show the
-	// MD3E disabled container and content while the arrow stays enabled.
-	actionPal := buttonPaletteOf(th, o.Variant, o.Disabled || o.ActionDisabled)
 	outer := restingRadius(spec, ButtonShapeRound)
 	inner := float32(connectedInnerRadii)
 	pad := float32(spec.Padding)
@@ -108,13 +104,22 @@ func SplitButton(c *ui.Context, label string, opts ...SplitButtonOptions) (group
 		Role(ui.RoleGroup).
 		FocusGroup(ui.Horizontal).
 		Label(label)
-	if o.Disabled {
+	// A disabled ancestor also disables the control and closes its menu.
+	groupDisabled := o.Disabled || group.IsDisabled()
+	if groupDisabled {
 		group.Disabled(true)
 	}
+	pal := buttonPaletteOf(th, o.Variant, groupDisabled)
+	// The action resolves its own palette: disabling it alone must show the
+	// MD3E disabled container and content while the arrow stays enabled.
+	actionPal := buttonPaletteOf(th, o.Variant, groupDisabled || o.ActionDisabled)
 
 	open = o.Open
 	if open == nil {
 		open = ui.Local(group, splitOpenKey{}, func() bool { return false })
+	}
+	if groupDisabled {
+		*open = false
 	}
 
 	actionLabel := label
@@ -155,11 +160,19 @@ func SplitButton(c *ui.Context, label string, opts ...SplitButtonOptions) (group
 		arrowTarget = [4]float32{outer, outer, outer, outer}
 	}
 	pressedRadius := float32(spec.PressedRadius)
+	// Pressing shrinks the segment's corners toward the tier's pressed radius;
+	// a seam corner keeps its smaller radius instead of inflating to it.
+	press := func(base [4]float32) [4]float32 {
+		for i := range base {
+			base[i] = min(base[i], pressedRadius)
+		}
+		return base
+	}
 	if action.Pressed() {
-		actionTarget = [4]float32{pressedRadius, pressedRadius, pressedRadius, pressedRadius}
+		actionTarget = press(actionTarget)
 	}
 	if arrow.Pressed() && !*open {
-		arrowTarget = [4]float32{pressedRadius, pressedRadius, pressedRadius, pressedRadius}
+		arrowTarget = press(arrowTarget)
 	}
 
 	// The Elevated variant lifts each segment on its own, so that the shadow
@@ -183,10 +196,12 @@ func SplitButton(c *ui.Context, label string, opts ...SplitButtonOptions) (group
 		if o.LeadingIcon != nil {
 			drawIconBox(c, o.LeadingIcon, float32(spec.IconSize), actionPal.content)
 		}
-		ApplyTypeStyle(c, ui.Text(c, label).NoWrap(), buttonTypeRole(o.Size))
+		if label != "" {
+			ApplyTypeStyle(c, ui.Text(c, label).NoWrap(), buttonTypeRole(o.Size))
+		}
 	})
 	arrow.Children(func() {
-		ui.Box(c).Size(float32(spec.IconSize), float32(spec.IconSize)).Draw(func(p *ui.Painter, r ui.Rect) {
+		ui.Box(c).Size(float32(spec.IconSize), float32(spec.IconSize)).Shrink(0).Draw(func(p *ui.Painter, r ui.Rect) {
 			if degrees == 0 {
 				mdicon.ChevronDown.Draw(p, r, pal.content)
 				return
@@ -197,13 +212,19 @@ func SplitButton(c *ui.Context, label string, opts ...SplitButtonOptions) (group
 		})
 	})
 
-	// Toggling: a click on the arrow, the up and down arrows on it, and
-	// Alt+Down on either segment.
+	// Toggling: a click on the arrow and Alt+Down on either segment. Up and
+	// Down on the arrow open the menu when it is closed, as a menu button
+	// does, and leave an open menu open.
 	toggle := arrow.Clicked() ||
-		arrow.Shortcut(0, ui.KeyUp) || arrow.Shortcut(0, ui.KeyDown) ||
 		action.Shortcut(ui.Alt, ui.KeyDown) || arrow.Shortcut(ui.Alt, ui.KeyDown)
-	if toggle && o.Menu != nil {
-		*open = !*open
+	openOnArrow := arrow.Shortcut(0, ui.KeyUp) || arrow.Shortcut(0, ui.KeyDown)
+	if o.Menu != nil {
+		if toggle {
+			*open = !*open
+		}
+		if openOnArrow {
+			*open = true
+		}
 	}
 
 	if o.Menu != nil {

@@ -7,6 +7,7 @@ import (
 
 	"github.com/egoist/mygo/ui"
 
+	"mygo-md3e/internal/mdicon"
 	"mygo-md3e/tokens"
 )
 
@@ -59,6 +60,111 @@ func buttonInfo(t *testing.T, tt *ui.Tester, role ui.Role, name string) ui.Acces
 // center returns the center of a box.
 func center(b ui.Rect) (float32, float32) {
 	return b.X + b.W/2, b.Y + b.H/2
+}
+
+// TestSplitButtonDisabledClosesOpenMenu checks that disabling the control
+// while the menu shows closes it and clears the expanded state.
+func TestSplitButtonDisabledClosesOpenMenu(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor)
+	disabled := false
+	open := false
+	tt := ui.NewTester(func(c *ui.Context) {
+		ThemeScope(c, th, func() {
+			ui.Box(c).Size(460, 280).Background(canvasRGB).Padding(20).AlignItems(ui.Start).Children(func() {
+				SplitButton(c, "Save", SplitButtonOptions{
+					Size:     tokens.SizeS,
+					Disabled: disabled,
+					Open:     &open,
+					Menu: func(panel ui.Element) {
+						panel.Children(func() { ui.ButtonBase(c).Label("Archive").Children(func() { ui.Text(c, "Archive") }) })
+					},
+				})
+			})
+		})
+	}, 460, 280)
+
+	arrow := buttonInfo(t, tt, ui.RoleButton, "More options")
+	rx, ry := center(arrow.Bounds)
+	tt.ClickAt(rx, ry)
+	if !open {
+		t.Fatal("arrow click did not open the menu")
+	}
+	tt.Advance(600 * time.Millisecond)
+
+	disabled = true
+	tt.Frame()
+	tt.Advance(600 * time.Millisecond)
+	if open {
+		t.Fatal("disabling the split button left the menu open")
+	}
+	if _, ok := tt.AccessByRole(ui.RoleButton, "Archive"); ok {
+		t.Fatal("the disabled split button still shows its menu")
+	}
+	if buttonInfo(t, tt, ui.RoleButton, "More options").Expanded {
+		t.Fatal("assistive technology still sees the disabled arrow expanded")
+	}
+}
+
+// TestSplitButtonIconOnlyWidth checks that an empty label adds no empty text
+// and its gap to a pure-icon split button.
+func TestSplitButtonIconOnlyWidth(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor)
+	tt := ui.NewTester(func(c *ui.Context) {
+		ThemeScope(c, th, func() {
+			ui.Box(c).Size(460, 280).Background(canvasRGB).Padding(20).AlignItems(ui.Start).Children(func() {
+				SplitButton(c, "", SplitButtonOptions{
+					Size:        tokens.SizeS,
+					LeadingIcon: mdicon.Add.Draw,
+					Menu:        func(ui.Element) {},
+				})
+			})
+		})
+	}, 460, 280)
+
+	var action ui.AccessInfo
+	for _, a := range tt.AccessAll() {
+		if a.Role == ui.RoleButton && a.Name == "" {
+			action = a
+		}
+	}
+	if action.Bounds.W == 0 {
+		t.Fatal("the icon-only action segment was not laid out")
+	}
+	spec := tokens.SizeS.Spec()
+	want := float32(2*spec.Padding) + float32(spec.IconSize)
+	if action.Bounds.W != want {
+		t.Fatalf("icon-only action width = %v, want %v without an empty label gap", action.Bounds.W, want)
+	}
+}
+
+// TestSplitButtonPressedSeamKeepsInnerRadius checks that pressing a large split
+// button shrinks its outer corners without inflating the 8 DIP seam.
+func TestSplitButtonPressedSeamKeepsInnerRadius(t *testing.T) {
+	span := connectedInnerRadii
+	seamFill := func(tt *ui.Tester, b ui.Rect) int {
+		return cornerFillAt(tt.Image(), int(b.X+b.W)-span, int(b.Y), span)
+	}
+
+	f := newSplitFixture(t, SplitButtonOptions{Size: tokens.SizeL})
+	tt := f.tt
+	tt.Move(5, 5)
+	tt.Advance(600 * time.Millisecond)
+	action := buttonInfo(t, tt, ui.RoleButton, "Save")
+	idle := seamFill(tt, action.Bounds)
+
+	cx, cy := center(action.Bounds)
+	tt.Move(cx, cy)
+	tt.Press(cx, cy)
+	tt.Advance(800 * time.Millisecond)
+	if got := seamFill(tt, action.Bounds); got > idle+span*span/8 {
+		t.Fatalf("pressed seam corner fill %d grew from %d: the 8 DIP seam inflated", got, idle)
+	}
+	tt.Release(cx, cy)
+	tt.Move(5, 5)
+	tt.Advance(800 * time.Millisecond)
+	if tt.FramePending() {
+		t.Fatal("the split button did not settle after the press")
+	}
 }
 
 // TestSplitButtonActionMenuAndAccessibility checks the group and button roles,
@@ -153,17 +259,39 @@ func TestSplitButtonKeyboard(t *testing.T) {
 	if !*f.open {
 		t.Fatal("Space on the arrow did not open the menu")
 	}
+	// Down and Up on an open menu button keep it open, as WAI-ARIA asks.
 	tt.Key(0, ui.KeyDown)
+	if !*f.open {
+		t.Fatal("Down on the arrow closed the menu")
+	}
+	tt.Key(0, ui.KeyUp)
+	if !*f.open {
+		t.Fatal("Up on the arrow closed the menu")
+	}
+	tt.Key(0, ui.KeyEscape)
 	if *f.open {
-		t.Fatal("Down on the arrow did not close the menu")
+		t.Fatal("Escape did not close the menu")
+	}
+	// From closed, Down and Up open it.
+	tt.Key(0, ui.KeyDown)
+	if !*f.open {
+		t.Fatal("Down on the closed arrow did not open the menu")
+	}
+	tt.Key(0, ui.KeyEscape)
+	if *f.open {
+		t.Fatal("Escape did not close the menu a second time")
+	}
+	tt.Key(0, ui.KeyUp)
+	if !*f.open {
+		t.Fatal("Up on the closed arrow did not open the menu")
+	}
+	tt.Key(0, ui.KeyEscape)
+	if *f.open {
+		t.Fatal("Escape did not close the menu a third time")
 	}
 	tt.Key(0, ui.KeyEnter)
 	if !*f.open {
 		t.Fatal("Enter on the arrow did not open the menu")
-	}
-	tt.Key(0, ui.KeyUp)
-	if *f.open {
-		t.Fatal("Up on the arrow did not close the menu")
 	}
 }
 

@@ -101,7 +101,6 @@ func Button(c *ui.Context, label string, opts ...ButtonOptions) ui.Element {
 
 	th := CurrentTheme(c)
 	spec := tierSpec(o.Size)
-	pal := buttonPaletteOf(th, o.Variant, o.Disabled)
 	rest := restingRadius(spec, o.Shape)
 
 	el := ui.ButtonBase(c).
@@ -109,9 +108,12 @@ func Button(c *ui.Context, label string, opts ...ButtonOptions) ui.Element {
 		FocusRing(false).
 		Height(float32(spec.Height)).
 		PaddingX(float32(spec.Padding)).
-		Gap(iconLabelGap(o.Size)).
-		Disabled(o.Disabled).
-		TextColor(pal.content)
+		Gap(iconLabelGap(o.Size))
+	// A disabled ancestor also disables the button: use MD3E's disabled palette
+	// so it does not look enabled while ignoring input.
+	disabled := o.Disabled || el.IsDisabled()
+	pal := buttonPaletteOf(th, o.Variant, disabled)
+	el.Disabled(o.Disabled).TextColor(pal.content)
 	if pal.container.A > 0 {
 		el.Background(pal.container)
 	}
@@ -144,7 +146,7 @@ func Button(c *ui.Context, label string, opts ...ButtonOptions) ui.Element {
 		Color:       pal.content,
 		Radius:      radius,
 		BorderInset: borderInset,
-		Disabled:    o.Disabled,
+		Disabled:    disabled,
 	})
 
 	name := o.Label
@@ -268,9 +270,14 @@ func iconLabelGap(t tokens.SizeTier) float32 {
 	}
 }
 
-// drawIconBox adds a square icon slot of side size that paints draw in ink.
+// drawIconBox adds a square icon slot of side size that paints draw in ink. A
+// nil icon draws nothing, and the slot never shrinks, so a collapsing container
+// clips it instead of squeezing it to zero width.
 func drawIconBox(c *ui.Context, draw IconDraw, size float32, ink ui.Color) {
-	ui.Box(c).Size(size, size).Draw(func(p *ui.Painter, r ui.Rect) {
+	if draw == nil {
+		return
+	}
+	ui.Box(c).Size(size, size).Shrink(0).Draw(func(p *ui.Painter, r ui.Rect) {
 		draw(p, r, ink)
 	})
 }

@@ -143,23 +143,64 @@ func TestButtonIconsGrowGeometry(t *testing.T) {
 			t.Fatalf("%d: both-icon width grew %v, want %v", size, got, wantGrowth)
 		}
 
-		// The leading icon slot's center must differ from the plain container
-		// color: it paints the Material check mark.
-		left := withIcons.X + float32(spec.Padding)
-		cx := int(left + float32(spec.IconSize)/2)
-		cy := int(withIcons.Y + withIcons.H/2)
+		// The leading icon slot paints OnPrimary ink over the Primary
+		// container: scan the whole slot, as a large check mark's middle is
+		// not necessarily inked.
+		container := rgbOf(th.Colors.Primary)
+		left := int(withIcons.X + float32(spec.Padding))
+		top := int(withIcons.Y + (withIcons.H-float32(spec.IconSize))/2)
+		side := int(spec.IconSize)
 		found := false
-		for dy := -2; dy <= 2 && !found; dy++ {
-			for dx := -2; dx <= 2; dx++ {
-				if tt.Image().RGBAAt(cx+dx, cy+dy) != white {
+		for dy := 0; dy < side && !found; dy++ {
+			for dx := 0; dx < side; dx++ {
+				if absColorDiff(tt.Image().RGBAAt(left+dx, top+dy), container) > 30 {
 					found = true
 					break
 				}
 			}
 		}
 		if !found {
-			t.Fatalf("%d: leading icon did not paint inside its %v slot", size, spec.IconSize)
+			t.Fatalf("%d: leading icon did not paint OnPrimary ink inside its %v slot", size, spec.IconSize)
 		}
+	}
+}
+
+// TestButtonAncestorDisabledPalette checks that a button inside a disabled
+// container takes MD3E's disabled palette instead of looking enabled while it
+// ignores input.
+func TestButtonAncestorDisabledPalette(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor)
+	clicks := 0
+	tt := ui.NewTester(func(c *ui.Context) {
+		ThemeScope(c, th, func() {
+			ui.Box(c).Size(320, 120).Background(canvasRGB).Padding(20).
+				Disabled(true).DimDisabled(false).Children(func() {
+				if Button(c, "Blocked", ButtonOptions{Size: tokens.SizeS}).Clicked() {
+					clicks++
+				}
+			})
+		})
+	}, 320, 120)
+
+	info := buttonInfo(t, tt, ui.RoleButton, "Blocked")
+	if !info.Disabled {
+		t.Fatal("the button inside a disabled container does not report itself disabled")
+	}
+	on := th.Colors.OnSurface
+	a := float32(on.A) / 255 * float32(tokens.DisabledContainerOpacity)
+	want := color.RGBA{
+		R: uint8(a*float32(on.R) + (1-a)*255 + 0.5),
+		G: uint8(a*float32(on.G) + (1-a)*255 + 0.5),
+		B: uint8(a*float32(on.B) + (1-a)*255 + 0.5),
+		A: 255,
+	}
+	got := tt.Image().RGBAAt(int(info.Bounds.X+info.Bounds.W*0.15), int(info.Bounds.Y+info.Bounds.H/2))
+	if absColorDiff(got, want) > 4 {
+		t.Fatalf("ancestor-disabled container = %v, want the OnSurface 12%% %v", got, want)
+	}
+	tt.ClickAt(info.Bounds.X+info.Bounds.W/2, info.Bounds.Y+info.Bounds.H/2)
+	if clicks != 0 {
+		t.Fatalf("the ancestor-disabled button handled %d clicks", clicks)
 	}
 }
 

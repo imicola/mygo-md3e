@@ -13,8 +13,8 @@ type IconButtonVariant int
 
 const (
 	// IconButtonStandard draws no container in its resting state, with an
-	// OnSurfaceVariant icon; a toggle's selected state fills it with
-	// SecondaryContainer and an OnSecondaryContainer icon.
+	// OnSurfaceVariant icon; a toggle's selected state keeps that plain
+	// container and turns the icon Primary.
 	IconButtonStandard IconButtonVariant = iota
 	// IconButtonFilled paints Primary with an OnPrimary icon; a toggle's
 	// resting state paints SurfaceContainerHighest instead.
@@ -111,16 +111,17 @@ func IconButton(c *ui.Context, label string, icon IconDraw, opts ...IconButtonOp
 	th := CurrentTheme(c)
 	spec := tierSpec(o.Size)
 	w := iconWidthOf(o.Size, o.Width)
-	pal := iconButtonPaletteOf(th, o.Variant, o.Disabled)
 	rest := actionRadius(w, spec, o.Shape, false)
 
 	el := ui.ButtonBase(c).
 		DimDisabled(false).
 		FocusRing(false).
 		Size(w, float32(spec.Height)).
-		Label(label).
-		Disabled(o.Disabled).
-		TextColor(pal.content)
+		Label(label)
+	// A disabled ancestor also disables the button: use MD3E's disabled palette.
+	disabled := o.Disabled || el.IsDisabled()
+	pal := iconButtonPaletteOf(th, o.Variant, disabled)
+	el.Disabled(o.Disabled).TextColor(pal.content)
 	if pal.container.A > 0 {
 		el.Background(pal.container)
 	}
@@ -136,14 +137,14 @@ func IconButton(c *ui.Context, label string, icon IconDraw, opts ...IconButtonOp
 	el.Radius(radius)
 
 	borderInset := float32(0)
-	if o.Variant == IconButtonOutlined {
+	if pal.border.A > 0 {
 		borderInset = 1
 	}
 	AttachRipple(c, el, StateLayerOptions{
 		Color:       pal.content,
 		Radius:      radius,
 		BorderInset: borderInset,
-		Disabled:    o.Disabled,
+		Disabled:    disabled,
 	})
 
 	el.Children(func() {
@@ -190,10 +191,10 @@ func ToggleIconButton(c *ui.Context, on *bool, label string, icon IconDraw, opts
 		DimDisabled(false).
 		FocusRing(false).
 		Size(w, float32(spec.Height)).
-		Label(label).
-		Disabled(o.Disabled)
-	pal := toggleIconButtonPaletteOf(th, o.Variant, *on, o.Disabled)
-	el.TextColor(pal.content)
+		Label(label)
+	disabled := o.Disabled || el.IsDisabled()
+	pal := toggleIconButtonPaletteOf(th, o.Variant, *on, disabled)
+	el.Disabled(o.Disabled).TextColor(pal.content)
 	if pal.container.A > 0 {
 		el.Background(pal.container)
 	}
@@ -210,14 +211,14 @@ func ToggleIconButton(c *ui.Context, on *bool, label string, icon IconDraw, opts
 	el.Radius(radius)
 
 	borderInset := float32(0)
-	if o.Variant == IconButtonOutlined {
+	if pal.border.A > 0 {
 		borderInset = 1
 	}
 	AttachRipple(c, el, StateLayerOptions{
 		Color:       pal.content,
 		Radius:      radius,
 		BorderInset: borderInset,
-		Disabled:    o.Disabled,
+		Disabled:    disabled,
 	})
 
 	draw := icon
@@ -301,7 +302,10 @@ func toggleIconButtonPaletteOf(th *Theme, v IconButtonVariant, on, disabled bool
 		case IconButtonOutlined:
 			return buttonColors{container: cs.InverseSurface, content: cs.InverseOnSurface}
 		default:
-			return buttonColors{container: cs.SecondaryContainer, content: cs.OnSecondaryContainer}
+			// Standard keeps its plain container and only turns the icon
+			// Primary, as MD3E specifies; the Tonal selected fill belongs to
+			// IconButtonTonal alone.
+			return buttonColors{content: cs.Primary}
 		}
 	}
 	switch v {
