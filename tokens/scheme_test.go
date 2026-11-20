@@ -423,3 +423,39 @@ func TestStateLayerOpacities(t *testing.T) {
 		}
 	}
 }
+
+func TestTonalPaletteNaNAndNonFiniteDoNotBloatCache(t *testing.T) {
+	dirty := NewTonalPalette(math.NaN(), math.Inf(1))
+	if dirty.Hue() != 0 || dirty.Chroma() != 0 {
+		t.Fatalf("NewTonalPalette with NaN/Inf produced hue=%v chroma=%v, want 0, 0", dirty.Hue(), dirty.Chroma())
+	}
+
+	p := NewTonalPalette(210, 40)
+	c0 := p.Tone(0)
+	c100 := p.Tone(100)
+	p.mu.RLock()
+	baseLen := len(p.tones)
+	p.mu.RUnlock()
+
+	for range 50 {
+		if got := p.Tone(math.NaN()); got != c0 {
+			t.Fatalf("Tone(NaN) = %v, want %v", got, c0)
+		}
+		if got := p.Tone(math.Inf(-1)); got != c0 {
+			t.Fatalf("Tone(-Inf) = %v, want %v", got, c0)
+		}
+		if got := p.Tone(math.Inf(1)); got != c100 {
+			t.Fatalf("Tone(+Inf) = %v, want %v", got, c100)
+		}
+	}
+	if hct := p.HCT(math.NaN()); math.IsNaN(hct.Tone) || hct.Tone != 0 {
+		t.Fatalf("HCT(NaN).Tone = %v, want 0", hct.Tone)
+	}
+
+	p.mu.RLock()
+	afterLen := len(p.tones)
+	p.mu.RUnlock()
+	if afterLen != baseLen {
+		t.Fatalf("TonalPalette cache bloated on non-finite tones: before=%d after=%d", baseLen, afterLen)
+	}
+}

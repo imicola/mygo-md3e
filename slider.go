@@ -204,26 +204,27 @@ func Slider(c *ui.Context, value *float64, lo, hi float64, opts ...SliderOptions
 	halo := el.AnimateTo(sliderHaloKey{}, haloTarget, effects)
 	indicator := el.AnimateTo(sliderIndicatorKey{}, boolFloat(engaged), spatial)
 
+	paintSnap := sliderPaint{
+		value:       *value,
+		lo:          lo,
+		hi:          hi,
+		step:        o.Step,
+		centered:    o.Centered,
+		rtl:         rtl,
+		trackH:      trackH,
+		thumbH:      thumbH,
+		thumbW:      clampF32(thumbW, 1, thumbH),
+		halo:        clampF32(halo, 0, 1),
+		haloInk:     haloInk,
+		active:      activeColor,
+		inactive:    inactiveColor,
+		thumb:       thumbColor,
+		activeDot:   activeDot,
+		inactiveDot: inactiveDot,
+		focusRing:   focused && !disabled,
+	}
 	el.Draw(func(p *ui.Painter, r ui.Rect) {
-		drawSlider(p, r, sliderPaint{
-			value:       *value,
-			lo:          lo,
-			hi:          hi,
-			step:        o.Step,
-			centered:    o.Centered,
-			rtl:         rtl,
-			trackH:      trackH,
-			thumbH:      thumbH,
-			thumbW:      clampF32(thumbW, 1, thumbH),
-			halo:        clampF32(halo, 0, 1),
-			haloInk:     haloInk,
-			active:      activeColor,
-			inactive:    inactiveColor,
-			thumb:       thumbColor,
-			activeDot:   activeDot,
-			inactiveDot: inactiveDot,
-			focusRing:   focused && !disabled,
-		})
+		drawSlider(p, r, paintSnap)
 	})
 
 	if indicator > 0.02 {
@@ -552,8 +553,13 @@ func RangeSlider(c *ui.Context, low, high *float64, lo, hi float64, opts ...Rang
 
 	drags := ui.Local(el, rangeDragKey{}, func() rangeDragState { return rangeDragState{knob: -1} })
 	if !disabled {
-		_, _, lowDrag := lowEl.Dragged()
-		_, _, highDrag := highEl.Dragged()
+		var lowDrag, highDrag bool
+		if lowEl.Valid() {
+			_, _, lowDrag = lowEl.Dragged()
+		}
+		if highEl.Valid() {
+			_, _, highDrag = highEl.Dragged()
+		}
 		dx, _, containerDrag := el.Dragged()
 		switch {
 		case lowDrag:
@@ -593,9 +599,9 @@ func RangeSlider(c *ui.Context, low, high *float64, lo, hi float64, opts ...Rang
 						} else {
 							drags.knob = 1
 						}
-						if drags.knob == 0 {
+						if drags.knob == 0 && lowEl.Valid() {
 							lowEl.Focus(ui.FocusOptions{PreventScroll: true})
-						} else if drags.knob == 1 {
+						} else if drags.knob == 1 && highEl.Valid() {
 							highEl.Focus(ui.FocusOptions{PreventScroll: true})
 						}
 					}
@@ -618,10 +624,15 @@ func RangeSlider(c *ui.Context, low, high *float64, lo, hi float64, opts ...Rang
 		spatial, effects = motion.Snap, motion.Snap
 	}
 
-	lowFocused := lowEl.FocusVisible()
-	highFocused := highEl.FocusVisible()
-	lowHover := lowEl.Hovered()
-	highHover := highEl.Hovered()
+	var lowFocused, highFocused, lowHover, highHover bool
+	if lowEl.Valid() {
+		lowFocused = lowEl.FocusVisible()
+		lowHover = lowEl.Hovered()
+	}
+	if highEl.Valid() {
+		highFocused = highEl.FocusVisible()
+		highHover = highEl.Hovered()
+	}
 	lowW := el.AnimateTo(rangeLowWidthKey{}, rangeThumbTarget(lowFocused, drags.knob == 0), spatial)
 	highW := el.AnimateTo(rangeHighWidthKey{}, rangeThumbTarget(highFocused, drags.knob == 1), spatial)
 	lowHalo := el.AnimateTo(rangeLowHaloKey{}, rangeHaloTarget(lowHover, lowFocused, drags.knob == 0), effects)
@@ -664,29 +675,30 @@ func RangeSlider(c *ui.Context, low, high *float64, lo, hi float64, opts ...Rang
 	}
 	thumbH = clampF32(thumbH, 8, sliderHeight)
 
+	paintSnap := rangePaint{
+		low:         *low,
+		high:        *high,
+		lo:          lo,
+		hi:          hi,
+		step:        step,
+		rtl:         rtl,
+		trackH:      trackH,
+		thumbH:      thumbH,
+		lowW:        clampF32(lowW, 1, thumbH),
+		highW:       clampF32(highW, 1, thumbH),
+		lowHalo:     clampF32(lowHalo, 0, 1),
+		highHalo:    clampF32(highHalo, 0, 1),
+		haloInk:     haloInk,
+		active:      activeColor,
+		inactive:    inactiveColor,
+		thumb:       thumbColor,
+		activeDot:   activeDot,
+		inactiveDot: inactiveDot,
+		lowFocus:    lowFocused && !disabled,
+		highFocus:   highFocused && !disabled,
+	}
 	el.Draw(func(p *ui.Painter, r ui.Rect) {
-		drawRangeSlider(p, r, rangePaint{
-			low:         *low,
-			high:        *high,
-			lo:          lo,
-			hi:          hi,
-			step:        step,
-			rtl:         rtl,
-			trackH:      trackH,
-			thumbH:      thumbH,
-			lowW:        clampF32(lowW, 1, thumbH),
-			highW:       clampF32(highW, 1, thumbH),
-			lowHalo:     clampF32(lowHalo, 0, 1),
-			highHalo:    clampF32(highHalo, 0, 1),
-			haloInk:     haloInk,
-			active:      activeColor,
-			inactive:    inactiveColor,
-			thumb:       thumbColor,
-			activeDot:   activeDot,
-			inactiveDot: inactiveDot,
-			lowFocus:    lowFocused && !disabled,
-			highFocus:   highFocused && !disabled,
-		})
+		drawRangeSlider(p, r, paintSnap)
 	})
 
 	if indicator > 0.02 && activeKnob >= 0 {

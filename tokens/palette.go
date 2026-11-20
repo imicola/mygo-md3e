@@ -19,13 +19,31 @@ type TonalPalette struct {
 }
 
 // NewTonalPalette returns the palette of hue and chroma. A hue outside 0..360
-// wraps around and a negative chroma is zero.
+// wraps around and a negative or non-finite chroma is zero.
 func NewTonalPalette(hue, chroma float64) *TonalPalette {
+	if math.IsNaN(chroma) || math.IsInf(chroma, 0) || chroma < 0 {
+		chroma = 0
+	} else if chroma == 0 {
+		chroma = 0
+	}
 	return &TonalPalette{
 		hue:    SanitizeDegrees(hue),
-		chroma: math.Max(0, chroma),
+		chroma: chroma,
 		tones:  make(map[float64]ui.Color),
 	}
+}
+
+func sanitizeTone(tone float64) float64 {
+	if math.IsNaN(tone) {
+		return 0
+	}
+	if tone <= 0 {
+		return 0
+	}
+	if tone >= 100 {
+		return 100
+	}
+	return tone
 }
 
 // PaletteFromColor returns the palette of c's hue and chroma.
@@ -42,12 +60,12 @@ func (p *TonalPalette) Chroma() float64 { return p.chroma }
 
 // HCT returns the palette's color at tone.
 func (p *TonalPalette) HCT(tone float64) HCT {
-	return HCT{Hue: p.hue, Chroma: p.chroma, Tone: min(max(tone, 0), 100)}
+	return HCT{Hue: p.hue, Chroma: p.chroma, Tone: sanitizeTone(tone)}
 }
 
 // Tone returns the palette's opaque color at tone, caching what it computes.
 func (p *TonalPalette) Tone(tone float64) ui.Color {
-	tone = min(max(tone, 0), 100)
+	tone = sanitizeTone(tone)
 	p.mu.RLock()
 	c, ok := p.tones[tone]
 	p.mu.RUnlock()

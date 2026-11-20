@@ -434,3 +434,174 @@ func TestThemeScopeWeakRegistryNoMemoryLeak(t *testing.T) {
 		t.Fatalf("theme registry leaked entries after scopes dropped: count=%d baseline=%d", got, baseline)
 	}
 }
+
+func TestWithPreferencesRoundTripAndManualEdits(t *testing.T) {
+	seed := ui.Hex("#1E88E5")
+	base := ThemeFromSeed(seed)
+	highPrefs := ui.Preferences{HighContrast: true, ReduceMotion: true, TextScale: 1.5}
+	normalPrefs := ui.Preferences{HighContrast: false, ReduceMotion: false, TextScale: 1}
+
+	high := base.WithPreferences(highPrefs)
+	if high.Contrast != tokens.ContrastHigh || !high.ReduceMotion || high.TextScale != 1.5 {
+		t.Fatalf("high preferences not applied: contrast=%v rm=%v scale=%v", high.Contrast, high.ReduceMotion, high.TextScale)
+	}
+	if high.Colors == base.Colors {
+		t.Fatal("expected high contrast seeded theme to regenerate colors")
+	}
+
+	restored := high.WithPreferences(normalPrefs)
+	if restored.Contrast != base.Contrast || restored.ReduceMotion != base.ReduceMotion || restored.TextScale != base.TextScale {
+		t.Fatalf("restored theme did not recover baseline prefs: got=(c=%v rm=%v s=%v) want=(c=%v rm=%v s=%v)",
+			restored.Contrast, restored.ReduceMotion, restored.TextScale, base.Contrast, base.ReduceMotion, base.TextScale)
+	}
+	if restored.Colors != base.Colors || restored.Warning != base.Warning || restored.Success != base.Success {
+		t.Fatal("restored seeded theme colors/semantic roles did not match baseline")
+	}
+
+	// Repeated high -> normal -> high -> normal remains strictly idempotent.
+	restoredAgain := restored.WithPreferences(highPrefs).WithPreferences(normalPrefs)
+	if restoredAgain.Contrast != base.Contrast || restoredAgain.ReduceMotion != base.ReduceMotion ||
+		restoredAgain.TextScale != base.TextScale || restoredAgain.Colors != base.Colors {
+		t.Fatal("repeated WithPreferences round-trip was not idempotent")
+	}
+
+	// Manual un-seeded theme restores original un-mixed Outline and Contrast.
+	manual := &Theme{Colors: base.Colors, Font: "Custom"}
+	manualHigh := manual.WithPreferences(highPrefs)
+	if manualHigh.Colors.Outline == manual.Colors.Outline {
+		t.Fatal("expected manual high-contrast theme to strengthen Outline")
+	}
+	manualRestored := manualHigh.WithPreferences(normalPrefs)
+	if manualRestored.Colors.Outline != manual.Colors.Outline || manualRestored.Contrast != 0 || manualRestored.ReduceMotion {
+		t.Fatalf("manual theme did not recover baseline on normal prefs: got c=%v rm=%v", manualRestored.Contrast, manualRestored.ReduceMotion)
+	}
+
+	// Explicit post-WithPreferences caller edits survive while untouched fields recover.
+	edited := high.Clone()
+	edited.Font = "RobotoMono"
+	editedRestored := edited.WithPreferences(normalPrefs)
+	if editedRestored.Font != "RobotoMono" {
+		t.Fatalf("caller Font override lost: got %q", editedRestored.Font)
+	}
+	if editedRestored.Contrast != base.Contrast || editedRestored.ReduceMotion || editedRestored.TextScale != 1 {
+		t.Fatalf("untouched preference fields did not restore after Font edit: c=%v rm=%v s=%v",
+			editedRestored.Contrast, editedRestored.ReduceMotion, editedRestored.TextScale)
+	}
+
+	// Theme's own explicit strict settings are never relaxed by normal prefs.
+	strict := ThemeFromSeed(seed, ThemeOptions{Contrast: tokens.ContrastHigh, ReduceMotion: true, TextScale: 1.25})
+	strictAfter := strict.WithPreferences(normalPrefs)
+	if strictAfter.Contrast != tokens.ContrastHigh || !strictAfter.ReduceMotion || strictAfter.TextScale != 1.25 {
+		t.Fatalf("explicit theme baseline should be preserved: c=%v rm=%v s=%v",
+			strictAfter.Contrast, strictAfter.ReduceMotion, strictAfter.TextScale)
+	}
+
+	// ThemeScope toggling HighContrast/ReduceMotion dynamically also recovers.
+	var seen *Theme
+	tt := ui.NewTester(func(c *ui.Context) {
+		ThemeScope(c, base, func() {
+			seen = CurrentTheme(c)
+			ui.Text(c, "Scope")
+		})
+	}, 200, 100)
+
+	tt.SetPreferences(highPrefs)
+	if seen == nil || seen.Contrast != tokens.ContrastHigh || !seen.ReduceMotion {
+		t.Fatalf("ThemeScope failed to apply high prefs: %+v", seen)
+	}
+	tt.SetPreferences(normalPrefs)
+	if seen.Contrast != base.Contrast || seen.ReduceMotion != base.ReduceMotion || seen.Colors != base.Colors {
+		t.Fatalf("ThemeScope failed to restore normal prefs: c=%v rm=%v", seen.Contrast, seen.ReduceMotion)
+	}
+}
+
+func TestThemeScopeHighContrastSteadyRebuildSkipsDynamicScheme(t *testing.T) {
+	uniqueSeed := ui.RGBA(0x31, 0x77, 0x99, 1)
+	base := ThemeFromSeed(uniqueSeed)
+	tick := 0
+	tt := ui.NewTester(func(c *ui.Context) {
+		ThemeScope(c, base, func() {
+			if tick >= 0 {
+				ui.Text(c, "Tick")
+			}
+		})
+	}, 200, 100)
+
+	tt.SetPreferences(ui.Preferences{HighContrast: true, TextScale: 1})
+	tt.Frame()
+	before := schemeComputeCount.Load()
+
+	for i := 1; i <= 20; i++ {
+		tick = i
+		tt.Frame()
+	}
+	if after := schemeComputeCount.Load(); after != before {
+		t.Fatalf("steady HighContrast ThemeScope rebuilds recomputed DynamicScheme %d times", after-before)
+	}
+}
+
+func TestNaNPreferencesDoNotBloatThemeCaches(t *testing.T) {
+	nan := float32(math.NaN())
+	infPos := float32(math.Inf(1))
+	infNeg := float32(math.Inf(-1))
+
+	th := ThemeFromSeed(ui.Hex("#6750A4"), ThemeOptions{
+		Contrast:  tokens.Contrast(math.NaN()),
+		TextScale: nan,
+		Shapes:    &ShapeScale{ExtraSmall: nan, Large: infPos, Medium: 12},
+	})
+	if got := th.EffectiveTextScale(); got != 1 {
+		t.Fatalf("EffectiveTextScale with NaN = %v, want 1", got)
+	}
+	if got := th.Shapes.Radius(tokens.ShapeExtraSmall); got != float32(tokens.ShapeExtraSmall.Radius()) {
+		t.Fatalf("ShapeScale NaN radius = %v, want fallback %v", got, tokens.ShapeExtraSmall.Radius())
+	}
+
+	_ = cachedThemeFromSeed(DefaultSeedColor, false, tokens.TonalSpot, ui.Preferences{TextScale: 1})
+	defaultThemeMu.RLock()
+	defBefore := len(defaultThemes)
+	defaultThemeMu.RUnlock()
+
+	for range 20 {
+		_ = cachedThemeFromSeed(DefaultSeedColor, false, tokens.TonalSpot, ui.Preferences{TextScale: nan})
+		_ = cachedThemeFromSeed(DefaultSeedColor, false, tokens.TonalSpot, ui.Preferences{TextScale: infPos})
+		_ = cachedThemeFromSeed(DefaultSeedColor, false, tokens.TonalSpot, ui.Preferences{TextScale: infNeg})
+	}
+	defaultThemeMu.RLock()
+	defAfter := len(defaultThemes)
+	defaultThemeMu.RUnlock()
+	if defAfter != defBefore {
+		t.Fatalf("defaultThemes cache bloated on NaN/Inf TextScale: before=%d after=%d", defBefore, defAfter)
+	}
+
+	runtime.GC()
+	baseSpec := themeSpecRegistryCountForTest()
+	for range 20 {
+		func() {
+			tmp := ui.NewTester(func(c *ui.Context) {
+				dirty := &Theme{
+					Contrast:  tokens.Contrast(math.NaN()),
+					TextScale: nan,
+					Shapes:    ShapeScale{Small: nan},
+				}
+				ThemeScope(c, dirty, func() {
+					ui.Text(c, "nan")
+				})
+			}, 200, 100)
+			tmp.SetPreferences(ui.Preferences{TextScale: nan})
+		}()
+	}
+	if gotSpec := themeSpecRegistryCountForTest(); gotSpec > baseSpec+1 {
+		t.Fatalf("themeBySpec bloated on NaN scopes: before=%d after=%d", baseSpec, gotSpec)
+	}
+	for range 25 {
+		runtime.GC()
+		runtime.Gosched()
+		if themeRegistryCountForTest() <= baseSpec && themeSpecRegistryCountForTest() <= baseSpec {
+			break
+		}
+	}
+	if gotSpec := themeSpecRegistryCountForTest(); gotSpec > baseSpec {
+		t.Fatalf("O(1) cleanup left stale spec entries: count=%d baseline=%d", gotSpec, baseSpec)
+	}
+}

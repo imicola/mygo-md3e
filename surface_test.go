@@ -463,3 +463,113 @@ func TestSurfacePolygonShapeClipKeyboardAndRTL(t *testing.T) {
 		t.Fatalf("unexpected RTL PaddingStart behavior: ltr=%+v (want X=40) rtl=%+v (want X=4)", ltrRect, rtlRect)
 	}
 }
+
+func TestRippleExitTransitionNoExpiredHandlePanic(t *testing.T) {
+	exitTr := ui.ElementTransition{
+		Duration: 180 * time.Millisecond,
+		Exit:     &ui.Motion{Opacity: 0},
+	}
+
+	t.Run("direct-button-exit-and-reappear", func(t *testing.T) {
+		show := true
+		clicks := 0
+		tt := ui.NewTester(func(c *ui.Context) {
+			ThemeScope(c, nil, func() {
+				ui.Row(c).Size(240, 120).Padding(16).Children(func() {
+					if show {
+						b := Button(c.Key("exit-btn"), "ExitBtn").
+							Transition(exitTr)
+						if b.Clicked() {
+							clicks++
+						}
+					}
+				})
+			})
+		}, 240, 120)
+
+		r, ok := tt.Find("ExitBtn")
+		if !ok {
+			t.Fatal("ExitBtn not found")
+		}
+		cx, cy := r.X+r.W/2, r.Y+r.H/2
+		tt.Move(cx, cy)
+		tt.Press(cx, cy)
+		tt.Advance(20 * time.Millisecond)
+		tt.Release(cx, cy)
+		tt.Advance(10 * time.Millisecond)
+
+		// Remove during active ripple/hover exit and step until full convergence.
+		show = false
+		tt.Frame()
+		for range 30 {
+			tt.Advance(16 * time.Millisecond)
+		}
+		if tt.FramePending() {
+			t.Fatal("direct exit transition should converge without pending frames")
+		}
+
+		// Re-show, exit again, then re-appear mid-exit without panicking.
+		show = true
+		tt.Frame()
+		tt.Advance(250 * time.Millisecond)
+		if r2, ok := tt.Find("ExitBtn"); ok {
+			tt.Move(r2.X+r2.W/2, r2.Y+r2.H/2)
+		}
+		show = false
+		tt.Frame()
+		tt.Advance(40 * time.Millisecond)
+		show = true
+		tt.Frame()
+		tt.Advance(300 * time.Millisecond)
+		if tt.FramePending() {
+			t.Fatal("re-appeared button should converge with no pending frames")
+		}
+	})
+
+	t.Run("ancestor-transition-exit-and-reappear", func(t *testing.T) {
+		show := true
+		tt := ui.NewTester(func(c *ui.Context) {
+			ThemeScope(c, nil, func() {
+				ui.Column(c).Size(260, 140).Padding(16).Children(func() {
+					if show {
+						ui.Row(c.Key("wrap")).
+							Transition(ui.ElementTransition{
+								Duration: 180 * time.Millisecond,
+								Exit:     &ui.Motion{Opacity: 0, Collapse: true},
+							}).
+							Children(func() {
+								Button(c, "ChildBtn")
+							})
+					}
+				})
+			})
+		}, 260, 140)
+
+		r, ok := tt.Find("ChildBtn")
+		if !ok {
+			t.Fatal("ChildBtn not found")
+		}
+		cx, cy := r.X+r.W/2, r.Y+r.H/2
+		tt.Move(cx, cy)
+		tt.Press(cx, cy)
+		tt.Advance(15 * time.Millisecond)
+
+		// Remove ancestor mid-press, advance halfway through exit, then re-appear.
+		show = false
+		tt.Frame()
+		tt.Advance(32 * time.Millisecond)
+		tt.Release(cx, cy)
+		tt.Advance(16 * time.Millisecond)
+		show = true
+		tt.Frame()
+		tt.Advance(300 * time.Millisecond)
+
+		// Full exit to settled state.
+		show = false
+		tt.Frame()
+		tt.Advance(300 * time.Millisecond)
+		if tt.FramePending() {
+			t.Fatal("ancestor exit transition should settle with zero pending frames")
+		}
+	})
+}

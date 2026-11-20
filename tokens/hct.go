@@ -115,11 +115,17 @@ func ColorFromCAM16(j, chroma, hue float64) ui.Color {
 	}))
 }
 
-// SanitizeDegrees wraps degrees into 0..360.
+// SanitizeDegrees wraps degrees into 0..360. Non-finite inputs return 0.
 func SanitizeDegrees(degrees float64) float64 {
+	if math.IsNaN(degrees) || math.IsInf(degrees, 0) {
+		return 0
+	}
 	degrees = math.Mod(degrees, 360)
 	if degrees < 0 {
 		degrees += 360
+	}
+	if degrees == 0 {
+		return 0
 	}
 	return degrees
 }

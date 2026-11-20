@@ -177,7 +177,7 @@ func attachOverlayFeedback(c *ui.Context, el ui.Element, withRipple bool, opt St
 	})
 
 	el.DrawOver(func(p *ui.Painter, r ui.Rect) {
-		if r.W <= 0 || r.H <= 0 {
+		if !el.Valid() || r.W <= 0 || r.H <= 0 {
 			return
 		}
 		if opt.Disabled || el.IsDisabled() {
@@ -411,7 +411,7 @@ func insetRadii(radii [4]float32, inset float32) [4]float32 {
 }
 
 func clampF32(v, lo, hi float32) float32 {
-	if v < lo {
+	if math.IsNaN(float64(v)) || v < lo {
 		return lo
 	}
 	if v > hi {

@@ -4,6 +4,7 @@ import (
 	"math"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"weak"
 
 	"github.com/egoist/mygo/ui"
@@ -54,6 +55,10 @@ func (s ShapeScale) Radius(scale tokens.ShapeScale) float32 {
 	var v float32
 	switch scale {
 	case tokens.ShapeNone:
+		f := float64(s.None)
+		if math.IsNaN(f) || math.IsInf(f, 0) || s.None < 0 {
+			return fallback
+		}
 		return s.None
 	case tokens.ShapeExtraSmall:
 		v = s.ExtraSmall
@@ -76,7 +81,8 @@ func (s ShapeScale) Radius(scale tokens.ShapeScale) float32 {
 	default:
 		return fallback
 	}
-	if v == 0 {
+	f := float64(v)
+	if math.IsNaN(f) || math.IsInf(f, 0) || !(v > 0) {
 		return fallback
 	}
 	return v
@@ -124,11 +130,22 @@ type Theme struct {
 	hasSeed bool
 	variant tokens.Variant
 
-	// baseTextScale is TextScale before desktop preferences were folded in,
-	// so that resolvedValue can reapply different preferences idempotently
-	// instead of multiplying the scale twice.
-	baseTextScale   float32
-	hasAppliedPrefs bool
+	// followed records the unresolved base theme and the resolved snapshot from
+	// the last WithPreferences / ThemeScope call, so repeated preference passes
+	// remain idempotent and reversible while preserving manual caller edits.
+	followed *followedTheme
+}
+
+type resolvedPrefs struct {
+	highContrast bool
+	textScale    float32
+	reduceMotion bool
+}
+
+type followedTheme struct {
+	from  Theme
+	to    Theme
+	prefs resolvedPrefs
 }
 
 // ThemeFromSeed derives an MD3E Theme from seed using Material HCT palettes.
@@ -146,42 +163,33 @@ func ThemeFromSeed(seed ui.Color, opts ...ThemeOptions) *Theme {
 		seed = DefaultSeedColor
 	}
 
-	ds := tokens.NewDynamicScheme(tokens.DynamicSchemeOptions{
-		Seed:     seed,
-		Dark:     o.Dark,
-		Variant:  o.Variant,
-		Contrast: o.Contrast,
-	})
+	contrast := sanitizeContrast(o.Contrast)
+	colors := cachedColorScheme(seed, o.Dark, o.Variant, contrast)
 
 	shapes := DefaultShapeScale()
 	if o.Shapes != nil {
-		shapes = *o.Shapes
+		shapes = sanitizeShapeScale(*o.Shapes)
 	}
 	typo := tokens.NewTypographyScale()
 	if o.Typography != nil {
-		typo = *o.Typography
+		typo = sanitizeTypographyScale(*o.Typography)
 	}
 
-	scale := o.TextScale
-	if scale <= 0 {
-		scale = 1
-	}
+	scale := sanitizePositiveScale(o.TextScale, 1)
 
 	t := &Theme{
 		Dark:         o.Dark,
-		Colors:       ds.Colors,
+		Colors:       colors,
 		Motion:       o.Motion,
 		Typography:   typo,
 		Shapes:       shapes,
-		Contrast:     o.Contrast,
+		Contrast:     contrast,
 		TextScale:    scale,
 		ReduceMotion: o.ReduceMotion,
 		Font:         o.Font,
 		seed:         seed,
 		hasSeed:      true,
 		variant:      o.Variant,
-
-		baseTextScale: scale,
 	}
 	applySemanticRoles(t)
 	return t
@@ -233,10 +241,10 @@ func (t *Theme) Clone() *Theme {
 
 // EffectiveTextScale returns a positive text scale multiplier (1.0 when unset).
 func (t *Theme) EffectiveTextScale() float32 {
-	if t == nil || t.TextScale <= 0 {
+	if t == nil {
 		return 1
 	}
-	return t.TextScale
+	return sanitizePositiveScale(t.TextScale, 1)
 }
 
 // Animation resolves token against t.Motion while respecting t.ReduceMotion.
@@ -355,28 +363,183 @@ func (t *Theme) WithPreferences(p ui.Preferences) *Theme {
 	return &resolved
 }
 
+func sanitizePositiveScale(v, fallback float32) float32 {
+	f := float64(v)
+	if math.IsNaN(f) || math.IsInf(f, 0) || !(v > 0) {
+		return fallback
+	}
+	return v
+}
+
+func sanitizeNonNegF32(v float32) float32 {
+	f := float64(v)
+	if math.IsNaN(f) || math.IsInf(f, 0) || v <= 0 {
+		return 0
+	}
+	return v
+}
+
+func sanitizeContrast(c tokens.Contrast) tokens.Contrast {
+	f := float64(c)
+	if math.IsNaN(f) || math.IsInf(f, 0) {
+		return tokens.ContrastStandard
+	}
+	if c == 0 {
+		return 0
+	}
+	return c
+}
+
+func sanitizeShapeScale(s ShapeScale) ShapeScale {
+	if s == (ShapeScale{}) {
+		return DefaultShapeScale()
+	}
+	return ShapeScale{
+		None:                sanitizeNonNegF32(s.None),
+		ExtraSmall:          sanitizeNonNegF32(s.ExtraSmall),
+		Small:               sanitizeNonNegF32(s.Small),
+		Medium:              sanitizeNonNegF32(s.Medium),
+		Large:               sanitizeNonNegF32(s.Large),
+		LargeIncreased:      sanitizeNonNegF32(s.LargeIncreased),
+		ExtraLarge:          sanitizeNonNegF32(s.ExtraLarge),
+		ExtraLargeIncreased: sanitizeNonNegF32(s.ExtraLargeIncreased),
+		ExtraExtraLarge:     sanitizeNonNegF32(s.ExtraExtraLarge),
+		Full:                sanitizeNonNegF32(s.Full),
+	}
+}
+
+func sanitizeTypeStyle(s, fallback tokens.TypeStyle) tokens.TypeStyle {
+	if math.IsNaN(s.Size) || math.IsInf(s.Size, 0) || !(s.Size >= 0) {
+		s.Size = fallback.Size
+	} else if s.Size == 0 {
+		s.Size = 0
+	}
+	if math.IsNaN(s.LineHeight) || math.IsInf(s.LineHeight, 0) || !(s.LineHeight >= 0) {
+		s.LineHeight = fallback.LineHeight
+	} else if s.LineHeight == 0 {
+		s.LineHeight = 0
+	}
+	if math.IsNaN(s.Tracking) || math.IsInf(s.Tracking, 0) {
+		s.Tracking = fallback.Tracking
+	} else if s.Tracking == 0 {
+		s.Tracking = 0
+	}
+	return s
+}
+
+func sanitizeTypographyScale(ts tokens.TypographyScale) tokens.TypographyScale {
+	if ts == (tokens.TypographyScale{}) {
+		return tokens.NewTypographyScale()
+	}
+	def := tokens.NewTypographyScale()
+	for i := range ts.Standard {
+		ts.Standard[i] = sanitizeTypeStyle(ts.Standard[i], def.Standard[i])
+		ts.Emphasized[i] = sanitizeTypeStyle(ts.Emphasized[i], def.Emphasized[i])
+	}
+	return ts
+}
+
+// sanitizeTheme returns a comparable value copy of t free of NaN/Inf floats and
+// with followed cleared so it can safely serve as a map key.
+func sanitizeTheme(t Theme) Theme {
+	t.followed = nil
+	t.Typography = sanitizeTypographyScale(t.Typography)
+	t.Shapes = sanitizeShapeScale(t.Shapes)
+	t.Contrast = sanitizeContrast(t.Contrast)
+	t.TextScale = sanitizePositiveScale(t.TextScale, 1)
+	if t.Warning.A == 0 || t.Success.A == 0 {
+		applySemanticRoles(&t)
+	}
+	return t
+}
+
+func (t *Theme) rebaseFromFollowed() Theme {
+	cur := sanitizeTheme(*t)
+	if t.followed == nil {
+		return cur
+	}
+	from := t.followed.from
+	to := t.followed.to
+	if cur == to {
+		return from
+	}
+	base := from
+	if cur.Dark != to.Dark {
+		base.Dark = cur.Dark
+		base.hasSeed = false
+	}
+	if cur.Colors != to.Colors {
+		base.Colors = cur.Colors
+		base.hasSeed = false
+	}
+	if cur.Motion != to.Motion {
+		base.Motion = cur.Motion
+	}
+	if cur.Typography != to.Typography {
+		base.Typography = cur.Typography
+	}
+	if cur.Shapes != to.Shapes {
+		base.Shapes = cur.Shapes
+	}
+	if cur.Contrast != to.Contrast {
+		base.Contrast = cur.Contrast
+	}
+	if cur.TextScale != to.TextScale {
+		base.TextScale = cur.TextScale
+	}
+	if cur.ReduceMotion != to.ReduceMotion {
+		base.ReduceMotion = cur.ReduceMotion
+	}
+	if cur.Font != to.Font {
+		base.Font = cur.Font
+	}
+	if cur.Warning != to.Warning {
+		base.Warning = cur.Warning
+	}
+	if cur.OnWarning != to.OnWarning {
+		base.OnWarning = cur.OnWarning
+	}
+	if cur.WarningContainer != to.WarningContainer {
+		base.WarningContainer = cur.WarningContainer
+	}
+	if cur.OnWarningContainer != to.OnWarningContainer {
+		base.OnWarningContainer = cur.OnWarningContainer
+	}
+	if cur.Success != to.Success {
+		base.Success = cur.Success
+	}
+	if cur.OnSuccess != to.OnSuccess {
+		base.OnSuccess = cur.OnSuccess
+	}
+	if cur.SuccessContainer != to.SuccessContainer {
+		base.SuccessContainer = cur.SuccessContainer
+	}
+	if cur.OnSuccessContainer != to.OnSuccessContainer {
+		base.OnSuccessContainer = cur.OnSuccessContainer
+	}
+	return base
+}
+
 func (t *Theme) resolvedValue(p ui.Preferences) Theme {
-	cp := *t
-	if cp.Typography == (tokens.TypographyScale{}) {
-		cp.Typography = tokens.NewTypographyScale()
+	np := resolvedPrefs{
+		highContrast: p.HighContrast,
+		textScale:    sanitizePositiveScale(p.TextScale, 1),
+		reduceMotion: p.ReduceMotion,
 	}
-	if cp.Shapes == (ShapeScale{}) {
-		cp.Shapes = DefaultShapeScale()
-	}
-	if cp.Warning.A == 0 || cp.Success.A == 0 {
-		applySemanticRoles(&cp)
+	if t.followed != nil && t.followed.prefs == np {
+		cur := sanitizeTheme(*t)
+		if cur == t.followed.to {
+			cur.followed = t.followed
+			return cur
+		}
 	}
 
-	if p.HighContrast && cp.Contrast < tokens.ContrastHigh {
+	orig := t.rebaseFromFollowed()
+	cp := orig
+	if np.highContrast && cp.Contrast < tokens.ContrastHigh {
 		cp.Contrast = tokens.ContrastHigh
 		if cp.hasSeed {
-			ds := tokens.NewDynamicScheme(tokens.DynamicSchemeOptions{
-				Seed:     cp.seed,
-				Dark:     cp.Dark,
-				Variant:  cp.variant,
-				Contrast: tokens.ContrastHigh,
-			})
-			cp.Colors = ds.Colors
+			cp.Colors = cachedColorScheme(cp.seed, cp.Dark, cp.variant, tokens.ContrastHigh)
 			applySemanticRoles(&cp)
 		} else {
 			// Manual theme without a seed: raise outline legibility while keeping custom palette intact.
@@ -388,24 +551,17 @@ func (t *Theme) resolvedValue(p ui.Preferences) Theme {
 		}
 	}
 
-	baseScale := cp.TextScale
-	if cp.hasAppliedPrefs && cp.baseTextScale > 0 {
-		// Preferences were already folded in once: reapply them from the
-		// original scale so that ThemeScope(t.WithPreferences(p), ...) does
-		// not multiply TextScale twice.
-		baseScale = cp.baseTextScale
+	baseScale := sanitizePositiveScale(orig.TextScale, 1)
+	cp.TextScale = sanitizePositiveScale(baseScale*np.textScale, 1)
+	cp.ReduceMotion = orig.ReduceMotion || np.reduceMotion
+
+	toSnap := sanitizeTheme(cp)
+	cp = toSnap
+	cp.followed = &followedTheme{
+		from:  orig,
+		to:    toSnap,
+		prefs: np,
 	}
-	if baseScale <= 0 {
-		baseScale = 1
-	}
-	prefScale := p.TextScale
-	if prefScale <= 0 {
-		prefScale = 1
-	}
-	cp.TextScale = baseScale * prefScale
-	cp.baseTextScale = baseScale
-	cp.hasAppliedPrefs = true
-	cp.ReduceMotion = cp.ReduceMotion || p.ReduceMotion
 	return cp
 }
 
@@ -533,6 +689,13 @@ var (
 	stockDarkAccent  = ui.DarkTheme().Accent
 )
 
+type schemeCacheKey struct {
+	seed     ui.Color
+	dark     bool
+	variant  tokens.Variant
+	contrast tokens.Contrast
+}
+
 type defaultThemeKey struct {
 	seed         ui.Color
 	dark         bool
@@ -542,43 +705,94 @@ type defaultThemeKey struct {
 	reduceMotion bool
 }
 
-const maxDefaultThemeCache = 32
+const (
+	maxDefaultThemeCache = 32
+	maxSchemeCache       = 64
+)
 
-func registerScopedTheme(resolved Theme) *ui.Theme {
+var (
+	schemeCacheMu      sync.RWMutex
+	schemeCache        = map[schemeCacheKey]tokens.ColorScheme{}
+	schemeComputeCount atomic.Uint64
+)
+
+func cachedColorScheme(seed ui.Color, dark bool, variant tokens.Variant, contrast tokens.Contrast) tokens.ColorScheme {
+	contrast = sanitizeContrast(contrast)
+	key := schemeCacheKey{
+		seed:     seed,
+		dark:     dark,
+		variant:  variant,
+		contrast: contrast,
+	}
+	schemeCacheMu.RLock()
+	if cs, ok := schemeCache[key]; ok {
+		schemeCacheMu.RUnlock()
+		return cs
+	}
+	schemeCacheMu.RUnlock()
+
+	schemeComputeCount.Add(1)
+	cs := tokens.NewDynamicScheme(tokens.DynamicSchemeOptions{
+		Seed:     seed,
+		Dark:     dark,
+		Variant:  variant,
+		Contrast: contrast,
+	}).Colors
+
+	schemeCacheMu.Lock()
+	defer schemeCacheMu.Unlock()
+	if cs, ok := schemeCache[key]; ok {
+		return cs
+	}
+	if len(schemeCache) >= maxSchemeCache {
+		for k := range schemeCache {
+			delete(schemeCache, k)
+			if len(schemeCache) < maxSchemeCache/2 {
+				break
+			}
+		}
+	}
+	schemeCache[key] = cs
+	return cs
+}
+
+func registerScopedTheme(resolved Theme, tracked *Theme) *ui.Theme {
+	spec := sanitizeTheme(resolved)
+
 	themeRegMu.Lock()
 	defer themeRegMu.Unlock()
 
-	if e, ok := themeBySpec[resolved]; ok {
+	if e, ok := themeBySpec[spec]; ok {
 		if existing := e.wp.Value(); existing != nil {
 			if cached, ok := themeByUI[e.wp]; ok && cached.id == e.id && cached.theme != nil {
 				return existing
 			}
 		}
-		delete(themeBySpec, resolved)
+		delete(themeBySpec, spec)
 	}
 
-	uiVal := resolved.buildUITheme()
+	uiVal := spec.buildUITheme()
 	uiPtr := &uiVal
 	wp := weak.Make(uiPtr)
-	stored := resolved
+	stored := spec
+	if tracked != nil {
+		stored = *tracked
+	}
 	themeSeq++
 	id := themeSeq
-	themeBySpec[stored] = scopedThemeEntry{wp: wp, id: id}
-	themeByUI[wp] = scopedThemeEntry{theme: &stored, spec: stored, id: id}
+	themeBySpec[spec] = scopedThemeEntry{wp: wp, id: id}
+	themeByUI[wp] = scopedThemeEntry{theme: &stored, spec: spec, id: id}
 
-	// Cleanup works from themeByUI, which is keyed by the weak pointer alone:
-	// a Theme with a NaN field is unequal to itself, so deleting its spec key
-	// would always miss. Rebuilding the spec index from the live entries
-	// drops such stale keys too.
+	// All float fields in spec are sanitized (finite and non-NaN), so O(1)
+	// direct key deletion with generation checks cleanly reclaims stale entries.
 	runtime.AddCleanup(uiPtr, func(k scopedUIKey) {
 		themeRegMu.Lock()
 		defer themeRegMu.Unlock()
 		if cur, ok := themeByUI[k.wp]; ok && cur.id == k.id {
 			delete(themeByUI, k.wp)
-		}
-		themeBySpec = make(map[Theme]scopedThemeEntry, len(themeByUI))
-		for wp, e := range themeByUI {
-			themeBySpec[e.spec] = scopedThemeEntry{wp: wp, id: e.id}
+			if live, ok := themeBySpec[cur.spec]; ok && live.id == k.id {
+				delete(themeBySpec, cur.spec)
+			}
 		}
 	}, scopedUIKey{wp: wp, id: id})
 
@@ -607,10 +821,7 @@ func cachedThemeFromSeed(seed ui.Color, dark bool, variant tokens.Variant, prefs
 	if prefs.HighContrast {
 		contrast = tokens.ContrastHigh
 	}
-	textScale := prefs.TextScale
-	if textScale <= 0 {
-		textScale = 1
-	}
+	textScale := sanitizePositiveScale(prefs.TextScale, 1)
 	key := defaultThemeKey{
 		seed:         seed,
 		dark:         dark,
@@ -627,18 +838,12 @@ func cachedThemeFromSeed(seed ui.Color, dark bool, variant tokens.Variant, prefs
 	}
 	defaultThemeMu.RUnlock()
 
-	built := ThemeFromSeed(seed, ThemeOptions{
-		Dark:         dark,
-		Variant:      variant,
-		Contrast:     contrast,
-		TextScale:    textScale,
-		ReduceMotion: prefs.ReduceMotion,
+	base := ThemeFromSeed(seed, ThemeOptions{
+		Dark:    dark,
+		Variant: variant,
 	})
-	// The cached theme already carries the desktop preferences: its scale is
-	// a preference value, not a caller base, so ThemeScope must not reapply
-	// them on top.
-	built.hasAppliedPrefs = true
-	built.baseTextScale = 1
+	resolved := base.resolvedValue(prefs)
+	built := &resolved
 
 	defaultThemeMu.Lock()
 	defer defaultThemeMu.Unlock()
@@ -685,7 +890,7 @@ func ThemeScope(c *ui.Context, t *Theme, content func()) ui.Element {
 		t = DefaultTheme(c)
 	}
 	resolved := t.resolvedValue(c.Preferences())
-	uiT := registerScopedTheme(resolved)
+	uiT := registerScopedTheme(resolved, &resolved)
 
 	el := ui.Themed(c, uiT)
 	if content == nil {

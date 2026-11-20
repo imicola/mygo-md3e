@@ -588,3 +588,46 @@ func TestSliderDisabledAndReduceMotion(t *testing.T) {
 		t.Fatal("ReduceMotion range slider should not ask for frames")
 	}
 }
+
+func TestSliderExitTransitionSnapshotAndValidChildHandles(t *testing.T) {
+	show := true
+	val := 60.0
+	low, high := 20.0, 80.0
+	tr := ui.ElementTransition{
+		Duration: 180 * time.Millisecond,
+		Exit:     &ui.Motion{Opacity: 0},
+	}
+
+	tt := sliderCanvas(nil, func(c *ui.Context) {
+		ui.Column(c).Width(280).Gap(12).Children(func() {
+			if show {
+				ui.Column(c.Key("sliders-wrap")).Width(260).Gap(12).Transition(tr).Children(func() {
+					Slider(c, &val, 0, 100, SliderOptions{Label: "Volume", Step: 10})
+					RangeSlider(c, &low, &high, 0, 100, RangeSliderOptions{Label: "Price", Step: 10})
+				})
+			}
+		})
+	})
+
+	// Exit while simultaneously mutating caller-owned pointers: exit ghosts must
+	// draw their build-time snapshots cleanly with no invalid handle panics.
+	show = false
+	tt.Frame()
+	val = 0
+	low = 0
+	high = 0
+	tt.Advance(40 * time.Millisecond)
+
+	// Interrupt mid-exit by re-showing, then settle.
+	show = true
+	tt.Frame()
+	tt.Advance(300 * time.Millisecond)
+
+	// Full exit and settle.
+	show = false
+	tt.Frame()
+	tt.Advance(300 * time.Millisecond)
+	if tt.FramePending() {
+		t.Fatal("slider exit transition should converge with zero pending frames")
+	}
+}
