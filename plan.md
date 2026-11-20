@@ -292,7 +292,7 @@
     - 无障碍 `RoleProgress` 范围 `[0, 1, value]` 校验。
   - **Commit**：`feat(progress): [T6.2] implement Linear/Circular and Wavy ProgressIndicators`
 
-- [ ] **T6.3：实现 Badge、Tooltip（Plain & Rich）与 Snackbar**
+- [x] **T6.3：实现 Badge、Tooltip（Plain & Rich）与 Snackbar**
   - **交付物**：`badge.go`、`tooltip.go`、`snackbar.go`、`feedback_test.go`
   - **核心能力**：
     - `Badge`（Small `6×6` 红点与 Large 带数字/上限截断如 `999+` 徽章）与 `BadgedBox` 锚定辅助；
