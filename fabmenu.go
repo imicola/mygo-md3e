@@ -136,13 +136,27 @@ func FABMenu(c *ui.Context, items []FABMenuItem, opts ...FABMenuOptions) ui.Elem
 			Background(scrim.Alpha(0.32)).
 			Modal()
 		back.Children(func() {
-			closeBtn := fabMenuCloseButton(c, th, trigger, closeLabel)
+			// A plain anchor inside the modal keeps the panel and the close
+			// button in the dialog's focus scope: an AttachTo(trigger) would
+			// scope them to the trigger outside the modal, where Tab cannot
+			// reach the items at all. It mirrors the trigger's last box.
+			tb := trigger.Bounds()
+			var anchor ui.Element
+			if tb.W > 0 && tb.H > 0 {
+				anchor = ui.Box(c).Absolute().Left(tb.X).Top(tb.Y).Size(tb.W, tb.H)
+			} else {
+				// A menu open on the first frame has no previous trigger box
+				// to mirror yet.
+				anchor = ui.Box(c).Size(1, 1).AttachTo(trigger, ui.AnchorCenter, ui.AnchorCenter)
+			}
+			closeBtn := fabMenuCloseButton(c, th, anchor, closeLabel)
 			panel := ui.Column(c).
-				AttachTo(trigger, ui.AnchorTop, ui.AnchorBottom).
+				AttachTo(anchor, ui.AnchorTopEnd, ui.AnchorBottomEnd).
 				Margin(0, 0, fabMenuTriggerTo, 0).
 				Gap(fabMenuGap).
 				AlignItems(ui.End).
 				Role(ui.RoleMenu).
+				FocusGroup(ui.Vertical).
 				Label(menuLabel)
 			panel.Children(func() {
 				// Build from the far end down, so that the first item sits
@@ -189,8 +203,13 @@ func fabMenuCloseButton(c *ui.Context, th *Theme, trigger ui.Element, label stri
 	entered := ui.Local(btn, fabMenuPoseKey{}, func() bool { return false })
 	pose := ui.Pose{}
 	if !*entered {
-		pose, *entered = ui.Pose{Rotate: -90, Scale: 0.6, Fade: 1}, true
-		c.Invalidate()
+		*entered = true
+		// ReduceMotion removes the entry pose entirely: posing Fade still
+		// animates under reduced motion and would ask for a needless frame.
+		if !th.ReduceMotion {
+			pose = ui.Pose{Rotate: -90, Scale: 0.6, Fade: 1}
+			c.Invalidate()
+		}
 	}
 	btn.AnimatePose(pose, fabMenuEntryAnimation(th, 0))
 
@@ -204,13 +223,6 @@ func fabMenuCloseButton(c *ui.Context, th *Theme, trigger ui.Element, label stri
 // chosen.
 func fabMenuItem(c *ui.Context, th *Theme, item *FABMenuItem, i int, reduceMotion bool) bool {
 	cs := th.Colors
-	pal := buttonColors{container: cs.SecondaryContainer, content: cs.OnSecondaryContainer}
-	if item.Disabled {
-		pal = buttonColors{
-			container: cs.OnSurface.Alpha(float32(tokens.DisabledContainerOpacity)),
-			content:   cs.OnSurface.Alpha(float32(tokens.DisabledContentOpacity)),
-		}
-	}
 
 	btn := ui.ButtonBase(c).
 		DimDisabled(false).
@@ -219,19 +231,29 @@ func fabMenuItem(c *ui.Context, th *Theme, item *FABMenuItem, i int, reduceMotio
 		PaddingX(16).
 		Gap(12).
 		Label(item.Label).
-		Disabled(item.Disabled).
+		Role(ui.RoleMenuItem)
+	disabled := item.Disabled || btn.IsDisabled()
+	pal := buttonColors{container: cs.SecondaryContainer, content: cs.OnSecondaryContainer}
+	if disabled {
+		pal = buttonColors{
+			container: cs.OnSurface.Alpha(float32(tokens.DisabledContainerOpacity)),
+			content:   cs.OnSurface.Alpha(float32(tokens.DisabledContentOpacity)),
+		}
+	}
+	btn.Disabled(item.Disabled).
 		TextColor(pal.content).
 		Background(pal.container).
-		Radius(fabMenuItemSide / 2).
-		Role(ui.RoleMenuItem)
+		Radius(fabMenuItemSide / 2)
 	ApplyElevationShadows(th, btn, tokens.Level2)
-	borderInset := float32(0)
 
 	entered := ui.Local(btn, fabMenuPoseKey{i: i + 1}, func() bool { return false })
 	pose := ui.Pose{}
 	if !*entered {
-		pose, *entered = ui.Pose{Y: 20, Scale: 0.85, Fade: 1}, true
-		c.Invalidate()
+		*entered = true
+		if !reduceMotion {
+			pose = ui.Pose{Y: 20, Scale: 0.85, Fade: 1}
+			c.Invalidate()
+		}
 	}
 	delay := 0
 	if !reduceMotion {
@@ -240,10 +262,9 @@ func fabMenuItem(c *ui.Context, th *Theme, item *FABMenuItem, i int, reduceMotio
 	btn.AnimatePose(pose, fabMenuEntryAnimation(th, delay))
 
 	AttachRipple(c, btn, StateLayerOptions{
-		Color:       pal.content,
-		Radius:      fabMenuItemSide / 2,
-		BorderInset: borderInset,
-		Disabled:    item.Disabled,
+		Color:    pal.content,
+		Radius:   fabMenuItemSide / 2,
+		Disabled: disabled,
 	})
 
 	clicked := btn.Clicked()

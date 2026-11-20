@@ -12,11 +12,11 @@ import (
 type FABSize int
 
 const (
-	// FABSizeSmall is the 40×40 button with a 24 DIP icon and 12 DIP corners.
-	FABSizeSmall FABSize = iota
 	// FABSizeMedium is the standard 56×56 button with a 24 DIP icon and 16
-	// DIP corners.
-	FABSizeMedium
+	// DIP corners; it is the zero value, as FABOptions documents.
+	FABSizeMedium FABSize = iota
+	// FABSizeSmall is the 40×40 button with a 24 DIP icon and 12 DIP corners.
+	FABSizeSmall
 	// FABSizeLarge is the 96×96 button with a 36 DIP icon and 28 DIP corners.
 	FABSizeLarge
 )
@@ -134,16 +134,19 @@ func FAB(c *ui.Context, label string, icon IconDraw, opts ...FABOptions) ui.Elem
 
 	th := CurrentTheme(c)
 	spec := fabGeometry(o.Size)
-	pal := fabPaletteOf(th, o.Color, o.Disabled)
 	visible := o.Visible == nil || *o.Visible
 
 	el := ui.ButtonBase(c).
 		DimDisabled(false).
 		FocusRing(false).
 		Size(spec.Side, spec.Side).
-		Label(label).
-		Disabled(o.Disabled || !visible).
-		TextColor(pal.content)
+		Label(label)
+	// A disabled ancestor also disables the button: paint MD3E's disabled
+	// palette rather than leaving an apparently enabled button that ignores
+	// input.
+	disabled := o.Disabled || !visible || el.IsDisabled()
+	pal := fabPaletteOf(th, o.Color, disabled)
+	el.Disabled(o.Disabled || !visible).TextColor(pal.content)
 	if pal.container.A > 0 {
 		el.Background(pal.container)
 	}
@@ -153,7 +156,7 @@ func FAB(c *ui.Context, label string, icon IconDraw, opts ...FABOptions) ui.Elem
 		// MD3E lifts a pressed FAB one elevation step.
 		elevation = tokens.Level4
 	}
-	if !o.Disabled && visible {
+	if !disabled {
 		ApplyElevationShadows(th, el, elevation)
 	}
 
@@ -167,7 +170,7 @@ func FAB(c *ui.Context, label string, icon IconDraw, opts ...FABOptions) ui.Elem
 	AttachRipple(c, el, StateLayerOptions{
 		Color:    pal.content,
 		Radius:   corner,
-		Disabled: o.Disabled || !visible,
+		Disabled: disabled,
 	})
 
 	if o.Visible != nil {
@@ -216,8 +219,8 @@ type extFabFadeKey struct{}
 // ExtendedFAB builds a Material Design 3 Expressive extended floating action
 // button: a ui.ButtonBase 56 DIP high (or 96 for the large size) carrying an
 // icon and a label, with the scheme's container and content colors, Level3
-// shadows lifting to Level4 while pressed, StateLayer and Ripple, and a Full
-// corner radius.
+// shadows lifting to Level4 while pressed, StateLayer and Ripple, and the
+// Medium 16 DIP (Large 28 DIP) corner that morphs toward the pressed radius.
 //
 // A non-nil Expanded pointer folds the label: the button springs from its
 // square, icon-only width to its full width and the text fades with it, as an
@@ -242,7 +245,6 @@ func ExtendedFAB(c *ui.Context, label string, icon IconDraw, opts ...ExtendedFAB
 	if o.Size != FABSizeLarge {
 		spec = fabGeometry(FABSizeMedium)
 	}
-	pal := fabPaletteOf(th, o.Color, o.Disabled)
 	expanded := o.Expanded == nil || *o.Expanded
 
 	role := tokens.TitleMedium
@@ -257,10 +259,11 @@ func ExtendedFAB(c *ui.Context, label string, icon IconDraw, opts ...ExtendedFAB
 		gap = 16
 	}
 	textW, _ := c.MeasureText(0, ui.Span{
-		Text:   label,
-		Font:   th.Font,
-		Size:   float32(style.Size) * scale,
-		Weight: style.Weight,
+		Text:          label,
+		Font:          th.Font,
+		Size:          float32(style.Size) * scale,
+		Weight:        style.Weight,
+		LetterSpacing: float32(style.Tracking) * scale,
 	})
 
 	progress := float32(0)
@@ -272,13 +275,14 @@ func ExtendedFAB(c *ui.Context, label string, icon IconDraw, opts ...ExtendedFAB
 		FocusRing(false).
 		Height(spec.Side).
 		Clip().
-		Label(labelOr(o.Label, label)).
-		Disabled(o.Disabled).
-		TextColor(pal.content)
+		Label(labelOr(o.Label, label))
+	disabled := o.Disabled || el.IsDisabled()
+	pal := fabPaletteOf(th, o.Color, disabled)
+	el.Disabled(o.Disabled).TextColor(pal.content)
 	if pal.container.A > 0 {
 		el.Background(pal.container)
 	}
-	if !o.Disabled {
+	if !disabled {
 		elevation := tokens.Level3
 		if el.Pressed() {
 			elevation = tokens.Level4
@@ -287,13 +291,22 @@ func ExtendedFAB(c *ui.Context, label string, icon IconDraw, opts ...ExtendedFAB
 	}
 
 	p := el.AnimateTo(extFabOpenKey{}, progress, th.Animation(motion.DefaultSpatial))
-	radius := el.AnimateTo(extFabRadiusKey{}, spec.Side/2, th.Animation(motion.FastSpatial))
+	radiusTarget := spec.Radius
+	if el.Pressed() {
+		radiusTarget = spec.PressedRadius
+	}
+	radius := el.AnimateTo(extFabRadiusKey{}, radiusTarget, th.Animation(motion.FastSpatial))
 	el.Radius(radius)
 
 	// The width springs between the square icon-only button and the full
-	// icon-label pill; the row clips the label while it collapses.
-	width := 2*pad + spec.IconSize + p*(gap+textW)
-	el.Width(width).PaddingX(pad)
+	// icon-label pill; the row clips the label while it collapses, and only
+	// reserves icon and gap room when there is an icon.
+	iconW, gapNow := float32(0), float32(0)
+	if icon != nil {
+		iconW, gapNow = spec.IconSize, p*gap
+	}
+	width := 2*pad + iconW + gapNow + p*textW
+	el.Width(width).PaddingX(pad).Gap(gapNow).Justify(ui.Start)
 	labelFade := float32(1)
 	if o.Expanded != nil {
 		labelFade = el.AnimateTo(extFabFadeKey{}, progress, th.Animation(motion.FastEffects))
@@ -302,7 +315,7 @@ func ExtendedFAB(c *ui.Context, label string, icon IconDraw, opts ...ExtendedFAB
 	AttachRipple(c, el, StateLayerOptions{
 		Color:    pal.content,
 		Radius:   radius,
-		Disabled: o.Disabled,
+		Disabled: disabled,
 	})
 
 	el.Children(func() {

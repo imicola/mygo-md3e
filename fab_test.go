@@ -2,6 +2,7 @@ package md3e
 
 import (
 	"image/color"
+	"math"
 	"testing"
 	"time"
 
@@ -90,6 +91,10 @@ func TestFABDisabledAndHidden(t *testing.T) {
 	}, 240, 200)
 
 	info := buttonInfo(t, tt, ui.RoleButton, "Compose")
+	if info.Bounds.W != 56 || info.Bounds.H != 56 {
+		t.Fatalf("zero-value FAB = %v×%v, want the standard 56×56 medium size",
+			info.Bounds.W, info.Bounds.H)
+	}
 	px := fabContainerProbe(t, tt, info.Bounds)
 	if absColorDiff(px, rgbOf(th.Colors.PrimaryContainer)) > 4 {
 		t.Fatalf("visible FAB container = %v, want the primary container", px)
@@ -141,17 +146,33 @@ func TestExtendedFABExpandCollapse(t *testing.T) {
 	tt := ui.NewTester(func(c *ui.Context) {
 		ThemeScope(c, th, func() {
 			ui.Box(c).Size(560, 220).Background(canvasRGB).Padding(24).Children(func() {
-				ExtendedFAB(c, "New message", mdicon.Edit.Draw, ExtendedFABOptions{Expanded: &expanded})
+				ExtendedFAB(c, "New message", mdicon.Edit.Draw, ExtendedFABOptions{Expanded: &expanded, Label: "Compose"})
 			})
 		})
 	}, 560, 220)
 
-	collapsed := buttonInfo(t, tt, ui.RoleButton, "New message")
+	collapsed := buttonInfo(t, tt, ui.RoleButton, "Compose")
 	if collapsed.Bounds.H != 56 {
 		t.Fatalf("extended FAB height = %v, want 56", collapsed.Bounds.H)
 	}
 	if collapsed.Bounds.W != 56 {
 		t.Fatalf("collapsed width = %v, want the 56 DIP icon-only square", collapsed.Bounds.W)
+	}
+	// The icon stays drawn at the center of the collapsed square rather than
+	// being squeezed away or centered off the clipped area.
+	container := rgbOf(th.Colors.PrimaryContainer)
+	ink := 0
+	for dy := -4; dy <= 4; dy++ {
+		for dx := -4; dx <= 4; dx++ {
+			px := tt.Image().RGBAAt(int(collapsed.Bounds.X+collapsed.Bounds.W/2)+dx,
+				int(collapsed.Bounds.Y+collapsed.Bounds.H/2)+dy)
+			if absColorDiff(px, container) > 30 {
+				ink++
+			}
+		}
+	}
+	if ink == 0 {
+		t.Fatal("collapsed extended FAB painted no icon at its center")
 	}
 
 	expanded = true
@@ -160,15 +181,21 @@ func TestExtendedFABExpandCollapse(t *testing.T) {
 	if tt.FramePending() {
 		t.Fatal("expanding the extended FAB left frames pending")
 	}
-	open := buttonInfo(t, tt, ui.RoleButton, "New message")
+	open := buttonInfo(t, tt, ui.RoleButton, "Compose")
 	if open.Bounds.W < collapsed.Bounds.W+60 {
 		t.Fatalf("expanded width = %v, not clearly past the collapsed %v", open.Bounds.W, collapsed.Bounds.W)
 	}
 	if open.Bounds.H != 56 {
 		t.Fatalf("expanded height = %v, want 56", open.Bounds.H)
 	}
-	if _, ok := tt.Find("New message"); !ok {
+	labelRect, ok := tt.Find("New message")
+	if !ok {
 		t.Fatal("expanded label not laid out")
+	}
+	// The 12 DIP icon-label gap separates the 24 DIP icon from the text.
+	wantLabelX := open.Bounds.X + 16 + 24 + 12
+	if math.Abs(float64(labelRect.X-wantLabelX)) > 1.5 {
+		t.Fatalf("expanded label x = %v, want %v after the icon and 12 DIP gap", labelRect.X, wantLabelX)
 	}
 
 	expanded = false
@@ -177,8 +204,58 @@ func TestExtendedFABExpandCollapse(t *testing.T) {
 	if tt.FramePending() {
 		t.Fatal("collapsing the extended FAB left frames pending")
 	}
-	if back := buttonInfo(t, tt, ui.RoleButton, "New message"); back.Bounds.W > 57 {
+	if back := buttonInfo(t, tt, ui.RoleButton, "Compose"); back.Bounds.W > 57 {
 		t.Fatalf("re-collapsed width = %v, want 56", back.Bounds.W)
+	}
+}
+
+// TestFABMenuKeyboardFocusGroup checks that Tab reaches the menu items and that
+// the vertical focus group moves between them with the arrow keys.
+func TestFABMenuKeyboardFocusGroup(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor)
+	opened := false
+	clicks := 0
+	items := fabMenuItems(3, &clicks)
+	tt := ui.NewTester(func(c *ui.Context) {
+		ThemeScope(c, th, func() {
+			ui.Box(c).Size(480, 360).Background(canvasRGB).Padding(24).
+				Justify(ui.End).AlignItems(ui.End).Children(func() {
+				FABMenu(c, items, FABMenuOptions{Open: &opened, Label: "Create"})
+			})
+		})
+	}, 480, 360)
+
+	trigger := buttonInfo(t, tt, ui.RoleButton, "Create")
+	tt.ClickAt(trigger.Bounds.X+trigger.Bounds.W/2, trigger.Bounds.Y+trigger.Bounds.H/2)
+	if !opened {
+		t.Fatal("trigger click did not open the menu")
+	}
+	tt.Advance(1200 * time.Millisecond)
+
+	// New folder sits above New file in the panel, so Down should move from it
+	// to New file.
+	labels := []string{"New note", "New folder", "New file"}
+	focused := -1
+	for i := 0; i < 6 && focused < 0; i++ {
+		tt.Key(0, ui.KeyTab)
+		for k, label := range labels {
+			if tt.Focused(label) {
+				focused = k
+			}
+		}
+	}
+	if focused < 0 {
+		t.Fatal("Tab never reached the FAB menu items")
+	}
+	tt.Key(0, ui.KeyDown)
+	next := -1
+	for k, label := range labels {
+		if tt.Focused(label) {
+			next = k
+		}
+	}
+	if next < 0 || next == focused {
+		t.Fatalf("Down did not move the focus down the FAB menu: item %d -> %d", focused, next)
 	}
 }
 
@@ -244,6 +321,10 @@ func TestFABMenuActionsAndDismiss(t *testing.T) {
 	}, 480, 360)
 
 	trigger := buttonInfo(t, tt, ui.RoleButton, "Create")
+	if trigger.Bounds.W != 56 || trigger.Bounds.H != 56 {
+		t.Fatalf("FAB menu trigger = %v×%v, want the standard 56×56 FAB",
+			trigger.Bounds.W, trigger.Bounds.H)
+	}
 	if trigger.HasPopup != ui.PopupMenu || trigger.Expanded {
 		t.Fatalf("closed trigger: popup=%v expanded=%v, want a collapsed menu button",
 			trigger.HasPopup, trigger.Expanded)
@@ -275,6 +356,11 @@ func TestFABMenuActionsAndDismiss(t *testing.T) {
 	}
 	if closeBtn.Bounds.W != 56 || closeBtn.Bounds.H != 56 {
 		t.Fatalf("close button = %v×%v, want 56×56", closeBtn.Bounds.W, closeBtn.Bounds.H)
+	}
+	// The panel is end-aligned with its trigger, so wider items do not spill
+	// past the FAB toward the window edge.
+	if got, want := file.Bounds.X+file.Bounds.W, trigger.Bounds.X+trigger.Bounds.W; math.Abs(float64(got-want)) > 1 {
+		t.Fatalf("menu item right edge = %v, want the trigger's %v", got, want)
 	}
 
 	// Choosing an item runs its callback, closes the menu, and gives the focus
@@ -355,6 +441,10 @@ func TestFABMenuEscapeAndReduceMotion(t *testing.T) {
 	if !opened {
 		t.Fatal("trigger click did not open the menu under ReduceMotion")
 	}
+	// ReduceMotion must not pose a first invisible frame and ask for another.
+	if tt.FramePending() {
+		t.Fatal("ReduceMotion opening asked for an extra frame")
+	}
 	tt.Advance(600 * time.Millisecond)
 	if tt.FramePending() {
 		t.Fatal("ReduceMotion opening left frames pending")
@@ -364,6 +454,9 @@ func TestFABMenuEscapeAndReduceMotion(t *testing.T) {
 	tt.Key(0, ui.KeyEscape)
 	if opened {
 		t.Fatal("Escape did not close the menu")
+	}
+	if tt.FramePending() {
+		t.Fatal("ReduceMotion closing asked for an extra frame")
 	}
 	tt.Advance(600 * time.Millisecond)
 	if tt.FramePending() {
