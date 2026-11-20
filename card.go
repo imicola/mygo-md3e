@@ -114,9 +114,10 @@ func Card(c *ui.Context, content func(), opts ...CardOptions) ui.Element {
 
 	var el ui.Element
 	if interactive {
-		el = ui.ButtonBase(c).DimDisabled(false).FocusRing(false)
+		el = ui.ButtonBase(c).Column().Justify(ui.Start).AlignItems(ui.Stretch).
+			DimDisabled(false).FocusRing(false)
 	} else {
-		el = ui.Column(c)
+		el = ui.Column(c).DimDisabled(false)
 	}
 	disabled := o.Disabled || el.IsDisabled()
 

@@ -198,15 +198,7 @@ func TestModalBottomSheetScrollDetentsAndDrag(t *testing.T) {
 		t.Fatal("scrolling the body closed the sheet")
 	}
 
-	// A taller detent grows the sheet upward.
-	detent = 1
-	tt.Frame()
-	tt.Advance(time.Second)
-	grown, _ := tt.AccessByRole(ui.RoleDialog, "Share sheet")
-	if grown.Bounds.Y >= info.Bounds.Y-50 || grown.Bounds.H <= info.Bounds.H+50 {
-		t.Fatalf("the full detent did not grow the sheet: %v then %v", info.Bounds, grown.Bounds)
-	}
-
+	// Pulling the handle upward switches detent 0 -> 1.
 	handle := func(pull float32) {
 		t.Helper()
 		box, _ := tt.AccessByRole(ui.RoleDialog, "Share sheet")
@@ -216,19 +208,60 @@ func TestModalBottomSheetScrollDetentsAndDrag(t *testing.T) {
 		tt.Release(x, y+pull)
 		tt.Advance(time.Second)
 	}
+	handle(-160)
+	if detent != 1 {
+		t.Fatalf("pulling upward settled on detent %d, want 1", detent)
+	}
+	grown, _ := tt.AccessByRole(ui.RoleDialog, "Share sheet")
+	if grown.Bounds.Y >= info.Bounds.Y-50 || grown.Bounds.H <= info.Bounds.H+50 {
+		t.Fatalf("the full detent did not grow the sheet: %v then %v", info.Bounds, grown.Bounds)
+	}
+
+	// A short pull down keeps detent 1 open; pulling down near detent 0 snaps
+	// to detent 0 rather than dismissing.
 	handle(40)
+	if detent != 1 {
+		t.Fatalf("short pull changed detent to %d, want 1", detent)
+	}
 	if _, ok := tt.AccessByRole(ui.RoleDialog, "Share sheet"); !ok {
 		t.Fatal("a short pull closed the sheet")
 	}
 	handle(180)
+	if _, ok := tt.AccessByRole(ui.RoleDialog, "Share sheet"); !ok {
+		t.Fatal("pulling from detent 1 toward detent 0 closed the sheet instead of snapping")
+	}
+	if detent != 0 {
+		t.Fatalf("pulling toward detent 0 settled on detent %d, want 0", detent)
+	}
+
+	// From the lowest detent, a short pull springs back and a long pull
+	// dismisses the sheet and restores focus.
+	handle(40)
+	if _, ok := tt.AccessByRole(ui.RoleDialog, "Share sheet"); !ok {
+		t.Fatal("a short pull from the lowest detent closed the sheet")
+	}
+	handle(120)
 	if _, ok := tt.AccessByRole(ui.RoleDialog, "Share sheet"); ok {
-		t.Fatal("a long pull does not close the sheet")
+		t.Fatal("a long pull from the lowest detent does not close the sheet")
 	}
 	if !tt.Focused("Share") {
 		t.Fatal("closing the sheet does not give the focus back")
 	}
 	if tt.FramePending() {
 		t.Fatal("the closed sheet keeps asking for frames")
+	}
+
+	// A single full-height pull from the tallest detent past the dismiss
+	// threshold also closes the sheet cleanly.
+	detent = 1
+	tt.Click("Share")
+	tt.Advance(500 * time.Millisecond)
+	handle(330)
+	if _, ok := tt.AccessByRole(ui.RoleDialog, "Share sheet"); ok {
+		t.Fatal("a full-height pull from detent 1 does not close the sheet")
+	}
+	if tt.FramePending() {
+		t.Fatal("the full-pull closed sheet keeps asking for frames")
 	}
 }
 
@@ -569,5 +602,103 @@ func TestFullScreenDialogSaveCloseAndEscape(t *testing.T) {
 	}
 	if tt.FramePending() {
 		t.Fatal("the closed full-screen dialog keeps asking for frames")
+	}
+}
+
+// TestMenuTriggerLayoutAndFocus checks DropdownMenu and MenuButton do not
+// collapse inside Row/Column, honor explicit Width, and forward Bind/Focus.
+func TestMenuTriggerLayoutAndFocus(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor)
+	openDrop := false
+	var dropHandle, btnHandle ui.Handle
+	items := []MenuItem{{Label: "Canada"}, {Label: "Japan"}}
+	tt := containerCanvas(th, func(c *ui.Context) {
+		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+			DropdownMenu(c, "Country", items, MenuOptions{
+				Open:  &openDrop,
+				Label: "Country",
+			}).Width(150).Bind(&dropHandle)
+			MenuButton(c, "More", mdicon.MoreVert.Draw, items).Bind(&btnHandle)
+			if Button(c, "Focus drop").Clicked() {
+				dropHandle.Focus(c)
+			}
+			if Button(c, "Focus menu").Clicked() {
+				btnHandle.Focus(c)
+			}
+			Button(c, "After")
+		})
+	})
+	tt.Frame()
+	country, ok := tt.AccessByRole(ui.RoleMenuButton, "Country")
+	if !ok {
+		t.Fatal("DropdownMenu trigger missing from access tree")
+	}
+	more, ok := tt.AccessByRole(ui.RoleMenuButton, "More")
+	if !ok {
+		t.Fatal("MenuButton trigger missing from access tree")
+	}
+	after, ok := tt.Find("After")
+	if !ok {
+		t.Fatal("sibling button missing")
+	}
+	if absF32(country.Bounds.W-150) > 1 || country.Bounds.H <= 0 {
+		t.Fatalf("DropdownMenu bounds = %+v, want width 150 and height > 0", country.Bounds)
+	}
+	if more.Bounds.W < menuTriggerHeight || more.Bounds.H < menuTriggerHeight {
+		t.Fatalf("MenuButton bounds = %+v, want >= %d square", more.Bounds, menuTriggerHeight)
+	}
+	if more.Bounds.X < country.Bounds.X+country.Bounds.W+7 {
+		t.Fatalf("MenuButton at %.1f overlaps DropdownMenu ending at %.1f", more.Bounds.X, country.Bounds.X+country.Bounds.W)
+	}
+	if after.X < more.Bounds.X+more.Bounds.W+7 {
+		t.Fatalf("After button at %.1f overlaps MenuButton ending at %.1f", after.X, more.Bounds.X+more.Bounds.W)
+	}
+
+	tt.Click("Focus drop")
+	tt.Frame()
+	if !tt.Focused("Country") {
+		t.Fatal("Bind/Focus on DropdownMenu did not focus its trigger")
+	}
+	tt.Click("Focus menu")
+	tt.Frame()
+	if !tt.Focused("More") {
+		t.Fatal("Bind/Focus on MenuButton did not focus its trigger")
+	}
+}
+
+// TestAlertAndSheetExitEdgeCases checks frame-1 dismissal without deadlock and
+// exit-state click immunity.
+func TestAlertAndSheetExitEdgeCases(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor)
+	openAlert := false
+	confirmed, dismissed := 0, 0
+	tt := alertCanvas(th, &openAlert, &confirmed, &dismissed, false)
+	tt.Click("Open alert")
+	// Immediately close on frame 1 before any exit spring starts.
+	openAlert = false
+	tt.Advance(500 * time.Millisecond)
+	if _, ok := tt.AccessByRole(ui.RoleAlertDialog, "Delete note"); ok {
+		t.Fatal("frame-1 closed AlertDialog remained in the tree")
+	}
+	if tt.FramePending() {
+		t.Fatal("frame-1 closed AlertDialog stuck requesting frames")
+	}
+
+	// Re-open, settle, trigger close, and ensure Confirm is inert while exiting.
+	tt.Click("Open alert")
+	tt.Advance(300 * time.Millisecond)
+	btn, ok := tt.AccessByRole(ui.RoleButton, "Delete")
+	if !ok {
+		t.Fatal("Delete button missing in AlertDialog")
+	}
+	openAlert = false
+	tt.Advance(16 * time.Millisecond)
+	tt.ClickAt(btn.Bounds.X+btn.Bounds.W/2, btn.Bounds.Y+btn.Bounds.H/2)
+	tt.Advance(500 * time.Millisecond)
+	if confirmed != 0 {
+		t.Fatalf("Confirm fired %d times during exiting AlertDialog", confirmed)
+	}
+	if tt.FramePending() {
+		t.Fatal("exited AlertDialog keeps asking for frames")
 	}
 }

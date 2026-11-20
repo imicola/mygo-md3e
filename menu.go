@@ -85,17 +85,14 @@ func DropdownMenu(c *ui.Context, label string, items []MenuItem, opts ...MenuOpt
 		o = opts[0]
 	}
 	th := CurrentTheme(c)
-	anchor := ui.Box(c).Size(0, 0)
-	open := o.Open
-	if open == nil {
-		open = ui.Local(anchor, menuOpenKey{}, func() bool { return false })
-	}
-	anchor.Children(func() {
+	buildTrigger := func(open *bool, grow bool) ui.Element {
 		m := ui.MenuBase(c, open)
 		trigger := m.Trigger.Height(menuTriggerHeight).PaddingX(16).Gap(8).
 			Radius(menuTriggerRadius).Label(label).Disabled(o.Disabled).
 			TextColor(th.Colors.OnSurface)
-		trigger.Label(label)
+		if grow {
+			trigger.Grow(1)
+		}
 		attachRippleWithTheme(th, trigger, StateLayerOptions{
 			Color:    th.Colors.OnSurface,
 			Radius:   menuTriggerRadius,
@@ -110,8 +107,20 @@ func DropdownMenu(c *ui.Context, label string, items []MenuItem, opts ...MenuOpt
 			styleMenuPanel(th, panel, o)
 			buildMenuItems(c, th, m, items, 0)
 		})
+		return trigger
+	}
+	if o.Open != nil {
+		return buildTrigger(o.Open, false)
+	}
+	wrap := ui.Row(c).Shrink(0)
+	open := ui.Local(wrap, menuOpenKey{}, func() bool { return false })
+	wrap.Children(func() {
+		trigger := buildTrigger(open, true)
+		if wrap.Focused() {
+			trigger.Focus()
+		}
 	})
-	return anchor
+	return wrap
 }
 
 // MenuButton builds a Material Design 3 Expressive icon menu button: a round
@@ -129,19 +138,13 @@ func MenuButton(c *ui.Context, label string, icon IconDraw, items []MenuItem, op
 		panic("md3e: MenuButton requires an accessibility label")
 	}
 	th := CurrentTheme(c)
-	anchor := ui.Box(c).Size(0, 0)
-	open := o.Open
-	if open == nil {
-		open = ui.Local(anchor, menuOpenKey{}, func() bool { return false })
-	}
-	anchor.Children(func() {
+	buildTrigger := func(open *bool) ui.Element {
 		m := ui.MenuBase(c, open)
 		trigger := m.Trigger.Size(menuTriggerHeight, menuTriggerHeight).
 			Radius(menuTriggerHeight / 2).
 			Background(th.Colors.SurfaceContainerHighest).
 			TextColor(th.Colors.OnSurfaceVariant).
 			Label(label).Disabled(o.Disabled)
-		trigger.Label(label)
 		attachRippleWithTheme(th, trigger, StateLayerOptions{
 			Color:    th.Colors.OnSurfaceVariant,
 			Radius:   menuTriggerHeight / 2,
@@ -154,8 +157,20 @@ func MenuButton(c *ui.Context, label string, icon IconDraw, items []MenuItem, op
 			styleMenuPanel(th, panel, o)
 			buildMenuItems(c, th, m, items, 0)
 		})
+		return trigger
+	}
+	if o.Open != nil {
+		return buildTrigger(o.Open)
+	}
+	wrap := ui.Row(c).Shrink(0)
+	open := ui.Local(wrap, menuOpenKey{}, func() bool { return false })
+	wrap.Children(func() {
+		trigger := buildTrigger(open)
+		if wrap.Focused() {
+			trigger.Focus()
+		}
 	})
-	return anchor
+	return wrap
 }
 
 // ContextMenu gives target a Material Design 3 Expressive context menu, opened

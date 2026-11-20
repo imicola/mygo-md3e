@@ -415,3 +415,80 @@ func TestCarouselReduceMotion(t *testing.T) {
 		t.Fatalf("the reduced-motion focus did not resize the slots: A %.1f, C %.1f", a.Bounds.W, c.Bounds.W)
 	}
 }
+
+// TestScrollableTabsIndicatorScrollsAndClips checks a scrollable tab bar moves
+// and clips its active indicator alongside the tabs on horizontal scrolling.
+func TestScrollableTabsIndicatorScrollsAndClips(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor)
+	selected := 1
+	items := []TabItem{
+		{Label: "Overview"},
+		{Label: "Schedule"},
+		{Label: "Speakers"},
+		{Label: "Workshops"},
+		{Label: "Exhibitors"},
+		{Label: "Sponsors"},
+		{Label: "Venue"},
+		{Label: "About"},
+	}
+	tt := containerCanvas(th, func(c *ui.Context) {
+		PrimaryTabs(c, items, TabsOptions{
+			Selected:   &selected,
+			Scrollable: true,
+			Label:      "Event tabs",
+		}).Width(260)
+	})
+	tt.Advance(600 * time.Millisecond)
+	schedBefore := tabInfo(t, tt, "Schedule")
+	if !tabIndicatorPainted(tt, th, schedBefore.Bounds) {
+		t.Fatal("initial scrollable indicator is not under Schedule")
+	}
+
+	// Select a further tab to force horizontal scrolling, then verify the
+	// indicator tracks it cleanly inside the bar without leaking outside.
+	selected = 5
+	tt.Frame()
+	tt.Advance(800 * time.Millisecond)
+	sponsors := tabInfo(t, tt, "Sponsors")
+	if !tabIndicatorPainted(tt, th, sponsors.Bounds) {
+		t.Fatalf("scrolled indicator is not under Sponsors at %+v", sponsors.Bounds)
+	}
+	y := int(sponsors.Bounds.Y+sponsors.Bounds.H) - 2
+	// Container Padding(24) + .Width(260) places the viewport at x in [24, 284).
+	for x := 14; x < 23; x++ {
+		if colorMatches(tt.Image().RGBAAt(x, y), th.Colors.Primary, 12) {
+			t.Fatalf("indicator leaked left of tab viewport at x=%d", x)
+		}
+	}
+	for x := 285; x < 296; x++ {
+		if colorMatches(tt.Image().RGBAAt(x, y), th.Colors.Primary, 12) {
+			t.Fatalf("indicator leaked right of tab viewport at x=%d", x)
+		}
+	}
+	// Wheel scroll while tab 5 stays selected and verify the indicator moves with it.
+	beforeX := sponsors.Bounds.X
+	centerX := float32(24 + 130)
+	centerY := sponsors.Bounds.Y + 24
+	tt.Wheel(centerX, centerY, -25, 0)
+	tt.Advance(400 * time.Millisecond)
+	sponsorsAfter := tabInfo(t, tt, "Sponsors")
+	if absF32(sponsorsAfter.Bounds.X-beforeX) < 1 {
+		tt.Wheel(centerX, centerY, 0, -25)
+		tt.Advance(400 * time.Millisecond)
+		sponsorsAfter = tabInfo(t, tt, "Sponsors")
+	}
+	if absF32(sponsorsAfter.Bounds.X-beforeX) < 1 {
+		t.Fatalf("wheel did not scroll tab strip (still at %.1f)", sponsorsAfter.Bounds.X)
+	}
+	if !tabIndicatorPainted(tt, th, sponsorsAfter.Bounds) {
+		t.Fatalf("wheel-scrolled indicator detached from Sponsors (before %.1f, after %.1f)", beforeX, sponsorsAfter.Bounds.X)
+	}
+	if tabIndicatorPainted(tt, th, sponsors.Bounds) {
+		t.Fatalf("indicator stayed behind at pre-scroll position %.1f", beforeX)
+	}
+	for x := 14; x < 23; x++ {
+		if colorMatches(tt.Image().RGBAAt(x, y), th.Colors.Primary, 12) {
+			t.Fatalf("wheel-scrolled indicator leaked left at x=%d", x)
+		}
+	}
+}

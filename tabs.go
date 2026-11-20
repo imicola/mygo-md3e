@@ -118,17 +118,15 @@ func buildTabs(c *ui.Context, items []TabItem, opts []TabsOptions, primary bool)
 		return root
 	}
 
-	// The indicator's local is created before the tabs build, as it paints in
-	// DrawOver after them.
-	indicator := ui.Local(root, tabsIndicatorKey{}, func() tabsIndicatorState { return tabsIndicatorState{} })
 	lastSelected := ui.Local(root, tabsLastKey{}, func() int { return *selected })
+	reduce := th.ReduceMotion || c.Preferences().ReduceMotion
 
 	var tabs ui.TabsParts
 	tabEls := make([]ui.Element, len(items))
 
 	buildList := func() {
 		tabs = ui.TabsBase(c, selected, len(items))
-		tabs.List.Label(label)
+		tabs.List.Label(label).Height(tabsHeight)
 		if !o.Scrollable {
 			tabs.List.FillWidth()
 		}
@@ -215,21 +213,23 @@ func buildTabs(c *ui.Context, items []TabItem, opts []TabsOptions, primary bool)
 		}
 	}
 
-	// Slide the indicator to the chosen tab's last laid-out box. Before the
-	// first layout there is no box yet, so the bar appears where it belongs
-	// instead of flying in from zero.
-	barBox := root.LayoutBounds()
+	// Slide the indicator to the chosen tab's last laid-out box relative to
+	// tabs.List, so scrolling moves and clips the indicator together with the
+	// tabs inside ScrollHorizontal. Before the first layout there is no box
+	// yet, so the bar appears where it belongs instead of flying in from zero.
+	indicator := ui.Local(tabs.List, tabsIndicatorKey{}, func() tabsIndicatorState { return tabsIndicatorState{} })
+	listBox := tabs.List.LayoutBounds()
 	tabBox := tabEls[*selected].LayoutBounds()
-	if barBox.W > 0 && tabBox.W > 0 {
+	if listBox.W > 0 && tabBox.W > 0 {
 		inset, width := tabsIndicatorBand(primary, tabBox.W)
-		targetX := tabBox.X - barBox.X + inset
+		targetX := tabBox.X - listBox.X + inset
 		if !indicator.set {
 			indicator.set = true
-			indicator.x = root.Jump(tabsIndicatorXKey{}, targetX)
-			indicator.w = root.Jump(tabsIndicatorWKey{}, width)
+			indicator.x = tabs.List.Jump(tabsIndicatorXKey{}, targetX)
+			indicator.w = tabs.List.Jump(tabsIndicatorWKey{}, width)
 		} else {
-			indicator.x = animateWithTheme(root, th, tabsIndicatorXKey{}, targetX, motion.FastSpatial)
-			indicator.w = animateWithTheme(root, th, tabsIndicatorWKey{}, width, motion.FastSpatial)
+			indicator.x = animateValue(tabs.List, tabsIndicatorXKey{}, targetX, th.Animation(motion.FastSpatial), reduce)
+			indicator.w = animateValue(tabs.List, tabsIndicatorWKey{}, width, th.Animation(motion.FastSpatial), reduce)
 		}
 	} else if !indicator.set {
 		// The first frame has not laid the tabs out yet; build once more so
@@ -241,17 +241,22 @@ func buildTabs(c *ui.Context, items []TabItem, opts []TabsOptions, primary bool)
 	if o.Disabled {
 		disabledInk = cs.OnSurface.Alpha(float32(tokens.DisabledContentOpacity))
 	}
-	root.DrawOver(func(p *ui.Painter, r ui.Rect) {
-		if !root.Valid() || !indicator.set || r.W <= 0 || r.H <= 0 {
-			return
-		}
-		if !primary && cs.OutlineVariant.A > 0 {
+	if !primary && cs.OutlineVariant.A > 0 {
+		root.DrawOver(func(p *ui.Painter, r ui.Rect) {
+			if r.W <= 0 || r.H <= 0 {
+				return
+			}
 			p.Fill(ui.Rect{
 				X: r.X,
 				Y: r.Y + r.H - tabsSecondaryDividerThickness,
 				W: r.W,
 				H: tabsSecondaryDividerThickness,
 			}, cs.OutlineVariant, 0)
+		})
+	}
+	tabs.List.DrawOver(func(p *ui.Painter, r ui.Rect) {
+		if !indicator.set || r.W <= 0 || r.H <= 0 {
+			return
 		}
 		height := float32(tabsIndicatorHeight)
 		if !primary {

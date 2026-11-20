@@ -444,3 +444,56 @@ func TestSnackbarShortSwipeSpringsBack(t *testing.T) {
 		t.Fatalf("the snackbar rests at x %.1f, want its original %.1f", after.Bounds.X, before.Bounds.X)
 	}
 }
+
+// TestSnackbarSwipePromotionAndExitActionGuard checks swiping one snackbar off
+// keeps the next promoted snackbar centered and ignores clicks while exiting.
+func TestSnackbarSwipePromotionAndExitActionGuard(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor)
+	state := &SnackbarState{}
+	actions := 0
+	state.Show(SnackbarOptions{
+		Message:     "First note",
+		ActionLabel: "Retry",
+		OnAction:    func() { actions++ },
+		Duration:    30 * time.Second,
+	})
+	state.Show(SnackbarOptions{
+		Message:  "Second note",
+		Duration: 30 * time.Second,
+	})
+	tt := feedbackCanvas(th, func(c *ui.Context) {
+		SnackbarHost(c, state)
+	})
+	tt.Frame()
+	tt.Advance(600 * time.Millisecond)
+
+	first, ok := tt.AccessByRole(ui.RoleStatus, "First note")
+	if !ok {
+		t.Fatal("first snackbar missing")
+	}
+	retryBtn, ok := tt.AccessByRole(ui.RoleButton, "Retry")
+	if !ok {
+		t.Fatal("Retry button missing")
+	}
+	x, y := first.Bounds.X+8, first.Bounds.Y+first.Bounds.H/2
+	tt.Press(x, y)
+	tt.Move(x+snackbarSwipeThreshold+20, y)
+	tt.Release(x+snackbarSwipeThreshold+20, y)
+	// Try clicking the Retry button while the first snackbar is exiting.
+	tt.Advance(16 * time.Millisecond)
+	tt.ClickAt(retryBtn.Bounds.X+retryBtn.Bounds.W/2, retryBtn.Bounds.Y+retryBtn.Bounds.H/2)
+	tt.Advance(700 * time.Millisecond)
+
+	if actions != 0 {
+		t.Fatalf("exiting snackbar fired OnAction %d times, want 0", actions)
+	}
+	second, ok := tt.AccessByRole(ui.RoleStatus, "Second note")
+	if !ok {
+		t.Fatal("second snackbar was not promoted")
+	}
+	center1 := first.Bounds.X + first.Bounds.W/2
+	center2 := second.Bounds.X + second.Bounds.W/2
+	if absF32(center2-center1) > 2 {
+		t.Fatalf("promoted snackbar center %.1f drifted from centered %.1f", center2, center1)
+	}
+}

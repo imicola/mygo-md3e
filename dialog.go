@@ -122,7 +122,7 @@ func AlertDialog(c *ui.Context, open *bool, opts ...AlertDialogOptions) ui.Eleme
 		return anchor
 	case !*open:
 		show = animateValue(anchor, alertDialogShowKey{}, 0, th.Animation(motion.FastSpatial), false)
-		if anchor.Arrived(alertDialogShowKey{}) {
+		if anchor.Arrived(alertDialogShowKey{}) || (anchor.Settled(alertDialogShowKey{}) && show <= 0.001) {
 			st.shown, st.appeared = false, false
 			c.Invalidate()
 			return anchor
@@ -131,11 +131,15 @@ func AlertDialog(c *ui.Context, open *bool, opts ...AlertDialogOptions) ui.Eleme
 		show = animateValue(anchor, alertDialogShowKey{}, target, th.Animation(motion.FastSpatial), false)
 	}
 
+	exiting := !*open
 	scrim := cs.Scrim
 	if scrim.A == 0 {
 		scrim = ui.RGB(0, 0, 0)
 	}
 	closeDialog := func() {
+		if !*open {
+			return
+		}
 		*open = false
 		if o.Dismiss != nil && o.Dismiss.OnClick != nil {
 			o.Dismiss.OnClick()
@@ -145,8 +149,11 @@ func AlertDialog(c *ui.Context, open *bool, opts ...AlertDialogOptions) ui.Eleme
 	ui.Overlay(c, func() {
 		back := ui.Row(c).Absolute().Left(0).Top(0).Right(0).Bottom(0).
 			Justify(ui.Center).AlignItems(ui.Center).
-			Background(scrim.Alpha(0.32 * clampF32(show, 0, 1))).
-			Modal()
+			Background(scrim.Alpha(0.32 * clampF32(show, 0, 1)))
+		if !exiting {
+			back.Modal()
+		}
+		back.IgnoreInput(exiting).AccessHidden(exiting)
 		back.Children(func() {
 			panel := ui.Column(c).
 				Width(alertDialogWidth).
@@ -163,7 +170,7 @@ func AlertDialog(c *ui.Context, open *bool, opts ...AlertDialogOptions) ui.Eleme
 			ApplyElevationShadows(th, panel, tokens.Level3)
 			// A press on the panel's own surface must not reach the scrim.
 			panel.Clicked()
-			if o.Width > 0 {
+			if isPositiveFiniteF32(o.Width) {
 				panel.Width(o.Width)
 			}
 			panel.Children(func() {
@@ -201,7 +208,7 @@ func AlertDialog(c *ui.Context, open *bool, opts ...AlertDialogOptions) ui.Eleme
 						}
 						if o.Confirm != nil && o.Confirm.Label != "" {
 							confirm := Button(c, o.Confirm.Label, ButtonOptions{Variant: ButtonFilled})
-							if confirm.Clicked() {
+							if confirm.Clicked() && *open {
 								if o.Confirm.OnClick != nil {
 									o.Confirm.OnClick()
 								}
@@ -212,11 +219,13 @@ func AlertDialog(c *ui.Context, open *bool, opts ...AlertDialogOptions) ui.Eleme
 				}
 			})
 		})
-		if back.Clicked() && o.DismissOnScrim {
-			closeDialog()
-		}
-		if back.OverlayShortcut(0, ui.KeyEscape) {
-			closeDialog()
+		if !exiting {
+			if back.Clicked() && o.DismissOnScrim {
+				closeDialog()
+			}
+			if back.OverlayShortcut(0, ui.KeyEscape) {
+				closeDialog()
+			}
 		}
 	})
 	return anchor

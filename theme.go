@@ -363,12 +363,21 @@ func (t *Theme) WithPreferences(p ui.Preferences) *Theme {
 	return &resolved
 }
 
-func sanitizePositiveScale(v, fallback float32) float32 {
+func sanitizePositiveF32(v, fallback float32) float32 {
 	f := float64(v)
 	if math.IsNaN(f) || math.IsInf(f, 0) || !(v > 0) {
 		return fallback
 	}
 	return v
+}
+
+func isPositiveFiniteF32(v float32) bool {
+	f := float64(v)
+	return !math.IsNaN(f) && !math.IsInf(f, 0) && v > 0
+}
+
+func sanitizePositiveScale(v, fallback float32) float32 {
+	return sanitizePositiveF32(v, fallback)
 }
 
 func sanitizeNonNegF32(v float32) float32 {

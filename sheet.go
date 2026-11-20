@@ -45,17 +45,20 @@ const (
 
 // Locals and channels of a bottom sheet.
 type (
-	bottomSheetStateKey  struct{}
-	bottomSheetShowKey   struct{}
-	bottomSheetHeightKey struct{}
-	bottomSheetDetentKey struct{}
-	bottomSheetDragKey   struct{}
+	bottomSheetStateKey      struct{}
+	bottomSheetShowKey       struct{}
+	bottomSheetHeightKey     struct{}
+	bottomSheetDetentKey     struct{}
+	bottomSheetDragKey       struct{}
+	bottomSheetDragOffsetKey struct{}
 )
 
 // bottomSheetState remembers a modal sheet through its exit animation.
 type bottomSheetState struct {
-	shown    bool
-	appeared bool
+	shown      bool
+	appeared   bool
+	exitHeight float32
+	exitOffset float32
 }
 
 // bottomSheetDragState follows a pull of the sheet's handle in the scrim's
@@ -88,9 +91,8 @@ func BottomSheet(c *ui.Context, open *bool, opts ...BottomSheetOptions) ui.Eleme
 	if len(opts) == 1 {
 		o = opts[0]
 	}
-	anchor := ui.Box(c).Size(0, 0)
 	if open == nil {
-		return anchor
+		return ui.Box(c).Size(0, 0)
 	}
 	th := CurrentTheme(c)
 	label := o.Label
@@ -99,15 +101,13 @@ func BottomSheet(c *ui.Context, open *bool, opts ...BottomSheetOptions) ui.Eleme
 	}
 	if !o.Modal {
 		if !*open {
-			return anchor
+			return ui.Box(c).Size(0, 0)
 		}
-		height := o.Height
-		if !(height > 0) {
-			height = bottomSheetDefaultHeight
-		}
+		height := sanitizePositiveF32(o.Height, bottomSheetDefaultHeight)
 		return bottomSheetPanel(c, th, height, label, o, false, nil)
 	}
 
+	anchor := ui.Box(c).Size(0, 0)
 	st := ui.Local(anchor, bottomSheetStateKey{}, func() bottomSheetState { return bottomSheetState{} })
 	drag := ui.Local(anchor, bottomSheetDragKey{}, func() bottomSheetDragState { return bottomSheetDragState{} })
 	detent := o.Detent
@@ -121,15 +121,25 @@ func BottomSheet(c *ui.Context, open *bool, opts ...BottomSheetOptions) ui.Eleme
 	if !(windowH > 0) {
 		windowH = 600
 	}
+	minH := windowH * detents[0]
+	maxH := windowH * detents[len(detents)-1]
 	baseH := windowH * detents[*detent]
 	reduce := th.ReduceMotion || c.Preferences().ReduceMotion
 
 	if !*open && !st.shown {
+		*st = bottomSheetState{}
+		*drag = bottomSheetDragState{}
 		return anchor
 	}
 	if *open {
+		if !st.shown {
+			st.exitHeight, st.exitOffset = 0, 0
+			*drag = bottomSheetDragState{}
+		}
 		st.shown = true
+		st.exitHeight, st.exitOffset = 0, 0
 	}
+	exiting := !*open
 	var show float32
 	switch {
 	case *open && !st.appeared:
@@ -141,14 +151,18 @@ func BottomSheet(c *ui.Context, open *bool, opts ...BottomSheetOptions) ui.Eleme
 			show = 0
 			c.Invalidate()
 		}
-	case !*open && reduce:
+	case exiting && reduce:
 		st.shown, st.appeared = false, false
+		st.exitHeight, st.exitOffset = 0, 0
+		*drag = bottomSheetDragState{}
 		c.Invalidate()
 		return anchor
-	case !*open:
+	case exiting:
 		show = animateValue(anchor, bottomSheetShowKey{}, 0, th.Animation(motion.FastSpatial), false)
-		if anchor.Arrived(bottomSheetShowKey{}) {
+		if anchor.Arrived(bottomSheetShowKey{}) || (anchor.Settled(bottomSheetShowKey{}) && show <= 0.001) {
 			st.shown, st.appeared = false, false
+			st.exitHeight, st.exitOffset = 0, 0
+			*drag = bottomSheetDragState{}
 			c.Invalidate()
 			return anchor
 		}
@@ -161,6 +175,9 @@ func BottomSheet(c *ui.Context, open *bool, opts ...BottomSheetOptions) ui.Eleme
 		scrim = ui.RGB(0, 0, 0)
 	}
 	handleInput := func(ev ui.InputEvent) bool {
+		if exiting {
+			return false
+		}
 		switch ev.Kind {
 		case ui.InputPointerDown:
 			if ev.Button != 0 {
@@ -188,65 +205,98 @@ func BottomSheet(c *ui.Context, open *bool, opts ...BottomSheetOptions) ui.Eleme
 	ui.Overlay(c, func() {
 		back = ui.Row(c).Absolute().Left(0).Top(0).Right(0).Bottom(0).
 			AlignItems(ui.End).
-			Background(scrim.Alpha(0.32 * clampF32(show, 0, 1))).
-			Modal()
-		back.Children(func() {
-			panel := bottomSheetPanel(c, th, baseH, label, o, true, handleInput)
-			panel.Opacity(clampF32(show, 0, 1))
-			height := animateWithTheme(panel, th, bottomSheetHeightKey{}, baseH, motion.DefaultSpatial)
-			panel.Height(height)
-			panel.Translate(0, (1-clampF32(show, 0, 1))*baseH+drag.offset)
-			// The panel's own surface takes presses, so the scrim below never
-			// sees them.
-			panel.Clicked()
-			if back.Clicked() {
-				*open = false
+			Background(scrim.Alpha(0.32 * clampF32(show, 0, 1)))
+		if !exiting {
+			back.Modal()
+		}
+		back.IgnoreInput(exiting).AccessHidden(exiting)
+
+		// Read the pointer in the scrim's stable axes before building the
+		// panel, so the sheet moving under the pointer never feeds back.
+		if !exiting && (drag.active || drag.release) {
+			if _, y, _ := back.PointerPosition(); drag.needStart {
+				drag.startY, drag.offset = y, 0
+				drag.needStart = false
+			} else {
+				drag.offset = y - drag.startY
 			}
-			if back.OverlayShortcut(0, ui.KeyEscape) {
+		} else if exiting {
+			drag.active, drag.needStart, drag.release = false, false, false
+			drag.offset = 0
+		}
+
+		dismissTriggered := false
+		if !exiting && drag.release {
+			drag.release = false
+			dy := drag.offset
+			drag.offset = 0
+			rawH := baseH - dy
+			dismissAt := max(float32(bottomSheetDismissMin), minH*bottomSheetDismissShare)
+			if minH-rawH >= dismissAt {
+				st.exitHeight = minH
+				st.exitOffset = max(float32(0), minH-rawH)
 				*open = false
+				dismissTriggered = true
+				c.Invalidate()
+			} else {
+				best := *detent
+				bestDist := absF32(rawH - baseH)
+				for i := range detents {
+					if d := absF32(rawH - windowH*detents[i]); d < bestDist {
+						best, bestDist = i, d
+					}
+				}
+				if best != *detent {
+					*detent = best
+					baseH = windowH * detents[best]
+					if o.Changed != nil {
+						o.Changed(best)
+					}
+				}
+			}
+		}
+
+		back.Children(func() {
+			rawH := baseH - drag.offset
+			panelBaseH := baseH
+			if exiting && st.exitHeight > 0 {
+				panelBaseH = st.exitHeight
+			} else if dismissTriggered {
+				panelBaseH = st.exitHeight
+			}
+			panel := bottomSheetPanel(c, th, panelBaseH, label, o, true, handleInput)
+			panel.Opacity(clampF32(show, 0, 1))
+
+			var height, slideY float32
+			switch {
+			case exiting || dismissTriggered:
+				height = panel.Jump(bottomSheetHeightKey{}, panelBaseH)
+				slideY = st.exitOffset + (1-clampF32(show, 0, 1))*max(height-st.exitOffset, 0)
+			case drag.active:
+				targetH := clampF32(rawH, minH, maxH)
+				height = panel.Jump(bottomSheetHeightKey{}, targetH)
+				dragTranslate := panel.Jump(bottomSheetDragOffsetKey{}, max(float32(0), minH-rawH))
+				slideY = (1-clampF32(show, 0, 1))*height + dragTranslate
+			default:
+				height = animateValue(panel, bottomSheetHeightKey{}, baseH, th.Animation(motion.DefaultSpatial), reduce)
+				dragTranslate := animateValue(panel, bottomSheetDragOffsetKey{}, 0, th.Animation(motion.FastSpatial), reduce)
+				slideY = (1-clampF32(show, 0, 1))*height + dragTranslate
+			}
+			panel.Height(height)
+			panel.Translate(0, slideY)
+			if !exiting && !dismissTriggered {
+				// The panel's own surface takes presses, so the scrim below never
+				// sees them.
+				panel.Clicked()
+				if back.Clicked() {
+					*open = false
+				}
+				if back.OverlayShortcut(0, ui.KeyEscape) {
+					*open = false
+				}
 			}
 		})
 	})
-
-	// Read the pointer in the scrim's stable axes: the handle moves with the
-	// sheet, so pointer coordinates in it would cancel the pull out.
-	if drag.active && back.Valid() {
-		if _, y, _ := back.PointerPosition(); drag.needStart {
-			drag.startY, drag.offset = y, 0
-			drag.needStart = false
-		} else {
-			offset := y - drag.startY
-			if offset < 0 {
-				offset = 0
-			}
-			drag.offset = offset
-		}
-	}
-	if drag.release {
-		drag.release = false
-		offset := drag.offset
-		drag.offset = 0
-		dismissAt := max(float32(bottomSheetDismissMin), baseH*bottomSheetDismissShare)
-		if offset >= dismissAt {
-			*open = false
-		} else {
-			target := baseH - offset
-			best := *detent
-			bestDist := absF32(target - baseH)
-			for i := range detents {
-				if d := absF32(target - windowH*detents[i]); d < bestDist {
-					best, bestDist = i, d
-				}
-			}
-			if best != *detent {
-				*detent = best
-				if o.Changed != nil {
-					o.Changed(best)
-				}
-			}
-		}
-		c.Invalidate()
-	}
 	return anchor
 }
 

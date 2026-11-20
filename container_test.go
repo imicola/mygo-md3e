@@ -463,3 +463,40 @@ func TestListKeyboardAndDisabled(t *testing.T) {
 		t.Fatal("the disabled list keeps asking for frames")
 	}
 }
+
+// TestInteractiveCardStacksChildrenVertically checks clickable cards use a
+// vertical column layout just like non-interactive cards.
+func TestInteractiveCardStacksChildrenVertically(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor)
+	clicks := 0
+	tt := containerCanvas(th, func(c *ui.Context) {
+		Card(c, func() {
+			ui.Text(c, "Headline line")
+			ui.Text(c, "Supporting detail")
+		}, CardOptions{
+			Variant: CardOutlined,
+			Label:   "Project card",
+			OnClick: func() { clicks++ },
+		})
+	})
+	tt.Frame()
+	head, ok := tt.Find("Headline line")
+	if !ok {
+		t.Fatal("card headline missing")
+	}
+	sub, ok := tt.Find("Supporting detail")
+	if !ok {
+		t.Fatal("card subtitle missing")
+	}
+	if sub.Y <= head.Y {
+		t.Fatalf("interactive card laid out children horizontally: head %.1f, sub %.1f", head.Y, sub.Y)
+	}
+	if absF32(sub.X-head.X) > 1 {
+		t.Fatalf("interactive card did not align children vertically: head x=%.1f, sub x=%.1f", head.X, sub.X)
+	}
+	tt.Click("Project card")
+	tt.Advance(300 * time.Millisecond)
+	if clicks != 1 {
+		t.Fatalf("card OnClick ran %d times, want 1", clicks)
+	}
+}

@@ -109,9 +109,8 @@ func (s *SnackbarState) finish() {
 // snackbarHostKey is the Local holding a host's seen version and entry state.
 type snackbarHostKey struct{}
 
-// snackbarHostState tracks rebuilds and the entry animation across frames.
+// snackbarHostState tracks the currently displayed snackbar's entry state.
 type snackbarHostState struct {
-	seen     uint64
 	seq      uint64
 	appeared bool
 }
@@ -139,12 +138,6 @@ func SnackbarHost(c *ui.Context, state *SnackbarState) ui.Element {
 		return host
 	}
 	hs := ui.Local(host, snackbarHostKey{}, func() snackbarHostState { return snackbarHostState{} })
-	if hs.seen != state.version {
-		// State changed outside this build, as a button enqueuing a message
-		// after the host was built.
-		hs.seen = state.version
-		c.Invalidate()
-	}
 	item := state.current
 	if item == nil {
 		hs.seq = 0
@@ -167,21 +160,33 @@ func SnackbarHost(c *ui.Context, state *SnackbarState) ui.Element {
 		row := ui.Row(c).Absolute().Left(0).Right(0).Bottom(snackbarBottom).
 			Justify(ui.Center).PaddingX(16).PassThrough()
 		row.Children(func() {
+			// Key each snackbar item by sequence number so a freshly promoted
+			// item never inherits the previous item's show or swipe channels.
+			c.Key(item.seq)
 			// The overlay is inside the caller's ThemeScope, so this reads the
 			// same theme as the content around it.
 			sb := snackbarSurface(c, th, item.opts,
 				func() {
+					if item.exiting {
+						return
+					}
 					if item.opts.OnAction != nil {
 						item.opts.OnAction()
 					}
 					state.dismiss()
 				},
-				func() { state.dismiss() },
+				func() {
+					if item.exiting {
+						return
+					}
+					state.dismiss()
+				},
 			)
+			sb.IgnoreInput(item.exiting).AccessHidden(item.exiting)
 
 			// The countdown pauses while the pointer rests on the snackbar or
 			// the focus is in it, and picks up the remaining time on leave.
-			hovered := sb.Hovered() || sb.FocusWithin()
+			hovered := !item.exiting && (sb.Hovered() || sb.FocusWithin())
 			if item.exiting {
 				item.paused = false
 			} else if hovered && !item.paused {
@@ -199,17 +204,21 @@ func SnackbarHost(c *ui.Context, state *SnackbarState) ui.Element {
 			// springs back as it is let go.
 			swipe := ui.Local(sb, snackbarSwipeKey{}, func() float32 { return 0 })
 			var offset float32
-			if dx, _, ok := sb.Dragged(); ok {
-				*swipe += dx
-				// Track the pointer at once while dragging; the spring takes
-				// over from the last offset once it is released.
-				offset = sb.Jump(snackbarSwipeOffsetKey{}, *swipe)
+			if !item.exiting {
+				if dx, _, ok := sb.Dragged(); ok {
+					*swipe += dx
+					// Track the pointer at once while dragging; the spring takes
+					// over from the last offset once it is released.
+					offset = sb.Jump(snackbarSwipeOffsetKey{}, *swipe)
+				} else {
+					offset = animateValue(sb, snackbarSwipeOffsetKey{}, 0, th.Animation(motion.FastSpatial), reduce)
+					*swipe = 0
+				}
+				if absF32(*swipe) >= snackbarSwipeThreshold {
+					state.dismiss()
+				}
 			} else {
-				offset = animateValue(sb, snackbarSwipeOffsetKey{}, 0, th.Animation(motion.FastSpatial), reduce)
-				*swipe = 0
-			}
-			if absF32(*swipe) >= snackbarSwipeThreshold {
-				state.dismiss()
+				offset = animateValue(sb, snackbarSwipeOffsetKey{}, *swipe, th.Animation(motion.FastSpatial), reduce)
 			}
 
 			target := float32(1)
@@ -223,7 +232,7 @@ func SnackbarHost(c *ui.Context, state *SnackbarState) ui.Element {
 				target = 0
 			}
 			show := animateValue(sb, snackbarShowKey{}, target, th.Animation(motion.FastSpatial), reduce)
-			if item.exiting && (reduce && show <= 0.001 || sb.Arrived(snackbarShowKey{})) {
+			if item.exiting && (reduce && show <= 0.001 || sb.Arrived(snackbarShowKey{}) || (sb.Settled(snackbarShowKey{}) && show <= 0.001)) {
 				state.finish()
 				c.Invalidate()
 			}
