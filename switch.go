@@ -100,7 +100,8 @@ func Switch(c *ui.Context, on *bool, opts ...SwitchOptions) ui.Element {
 	offTrack := cs.SurfaceContainerHighest
 	offThumb := cs.Outline
 	offBorder := cs.Outline
-	onIconInk := onThumb
+	// The handle's icon is the track color cut out of it, as MD3 draws it.
+	onIconInk := onTrack
 	offIconInk := offTrack
 	if disabled {
 		onTrack = cs.OnSurface.Alpha(float32(tokens.DisabledContainerOpacity))

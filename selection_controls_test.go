@@ -1,7 +1,6 @@
 package md3e
 
 import (
-	"image"
 	"image/color"
 	"strings"
 	"testing"
@@ -15,18 +14,6 @@ import (
 // colorMatches reports whether a rendered pixel is within tol of col.
 func colorMatches(px color.RGBA, col ui.Color, tol int) bool {
 	return absColorDiff(px, rgbOf(col)) <= tol
-}
-
-// countRun counts the pixels of the row y between x0 and x1 (exclusive) that
-// match col, as a thumb's width along its center line.
-func countRun(img *image.RGBA, y, x0, x1 int, col ui.Color, tol int) int {
-	n := 0
-	for x := x0; x < x1; x++ {
-		if colorMatches(img.RGBAAt(x, y), col, tol) {
-			n++
-		}
-	}
-	return n
 }
 
 // switchTrackRect returns the 52x32 track inside a switch row's access bounds.
@@ -43,19 +30,39 @@ func switchTrackRect(b ui.Rect, rtl bool) ui.Rect {
 	}
 }
 
-// thumbWidthOnRow measures the widest run of col across the track center row,
-// the thumb's diameter after its spring settled.
-func thumbWidthOnRow(t *testing.T, tt *ui.Tester, track ui.Rect, col ui.Color) int {
-	t.Helper()
+// thumbExtent finds the leftmost and rightmost pixels of col inside the track,
+// leaving out its thin border, across a band around its center row.
+func thumbExtent(tt *ui.Tester, track ui.Rect, col ui.Color) (int, int) {
 	img := tt.Image()
-	y := int(track.Y + track.H/2)
-	best := 0
-	for dy := -3; dy <= 3; dy++ {
-		if n := countRun(img, y+dy, int(track.X), int(track.X+track.W), col, 30); n > best {
-			best = n
+	x0, x1 := int(track.X)+3, int(track.X+track.W)-3
+	y0 := int(track.Y+track.H/2) - 5
+	y1 := int(track.Y+track.H/2) + 5
+	minX, maxX := -1, -1
+	for y := y0; y <= y1; y++ {
+		for x := x0; x < x1; x++ {
+			if colorMatches(img.RGBAAt(x, y), col, 30) {
+				if minX < 0 || x < minX {
+					minX = x
+				}
+				if x > maxX {
+					maxX = x
+				}
+			}
 		}
 	}
-	return best
+	return minX, maxX
+}
+
+// thumbWidthOnRow measures the handle of col in the track, its diameter after
+// its spring settled. Its icon may cut the handle's color in two, so the
+// leftmost and rightmost pixels of a band around the center row tell its size.
+func thumbWidthOnRow(t *testing.T, tt *ui.Tester, track ui.Rect, col ui.Color) int {
+	t.Helper()
+	minX, maxX := thumbExtent(tt, track, col)
+	if minX < 0 {
+		return 0
+	}
+	return maxX - minX + 1
 }
 
 // selectionCanvas builds a 320x200 white canvas holding build's controls.
@@ -110,6 +117,19 @@ func TestSwitchClickSpaceAndThumbGeometry(t *testing.T) {
 	if onWidth < offWidth+4 {
 		t.Fatalf("on thumb width %d barely exceeds the off %d", onWidth, offWidth)
 	}
+	// The check mark is the track color cut out of the OnPrimary handle.
+	img := tt.Image()
+	checkInk := 0
+	for y := int(track.Y + 10); y < int(track.Y+22); y++ {
+		for x := int(track.X + 30); x < int(track.X+42); x++ {
+			if colorMatches(img.RGBAAt(x, y), th.Colors.Primary, 30) {
+				checkInk++
+			}
+		}
+	}
+	if checkInk < 6 {
+		t.Fatalf("selected handle shows %d check pixels, want a visible check", checkInk)
+	}
 
 	// Pressed: the handle grows to 28 DIP and springs back on release.
 	tt.Press(cx, cy)
@@ -163,9 +183,7 @@ func TestSwitchRTLMirror(t *testing.T) {
 
 	info := buttonInfo(t, tt, ui.RoleSwitch, "Wi-Fi")
 	track := switchTrackRect(info.Bounds, true)
-	img := tt.Image()
-	y := int(track.Y + track.H/2)
-	offCenter := thumbCenterOnRow(img, y, track, th.Colors.Outline)
+	offCenter := thumbCenterOnRow(t, tt, track, th.Colors.Outline)
 	if offCenter < track.X+track.W/2 {
 		t.Fatalf("RTL off thumb center %v is not at the track's right end", offCenter)
 	}
@@ -176,34 +194,20 @@ func TestSwitchRTLMirror(t *testing.T) {
 		t.Fatal("RTL switch click did not turn on")
 	}
 	tt.Advance(900 * time.Millisecond)
-	onCenter := thumbCenterOnRow(tt.Image(), y, track, th.Colors.OnPrimary)
+	onCenter := thumbCenterOnRow(t, tt, track, th.Colors.OnPrimary)
 	if onCenter > track.X+track.W/2 {
 		t.Fatalf("RTL on thumb center %v is not at the track's left end", onCenter)
 	}
 }
 
-// thumbCenterOnRow returns the middle of the widest run of col along the row y
-// inside track, the handle rather than the track's thin border, or the track's
-// middle when no pixel matches.
-func thumbCenterOnRow(img *image.RGBA, y int, track ui.Rect, col ui.Color) float32 {
-	bestFirst, bestLast := -1, -1
-	first := -1
-	for x := int(track.X); x < int(track.X+track.W); x++ {
-		if colorMatches(img.RGBAAt(x, y), col, 30) {
-			if first < 0 {
-				first = x
-			}
-			if x-first > bestLast-bestFirst {
-				bestFirst, bestLast = first, x
-			}
-		} else {
-			first = -1
-		}
-	}
-	if bestFirst < 0 {
+// thumbCenterOnRow returns the middle of the handle of col in the track.
+func thumbCenterOnRow(t *testing.T, tt *ui.Tester, track ui.Rect, col ui.Color) float32 {
+	t.Helper()
+	minX, maxX := thumbExtent(tt, track, col)
+	if minX < 0 {
 		return track.X + track.W/2
 	}
-	return float32(bestFirst+bestLast) / 2
+	return float32(minX+maxX) / 2
 }
 
 // TestSwitchDisabledAndReduceMotion checks that a disabled switch ignores the
@@ -492,6 +496,37 @@ func TestRadioGroupKeyboardAndDisabled(t *testing.T) {
 	}
 	if disabled.FramePending() {
 		t.Fatal("disabled group left frames pending")
+	}
+}
+
+// TestSelectionContextKeys checks that Context.Key given to a control lands on
+// its stateful base, so the caller's c.Key usage works as documented.
+func TestSelectionContextKeys(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor)
+	on := false
+	checked := false
+	choice := ""
+	tt := selectionCanvas(th, func(c *ui.Context) {
+		Switch(c.Key("wifi"), &on, SwitchOptions{Label: "Wi-Fi"})
+		Checkbox(c.Key("sync"), &checked, CheckboxOptions{Label: "Sync"})
+		RadioGroup(c, func() {
+			Radio(c.Key("radio-a"), &choice, "A", "Alpha")
+		}, RadioGroupOptions{Label: "Choice"})
+	})
+	sw := buttonInfo(t, tt, ui.RoleSwitch, "Wi-Fi")
+	tt.ClickAt(sw.Bounds.X+sw.Bounds.W/2, sw.Bounds.Y+sw.Bounds.H/2)
+	if !on {
+		t.Fatal("keyed switch did not toggle")
+	}
+	cb := buttonInfo(t, tt, ui.RoleCheckBox, "Sync")
+	tt.ClickAt(cb.Bounds.X+cb.Bounds.W/2, cb.Bounds.Y+cb.Bounds.H/2)
+	if !checked {
+		t.Fatal("keyed check box did not toggle")
+	}
+	rd := buttonInfo(t, tt, ui.RoleRadio, "Alpha")
+	tt.ClickAt(rd.Bounds.X+rd.Bounds.W/2, rd.Bounds.Y+rd.Bounds.H/2)
+	if choice != "A" {
+		t.Fatalf("keyed radio chose %q", choice)
 	}
 }
 
