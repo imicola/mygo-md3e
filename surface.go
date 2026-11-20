@@ -213,7 +213,7 @@ func Surface(c *ui.Context, opts ...SurfaceOptions) ui.Element {
 		el.TextColor(fg)
 	}
 	if opt.HasTypeRole {
-		ApplyTypeStyle(c, el, opt.TypeRole, opt.TypeEmphasized)
+		applyTypeStyleWithTheme(th, el, opt.TypeRole, opt.TypeEmphasized)
 	}
 
 	if geom.poly != nil {

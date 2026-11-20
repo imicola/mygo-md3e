@@ -192,13 +192,13 @@ func SplitButton(c *ui.Context, label string, opts ...SplitButtonOptions) (group
 	styleSplitSegment(c, th, arrow, pal, arrowTarget, arrowElevation)
 
 	// The chevron turns 180 degrees as the menu opens and back as it closes.
-	degrees := arrow.AnimateTo(splitChevronKey{}, splitChevronDegrees(*open), th.Animation(motion.DefaultSpatial))
+	degrees := animateWithTheme(arrow, th, splitChevronKey{}, splitChevronDegrees(*open), motion.DefaultSpatial)
 	action.Children(func() {
 		if o.LeadingIcon != nil {
 			drawIconBox(c, o.LeadingIcon, float32(spec.IconSize), actionPal.content)
 		}
 		if label != "" {
-			ApplyTypeStyle(c, ui.Text(c, label).NoWrap(), buttonTypeRole(o.Size))
+			applyTypeStyleWithTheme(th, ui.Text(c, label).NoWrap(), buttonTypeRole(o.Size))
 		}
 	})
 	arrow.Children(func() {
@@ -254,14 +254,14 @@ func styleSplitSegment(c *ui.Context, th *Theme, el ui.Element, pal buttonColors
 	}
 	var radii [4]float32
 	for i := 0; i < 4; i++ {
-		radii[i] = el.AnimateTo(splitCornerKey{i: i}, target[i], th.Animation(motion.FastSpatial))
+		radii[i] = animateWithTheme(el, th, splitCornerKey{i: i}, target[i], motion.FastSpatial)
 	}
 	el.Radius(radii[0], radii[1], radii[2], radii[3])
 	borderInset := float32(0)
 	if pal.border.A > 0 {
 		borderInset = 1
 	}
-	AttachRipple(c, el, StateLayerOptions{
+	attachRippleWithTheme(th, el, StateLayerOptions{
 		Color:       pal.content,
 		Radii:       radii,
 		HasRadii:    true,

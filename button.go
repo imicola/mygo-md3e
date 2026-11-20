@@ -136,14 +136,14 @@ func Button(c *ui.Context, label string, opts ...ButtonOptions) ui.Element {
 	if pressed {
 		target = float32(spec.PressedRadius)
 	}
-	radius := el.AnimateTo(buttonCornerKey{}, target, th.Animation(motion.FastSpatial))
+	radius := animateWithTheme(el, th, buttonCornerKey{}, target, motion.FastSpatial)
 	el.Radius(radius)
 
 	borderInset := float32(0)
 	if o.Variant == ButtonOutlined {
 		borderInset = 1
 	}
-	AttachRipple(c, el, StateLayerOptions{
+	attachRippleWithTheme(th, el, StateLayerOptions{
 		Color:       pal.content,
 		Radius:      radius,
 		BorderInset: borderInset,
@@ -164,7 +164,7 @@ func Button(c *ui.Context, label string, opts ...ButtonOptions) ui.Element {
 			drawIconBox(c, o.LeadingIcon, float32(spec.IconSize), pal.content)
 		}
 		if label != "" {
-			ApplyTypeStyle(c, ui.Text(c, label).NoWrap(), role)
+			applyTypeStyleWithTheme(th, ui.Text(c, label).NoWrap(), role)
 		}
 		if o.TrailingIcon != nil {
 			drawIconBox(c, o.TrailingIcon, float32(spec.IconSize), pal.content)

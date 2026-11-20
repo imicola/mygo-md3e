@@ -113,24 +113,11 @@ func Radio[T comparable](c *ui.Context, selected *T, value T, label string, opts
 		dotInk = ringOff
 	}
 
+	thReduceMotion := th.ReduceMotion
 	spatial := th.Animation(motion.FastSpatial)
-	effects := th.Animation(motion.FastEffects)
-	if th.ReduceMotion {
-		spatial, effects = motion.Snap, motion.Snap
-	}
-	sel := el.AnimateTo(radioSelectKey{}, boolFloat(on), spatial)
+	sel := animateValue(el, radioSelectKey{}, boolFloat(on), spatial, thReduceMotion)
 
-	haloTarget := float32(0)
-	switch {
-	case disabled:
-	case el.Pressed():
-		haloTarget = float32(tokens.StatePressedOpacity)
-	case el.FocusVisible():
-		haloTarget = float32(tokens.StateFocusOpacity)
-	case el.Hovered():
-		haloTarget = float32(tokens.StateHoverOpacity)
-	}
-	halo := el.AnimateTo(radioHaloKey{}, haloTarget, effects)
+	haloSt := ui.Local(el, radioHaloKey{}, func() haloFadeState { return haloFadeState{} })
 	haloInk := cs.OnSurfaceVariant
 
 	// Press waves start only in the ring's touch target, not on the label.
@@ -162,21 +149,40 @@ func Radio[T comparable](c *ui.Context, selected *T, value T, label string, opts
 		rp.start = ev.Time
 	})
 
+	paintSnap := radioPaint{
+		sel:          clampF32(sel, 0, 1),
+		haloInk:      haloInk,
+		ringOff:      ringOff,
+		ringOn:       ringOn,
+		dot:          dotInk,
+		ripple:       rp,
+		reduceMotion: thReduceMotion,
+	}
+
 	el.Children(func() {
 		ui.Box(c).Size(target, target).Shrink(0).Draw(func(p *ui.Painter, r ui.Rect) {
-			drawRadio(p, r, radioPaint{
-				sel:          clampF32(sel, 0, 1),
-				halo:         clampF32(halo, 0, 1),
-				haloInk:      haloInk,
-				ringOff:      ringOff,
-				ringOn:       ringOn,
-				dot:          dotInk,
-				ripple:       rp,
-				reduceMotion: th.ReduceMotion,
-			})
+			if !el.Valid() {
+				return
+			}
+			hovered := el.Hovered() && !disabled
+			pressed := !disabled && el.Pressed()
+			focused := !disabled && el.FocusVisible()
+			targetHalo := resolveStateLayerTarget(disabled, false, pressed, true, focused, hovered)
+			if disabled {
+				haloSt.reset()
+			}
+			rm := thReduceMotion || p.Preferences().ReduceMotion
+			halo, needFrame := haloSt.step(targetHalo, p.Now(), rm)
+			if needFrame {
+				p.After(16 * time.Millisecond)
+			}
+			paintCfg := paintSnap
+			paintCfg.halo = clampF32(halo, 0, 1)
+			paintCfg.reduceMotion = rm
+			drawRadio(p, r, paintCfg)
 		})
 		if label != "" {
-			ApplyTypeStyle(c, ui.Text(c, label).NoWrap().TextColor(ink), tokens.LabelLarge)
+			applyTypeStyleWithTheme(th, ui.Text(c, label).NoWrap().TextColor(ink), tokens.LabelLarge)
 		}
 	})
 	return el
@@ -228,7 +234,7 @@ func drawRadio(p *ui.Painter, r ui.Rect, s radioPaint) {
 	}
 
 	ring := ui.Rect{X: cx - radioRingSize/2, Y: cy - radioRingSize/2, W: radioRingSize, H: radioRingSize}
-	p.Stroke(ring, s.ringOff.Mix(s.ringOn, s.sel), radioRingSize/2, radioRingWidth)
+	p.Stroke(ring, s.ringOff.MixOklab(s.ringOn, s.sel), radioRingSize/2, radioRingWidth)
 
 	dot := radioDotSize * s.sel
 	if dot > 0.4 {

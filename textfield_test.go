@@ -684,3 +684,22 @@ func TestTextFieldTextScaleAndNarrowLabelTruncation(t *testing.T) {
 		t.Fatalf("narrow TextField label spilled outside bounds: %d ink pixels to the right", n)
 	}
 }
+
+func TestTextFieldEmptyLabelAndEmptyAffixSettles(t *testing.T) {
+	val := ""
+	tt := fieldCanvas(nil, func(c *ui.Context) {
+		TextField(c, &val, TextFieldOptions{
+			Placeholder: "Quick filter",
+		})
+	})
+	info := buttonInfo(t, tt, ui.RoleTextField, "Quick filter")
+	tt.ClickAt(info.Bounds.X+20, info.Bounds.Y+12)
+	tt.Type("ok")
+	if val != "ok" {
+		t.Fatalf("empty-label TextField typed %q, want %q", val, "ok")
+	}
+	tt.Advance(400 * time.Millisecond)
+	if tt.FramePending() {
+		t.Fatal("empty-label TextField indicator did not settle cleanly")
+	}
+}

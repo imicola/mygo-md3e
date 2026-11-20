@@ -573,3 +573,60 @@ func TestRippleExitTransitionNoExpiredHandlePanic(t *testing.T) {
 		}
 	})
 }
+
+func TestStateLayerOnlyPressWithoutWavesAndPolygonClip(t *testing.T) {
+	poly := shape.Pill()
+	builds := 0
+	tt := ui.NewTester(func(c *ui.Context) {
+		builds++
+		ThemeScope(c, nil, func() {
+			ui.Box(c).Size(200, 120).Background(ui.RGB(255, 255, 255)).Padding(20).Children(func() {
+				s := Surface(c, SurfaceOptions{
+					Color: ui.RGB(255, 255, 255),
+					Shape: poly,
+				}).Size(120, 60)
+				AttachStateLayer(c, s, StateLayerOptions{
+					Color: ui.RGB(0, 0, 0),
+					Shape: poly,
+				})
+			})
+		})
+	}, 200, 120)
+
+	b0 := builds
+	tt.Move(80, 50)
+	if builds > b0+1 {
+		t.Fatalf("StateLayer hover enter caused %d builds, want at most 1 settle build", builds-b0)
+	}
+	afterMove := builds
+	tt.Advance(250 * time.Millisecond)
+	if builds != afterMove {
+		t.Fatalf("StateLayer hover Advance caused %d rebuilds, want 0", builds-afterMove)
+	}
+	hoverPx := tt.Image().RGBAAt(80, 50)
+	if hoverPx.R >= 250 {
+		t.Fatalf("StateLayer-only polygon hover did not paint overlay: %+v", hoverPx)
+	}
+
+	tt.Press(80, 50)
+	afterPress := builds
+	tt.Advance(250 * time.Millisecond)
+	if builds != afterPress {
+		t.Fatalf("StateLayer press Advance caused %d rebuilds, want 0", builds-afterPress)
+	}
+	pressPx := tt.Image().RGBAAt(80, 50)
+	if pressPx.R >= hoverPx.R {
+		t.Fatalf("StateLayer-only press did not deepen overlay: hover=%+v press=%+v", hoverPx, pressPx)
+	}
+
+	tt.Release(80, 50)
+	tt.Move(2, 2)
+	afterLeave := builds
+	tt.Advance(300 * time.Millisecond)
+	if builds != afterLeave {
+		t.Fatalf("StateLayer leave Advance caused %d rebuilds, want 0", builds-afterLeave)
+	}
+	if tt.FramePending() {
+		t.Fatal("StateLayer-only polygon did not settle cleanly")
+	}
+}

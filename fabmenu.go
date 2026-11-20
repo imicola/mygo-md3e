@@ -198,7 +198,7 @@ func fabMenuCloseButton(c *ui.Context, th *Theme, trigger ui.Element, label stri
 		TextColor(th.Colors.OnPrimary).
 		Radius(fabMenuCloseSide / 2)
 	ApplyElevationShadows(th, btn, tokens.Level3)
-	AttachRipple(c, btn, StateLayerOptions{Color: th.Colors.OnPrimary, Radius: fabMenuCloseSide / 2})
+	attachRippleWithTheme(th, btn, StateLayerOptions{Color: th.Colors.OnPrimary, Radius: fabMenuCloseSide / 2})
 	btn.AttachTo(trigger, ui.AnchorCenter, ui.AnchorCenter)
 
 	entered := ui.Local(btn, fabMenuPoseKey{}, func() bool { return false })
@@ -262,7 +262,7 @@ func fabMenuItem(c *ui.Context, th *Theme, item *FABMenuItem, i int, reduceMotio
 	}
 	btn.AnimatePose(pose, fabMenuEntryAnimation(th, delay))
 
-	AttachRipple(c, btn, StateLayerOptions{
+	attachRippleWithTheme(th, btn, StateLayerOptions{
 		Color:    pal.content,
 		Radius:   fabMenuItemSide / 2,
 		Disabled: disabled,
@@ -273,7 +273,7 @@ func fabMenuItem(c *ui.Context, th *Theme, item *FABMenuItem, i int, reduceMotio
 		if item.Icon != nil {
 			drawIconBox(c, item.Icon, 24, pal.content)
 		}
-		ApplyTypeStyle(c, ui.Text(c, item.Label).NoWrap(), tokens.LabelLarge)
+		applyTypeStyleWithTheme(th, ui.Text(c, item.Label).NoWrap(), tokens.LabelLarge)
 	})
 	return clicked
 }

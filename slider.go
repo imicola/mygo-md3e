@@ -4,11 +4,13 @@ import (
 	"math"
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/egoist/mygo/ui"
 
 	"mygo-md3e/motion"
+	"mygo-md3e/tokens"
 )
 
 // Slider metrics in DIP, as MD3E specifies the Expressive slider: a 48 DIP row
@@ -142,11 +144,8 @@ func Slider(c *ui.Context, value *float64, lo, hi float64, opts ...SliderOptions
 	_, _, dragging := el.Dragged()
 	held := !disabled && ((ok && btn == 0) || dragging)
 
+	thReduceMotion := th.ReduceMotion
 	spatial := th.Animation(motion.FastSpatial)
-	effects := th.Animation(motion.FastEffects)
-	if th.ReduceMotion {
-		spatial, effects = motion.Snap, motion.Snap
-	}
 
 	activeColor := cs.Primary
 	inactiveColor := cs.SurfaceContainerHighest
@@ -179,20 +178,11 @@ func Slider(c *ui.Context, value *float64, lo, hi float64, opts ...SliderOptions
 	if engaged {
 		thumbTarget = sliderThumbPressed
 	}
-	thumbW := el.AnimateTo(sliderThumbWidthKey{}, thumbTarget, spatial)
+	thumbW := animateValue(el, sliderThumbWidthKey{}, thumbTarget, spatial, thReduceMotion)
+	indicator := animateValue(el, sliderIndicatorKey{}, boolFloat(engaged), spatial, thReduceMotion)
 
-	haloTarget := float32(0)
-	switch {
-	case disabled:
-	case held, el.Pressed():
-		haloTarget = float32(0.10)
-	case focused:
-		haloTarget = float32(0.10)
-	case el.Hovered():
-		haloTarget = float32(0.08)
-	}
-	halo := el.AnimateTo(sliderHaloKey{}, haloTarget, effects)
-	indicator := el.AnimateTo(sliderIndicatorKey{}, boolFloat(engaged), spatial)
+	haloSt := ui.Local(el, sliderHaloKey{}, func() haloFadeState { return haloFadeState{} })
+	haloBase := resolveStateLayerTarget(disabled, held, held, true, focused, false)
 
 	paintSnap := sliderPaint{
 		value:       *value,
@@ -204,7 +194,6 @@ func Slider(c *ui.Context, value *float64, lo, hi float64, opts ...SliderOptions
 		trackH:      trackH,
 		thumbH:      thumbH,
 		thumbW:      clampF32(thumbW, 1, thumbH),
-		halo:        clampF32(halo, 0, 1),
 		haloInk:     haloInk,
 		active:      activeColor,
 		inactive:    inactiveColor,
@@ -214,7 +203,28 @@ func Slider(c *ui.Context, value *float64, lo, hi float64, opts ...SliderOptions
 		focusRing:   focused && !disabled,
 	}
 	el.Draw(func(p *ui.Painter, r ui.Rect) {
-		drawSlider(p, r, paintSnap)
+		if !el.Valid() {
+			return
+		}
+		targetHalo := haloBase
+		hovered := el.Hovered()
+		if !disabled && targetHalo < float32(tokens.StatePressedOpacity) {
+			if el.Pressed() {
+				targetHalo = float32(tokens.StatePressedOpacity)
+			} else if targetHalo < float32(tokens.StateHoverOpacity) && hovered {
+				targetHalo = float32(tokens.StateHoverOpacity)
+			}
+		}
+		if disabled {
+			haloSt.reset()
+		}
+		alpha, needFrame := haloSt.step(targetHalo, p.Now(), thReduceMotion || p.Preferences().ReduceMotion)
+		if needFrame {
+			p.After(16 * time.Millisecond)
+		}
+		paintCfg := paintSnap
+		paintCfg.halo = clampF32(alpha, 0, 1)
+		drawSlider(p, r, paintCfg)
 	})
 
 	if indicator > 0.02 {
@@ -458,11 +468,11 @@ type (
 	rangeDragKey      struct{}
 	rangeLowWidthKey  struct{}
 	rangeHighWidthKey struct{}
-	rangeLowHaloKey   struct{}
-	rangeHighHaloKey  struct{}
+	rangeHalosKey     struct{}
 	rangeIndicatorKey struct{}
 
-	rangeDragState struct{ knob int }
+	rangeDragState  struct{ knob int }
+	rangeHalosState struct{ low, high haloFadeState }
 
 	rangePaint struct {
 		low, high   float64
@@ -650,25 +660,18 @@ func RangeSlider(c *ui.Context, low, high *float64, lo, hi float64, opts ...Rang
 			Range(*low, hi, *high)
 	}
 
+	thReduceMotion := th.ReduceMotion
 	spatial := th.Animation(motion.FastSpatial)
-	effects := th.Animation(motion.FastEffects)
-	if th.ReduceMotion {
-		spatial, effects = motion.Snap, motion.Snap
-	}
 
-	var lowFocused, highFocused, lowHover, highHover bool
+	var lowFocused, highFocused bool
 	if lowEl.Valid() {
 		lowFocused = lowEl.FocusVisible()
-		lowHover = lowEl.Hovered()
 	}
 	if highEl.Valid() {
 		highFocused = highEl.FocusVisible()
-		highHover = highEl.Hovered()
 	}
-	lowW := el.AnimateTo(rangeLowWidthKey{}, rangeThumbTarget(lowFocused, drags.knob == 0), spatial)
-	highW := el.AnimateTo(rangeHighWidthKey{}, rangeThumbTarget(highFocused, drags.knob == 1), spatial)
-	lowHalo := el.AnimateTo(rangeLowHaloKey{}, rangeHaloTarget(lowHover, lowFocused, drags.knob == 0), effects)
-	highHalo := el.AnimateTo(rangeHighHaloKey{}, rangeHaloTarget(highHover, highFocused, drags.knob == 1), effects)
+	lowW := animateValue(el, rangeLowWidthKey{}, rangeThumbTarget(lowFocused, drags.knob == 0), spatial, thReduceMotion)
+	highW := animateValue(el, rangeHighWidthKey{}, rangeThumbTarget(highFocused, drags.knob == 1), spatial, thReduceMotion)
 
 	activeKnob := -1
 	switch {
@@ -680,7 +683,11 @@ func RangeSlider(c *ui.Context, low, high *float64, lo, hi float64, opts ...Rang
 		activeKnob = 1
 	}
 	engaged := !disabled && activeKnob >= 0
-	indicator := el.AnimateTo(rangeIndicatorKey{}, boolFloat(engaged), spatial)
+	indicator := animateValue(el, rangeIndicatorKey{}, boolFloat(engaged), spatial, thReduceMotion)
+
+	halosSt := ui.Local(el, rangeHalosKey{}, func() rangeHalosState { return rangeHalosState{} })
+	lowHaloBase := rangeHaloTarget(disabled, false, lowFocused, drags.knob == 0)
+	highHaloBase := rangeHaloTarget(disabled, false, highFocused, drags.knob == 1)
 
 	activeColor := cs.Primary
 	inactiveColor := cs.SurfaceContainerHighest
@@ -718,8 +725,6 @@ func RangeSlider(c *ui.Context, low, high *float64, lo, hi float64, opts ...Rang
 		thumbH:      thumbH,
 		lowW:        clampF32(lowW, 1, thumbH),
 		highW:       clampF32(highW, 1, thumbH),
-		lowHalo:     clampF32(lowHalo, 0, 1),
-		highHalo:    clampF32(highHalo, 0, 1),
 		haloInk:     haloInk,
 		active:      activeColor,
 		inactive:    inactiveColor,
@@ -730,7 +735,54 @@ func RangeSlider(c *ui.Context, low, high *float64, lo, hi float64, opts ...Rang
 		highFocus:   highFocused && !disabled,
 	}
 	el.Draw(func(p *ui.Painter, r ui.Rect) {
-		drawRangeSlider(p, r, paintSnap)
+		if !el.Valid() {
+			return
+		}
+		drawRangeTrack(p, r, paintSnap)
+	})
+	// Halos and thumbs paint in DrawOver so reading child Hovered()/Pressed()
+	// happens after p.element(lowEl)/p.element(highEl) clears per-element hoverLook.
+	el.DrawOver(func(p *ui.Painter, r ui.Rect) {
+		if !el.Valid() {
+			return
+		}
+		lowTarget := lowHaloBase
+		if lowEl.Valid() {
+			lowHover := lowEl.Hovered()
+			if !disabled && lowTarget < float32(tokens.StatePressedOpacity) {
+				if lowEl.Pressed() {
+					lowTarget = float32(tokens.StatePressedOpacity)
+				} else if lowTarget < float32(tokens.StateHoverOpacity) && lowHover {
+					lowTarget = float32(tokens.StateHoverOpacity)
+				}
+			}
+		}
+		highTarget := highHaloBase
+		if highEl.Valid() {
+			highHover := highEl.Hovered()
+			if !disabled && highTarget < float32(tokens.StatePressedOpacity) {
+				if highEl.Pressed() {
+					highTarget = float32(tokens.StatePressedOpacity)
+				} else if highTarget < float32(tokens.StateHoverOpacity) && highHover {
+					highTarget = float32(tokens.StateHoverOpacity)
+				}
+			}
+		}
+		if disabled {
+			halosSt.low.reset()
+			halosSt.high.reset()
+		}
+		rm := thReduceMotion || p.Preferences().ReduceMotion
+		now := p.Now()
+		lowAlpha, lowNeed := halosSt.low.step(lowTarget, now, rm)
+		highAlpha, highNeed := halosSt.high.step(highTarget, now, rm)
+		if lowNeed || highNeed {
+			p.After(16 * time.Millisecond)
+		}
+		paintCfg := paintSnap
+		paintCfg.lowHalo = clampF32(lowAlpha, 0, 1)
+		paintCfg.highHalo = clampF32(highAlpha, 0, 1)
+		drawRangeThumbs(p, r, paintCfg)
 	})
 
 	if indicator > 0.02 && activeKnob >= 0 {
@@ -813,33 +865,43 @@ func rangeThumbTarget(focused, dragged bool) float32 {
 }
 
 // rangeHaloTarget returns the state layer opacity of a handle.
-func rangeHaloTarget(hovered, focused, dragged bool) float32 {
+func rangeHaloTarget(disabled, hovered, focused, dragged bool) float32 {
+	if disabled {
+		return 0
+	}
 	switch {
 	case dragged, focused:
-		return 0.10
+		return float32(tokens.StateFocusOpacity)
 	case hovered:
-		return 0.08
+		return float32(tokens.StateHoverOpacity)
 	}
 	return 0
 }
 
-// drawRangeSlider paints a range slider's track, stop dots, state layers and
-// two capsule handles in the row r.
-func drawRangeSlider(p *ui.Painter, r ui.Rect, s rangePaint) {
-	w := r.W - 2*sliderPad
+func rangeThumbPositions(r ui.Rect, s rangePaint) (w, x0, cy, lx, hx float32, ok bool) {
+	w = r.W - 2*sliderPad
 	if w <= 0 || r.H <= 0 {
-		return
+		return 0, 0, 0, 0, 0, false
 	}
-	x0 := r.X + sliderPad
-	x1 := x0 + w
-	cy := r.Y + r.H/2
+	x0 = r.X + sliderPad
+	cy = r.Y + r.H/2
 	fl := sliderFraction(s.low, s.lo, s.hi)
 	fh := sliderFraction(s.high, s.lo, s.hi)
 	if s.rtl {
 		fl, fh = 1-fl, 1-fh
 	}
-	lx := x0 + w*fl
-	hx := x0 + w*fh
+	lx = x0 + w*fl
+	hx = x0 + w*fh
+	return w, x0, cy, lx, hx, true
+}
+
+// drawRangeTrack paints a range slider's active/inactive track segments and stop dots.
+func drawRangeTrack(p *ui.Painter, r ui.Rect, s rangePaint) {
+	w, x0, cy, lx, hx, ok := rangeThumbPositions(r, s)
+	if !ok {
+		return
+	}
+	x1 := x0 + w
 	leftX, rightX := min(lx, hx), max(lx, hx)
 	var leftW, rightW float32
 	if lx <= hx {
@@ -887,7 +949,14 @@ func drawRangeSlider(p *ui.Painter, r ui.Rect, s rangePaint) {
 			}
 		}
 	}
+}
 
+// drawRangeThumbs paints the two capsule handles, focus rings, and state layer halos.
+func drawRangeThumbs(p *ui.Painter, r ui.Rect, s rangePaint) {
+	_, _, cy, lx, hx, ok := rangeThumbPositions(r, s)
+	if !ok {
+		return
+	}
 	if s.lowHalo > 0.001 {
 		paintHalo(p, lx, cy, sliderHaloDiameter/2, s.haloInk, s.lowHalo)
 	}

@@ -19,7 +19,13 @@ type TypeStyleMetrics struct {
 // TypeStyleOf resolves the MD3E TypeStyleMetrics for role (standard or
 // emphasized) from CurrentTheme(c), scaled by the theme's EffectiveTextScale.
 func TypeStyleOf(c *ui.Context, role tokens.TypeRole, emphasized ...bool) TypeStyleMetrics {
-	th := CurrentTheme(c)
+	return typeStyleOfWithTheme(CurrentTheme(c), role, emphasized...)
+}
+
+func typeStyleOfWithTheme(th *Theme, role tokens.TypeRole, emphasized ...bool) TypeStyleMetrics {
+	if th == nil {
+		th = DefaultTheme(nil)
+	}
 	ts := th.TypeStyle(role, emphasized...)
 	scale := th.EffectiveTextScale()
 	return TypeStyleMetrics{
@@ -35,7 +41,11 @@ func TypeStyleOf(c *ui.Context, role tokens.TypeRole, emphasized ...bool) TypeSt
 // weight, fixed DIP line height, letter spacing, and optional font family) to el
 // without altering el's foreground TextColor so parent Surface inheritance works.
 func ApplyTypeStyle(c *ui.Context, el ui.Element, role tokens.TypeRole, emphasized ...bool) ui.Element {
-	m := TypeStyleOf(c, role, emphasized...)
+	return applyTypeStyleWithTheme(CurrentTheme(c), el, role, emphasized...)
+}
+
+func applyTypeStyleWithTheme(th *Theme, el ui.Element, role tokens.TypeRole, emphasized ...bool) ui.Element {
+	m := typeStyleOfWithTheme(th, role, emphasized...)
 	el.FontSize(m.Size).
 		FontWeight(m.Weight).
 		FixedLineHeight(m.LineHeight).

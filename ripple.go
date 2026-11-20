@@ -6,6 +6,7 @@ import (
 
 	"github.com/egoist/mygo/ui"
 
+	"mygo-md3e/motion"
 	"mygo-md3e/shape"
 	"mygo-md3e/tokens"
 )
@@ -41,17 +42,105 @@ type rippleWave struct {
 	released   bool
 }
 
+type evaluatedWave struct {
+	ox, oy    float32
+	curR      float32
+	waveAlpha float32
+}
+
 type rippleLocalKey struct{}
+
+// haloFadeState tracks exponential StateLayer / Halo alpha transitions inside Draw
+// so hover changes never trigger view rebuilds.
+type haloFadeState struct {
+	alpha     float32
+	target    float32
+	animating bool
+	prevNow   time.Time
+}
+
+func (h *haloFadeState) reset() {
+	h.alpha = 0
+	h.target = 0
+	h.animating = false
+}
+
+func (h *haloFadeState) step(target float32, now time.Time, reduceMotion bool) (alpha float32, needFrame bool) {
+	if reduceMotion {
+		h.alpha = target
+		h.target = target
+		h.animating = false
+		return target, false
+	}
+	if h.alpha != target {
+		if !h.animating || h.target != target {
+			h.target = target
+			h.animating = true
+			h.prevNow = now
+		} else {
+			dt := float32(now.Sub(h.prevNow).Seconds())
+			h.prevNow = now
+			if dt > 0 {
+				factor := 1 - float32(math.Exp(-28.0*float64(dt)))
+				h.alpha += (target - h.alpha) * factor
+				if absF32(target-h.alpha) < 0.0015 {
+					h.alpha = target
+				}
+			}
+		}
+		if h.alpha != target {
+			return h.alpha, true
+		}
+		h.animating = false
+	} else {
+		h.animating = false
+	}
+	return h.alpha, false
+}
+
+func resolveStateLayerTarget(disabled, dragged, pressed, withWavePressed, focused, hovered bool) float32 {
+	if disabled {
+		return 0
+	}
+	switch {
+	case dragged:
+		return float32(tokens.StateDraggedOpacity)
+	case pressed && withWavePressed:
+		return float32(tokens.StatePressedOpacity)
+	case focused:
+		return float32(tokens.StateFocusOpacity)
+	case hovered:
+		return float32(tokens.StateHoverOpacity)
+	default:
+		return 0
+	}
+}
+
+func animateValue(el ui.Element, key any, target float32, anim ui.Animation, reduceMotion bool) float32 {
+	if reduceMotion {
+		return el.Jump(key, target)
+	}
+	return el.AnimateTo(key, target, anim)
+}
+
+func animateWithTheme(el ui.Element, th *Theme, key any, target float32, token motion.Token) float32 {
+	if th == nil {
+		th = DefaultTheme(nil)
+	}
+	anim := th.Animation(token)
+	if th.ReduceMotion && !anim.NonMotion {
+		return el.Jump(key, target)
+	}
+	return el.AnimateTo(key, target, anim)
+}
 
 type rippleState struct {
 	waves          []rippleWave
 	pointerHeld    bool
 	sawPressedTrue bool
+	allowWaves     bool
 
-	layerAlpha     float32
-	layerTarget    float32
-	layerAnimating bool
-	layerPrevNow   time.Time
+	halo haloFadeState
 }
 
 const (
@@ -117,7 +206,11 @@ func AttachStateLayer(c *ui.Context, el ui.Element, opts ...StateLayerOptions) u
 	if len(opts) == 1 {
 		opt = opts[0]
 	}
-	return attachOverlayFeedback(c, el, false, opt)
+	return attachStateLayerWithTheme(CurrentTheme(c), el, opt)
+}
+
+func attachStateLayerWithTheme(th *Theme, el ui.Element, opt StateLayerOptions) ui.Element {
+	return attachOverlayFeedbackWithTheme(th, el, false, opt)
 }
 
 // AttachRipple attaches both MD3E StateLayer and ExpressiveRipple wave feedback
@@ -132,16 +225,24 @@ func AttachRipple(c *ui.Context, el ui.Element, opts ...StateLayerOptions) ui.El
 	if len(opts) == 1 {
 		opt = opts[0]
 	}
-	return attachOverlayFeedback(c, el, !opt.DisableRipple, opt)
+	return attachRippleWithTheme(CurrentTheme(c), el, opt)
 }
 
-func attachOverlayFeedback(c *ui.Context, el ui.Element, withRipple bool, opt StateLayerOptions) ui.Element {
+func attachRippleWithTheme(th *Theme, el ui.Element, opt StateLayerOptions) ui.Element {
+	return attachOverlayFeedbackWithTheme(th, el, !opt.DisableRipple, opt)
+}
+
+func attachOverlayFeedbackWithTheme(th *Theme, el ui.Element, withRipple bool, opt StateLayerOptions) ui.Element {
 	st := ui.Local(el, rippleLocalKey{}, func() rippleState { return rippleState{} })
 	if st == nil {
 		return el
 	}
+	if th == nil {
+		th = DefaultTheme(nil)
+	}
+	thReduceMotion := th.ReduceMotion
+	st.allowWaves = withRipple && !thReduceMotion
 
-	th := CurrentTheme(c)
 	ink := opt.Color
 	if ink.A == 0 {
 		ink = th.Colors.OnSurface
@@ -152,29 +253,35 @@ func attachOverlayFeedback(c *ui.Context, el ui.Element, withRipple bool, opt St
 		radii = [4]float32{opt.Radius, opt.Radius, opt.Radius, opt.Radius}
 	}
 
-	el.ObserveInput(func(ev ui.InputEvent) {
-		if opt.Disabled {
-			return
-		}
-		switch ev.Kind {
-		case ui.InputPointerDown:
-			if ev.Button == 0 {
-				st.startWave(ev.X, ev.Y, false, ev.Time)
+	if withRipple {
+		el.ObserveInput(func(ev ui.InputEvent) {
+			if opt.Disabled || !st.allowWaves {
+				return
 			}
-		case ui.InputPointerUp:
-			if ev.Button == 0 {
-				st.releaseWaves(false, ev.Time)
+			switch ev.Kind {
+			case ui.InputPointerDown:
+				if ev.Button == 0 {
+					st.startWave(ev.X, ev.Y, false, ev.Time)
+				}
+			case ui.InputPointerUp:
+				if ev.Button == 0 {
+					st.releaseWaves(false, ev.Time)
+				}
+			case ui.InputKeyDown:
+				if (ev.Key == ui.KeyEnter || ev.Key == ui.KeySpace) && !ev.Repeat {
+					st.startWave(0, 0, true, ev.Time)
+				}
+			case ui.InputKeyUp:
+				if ev.Key == ui.KeyEnter || ev.Key == ui.KeySpace {
+					st.releaseWaves(true, ev.Time)
+				}
 			}
-		case ui.InputKeyDown:
-			if (ev.Key == ui.KeyEnter || ev.Key == ui.KeySpace) && !ev.Repeat {
-				st.startWave(0, 0, true, ev.Time)
-			}
-		case ui.InputKeyUp:
-			if ev.Key == ui.KeyEnter || ev.Key == ui.KeySpace {
-				st.releaseWaves(true, ev.Time)
-			}
-		}
-	})
+		})
+	} else if !opt.Disabled {
+		// StateLayer-only surfaces still need pointer-press capture without allocating
+		// an ObserveInput closure or setting hoverBuilt.
+		_, _ = el.PressedButton()
+	}
 
 	el.DrawOver(func(p *ui.Painter, r ui.Rect) {
 		if !el.Valid() || r.W <= 0 || r.H <= 0 {
@@ -182,71 +289,33 @@ func attachOverlayFeedback(c *ui.Context, el ui.Element, withRipple bool, opt St
 		}
 		if opt.Disabled || el.IsDisabled() {
 			st.clearTransient()
-			st.layerAlpha = 0
-			st.layerAnimating = false
+			st.halo.reset()
 			return
 		}
 
-		reduceMotion := th.ReduceMotion || p.Preferences().ReduceMotion
+		reduceMotion := thReduceMotion || p.Preferences().ReduceMotion
 		now := p.Now()
 		hovered := el.Hovered()
 		pressed := el.Pressed()
 		focused := el.FocusVisible()
 
-		if pressed {
-			st.sawPressedTrue = true
-		} else if st.pointerHeld && (st.sawPressedTrue || !hovered) {
-			st.releaseWaves(false, now)
-		}
-
-		if reduceMotion {
-			// Skip circular wave animation under ReduceMotion, retaining immediate static layer feedback.
-			st.waves = st.waves[:0]
-		}
-
-		var targetAlpha float32
-		switch {
-		case opt.Dragged:
-			targetAlpha = float32(tokens.StateDraggedOpacity)
-		case (pressed || st.pointerHeld) && (!withRipple || reduceMotion):
-			// The ripple itself is the pressed feedback; adding the 10% pressed
-			// layer on top would double it. Keep the layer for keyboard and
-			// ReduceMotion feedback, where no wave spreads.
-			targetAlpha = float32(tokens.StatePressedOpacity)
-		case focused:
-			targetAlpha = float32(tokens.StateFocusOpacity)
-		case hovered:
-			targetAlpha = float32(tokens.StateHoverOpacity)
-		}
-
-		needFrame := false
-		if reduceMotion {
-			st.layerAlpha = targetAlpha
-			st.layerAnimating = false
-		} else if st.layerAlpha != targetAlpha {
-			if !st.layerAnimating || st.layerTarget != targetAlpha {
-				st.layerTarget = targetAlpha
-				st.layerAnimating = true
-				st.layerPrevNow = now
-			} else {
-				dt := float32(now.Sub(st.layerPrevNow).Seconds())
-				st.layerPrevNow = now
-				if dt > 0 {
-					factor := 1 - float32(math.Exp(-28.0*float64(dt)))
-					st.layerAlpha += (targetAlpha - st.layerAlpha) * factor
-					if absF32(targetAlpha-st.layerAlpha) < 0.0015 {
-						st.layerAlpha = targetAlpha
-					}
-				}
+		if withRipple {
+			if pressed {
+				st.sawPressedTrue = true
+			} else if st.pointerHeld && (st.sawPressedTrue || !hovered) {
+				st.releaseWaves(false, now)
 			}
-			if st.layerAlpha != targetAlpha {
-				needFrame = true
-			} else {
-				st.layerAnimating = false
+			if reduceMotion {
+				// Skip circular wave animation under ReduceMotion, retaining immediate static layer feedback.
+				st.clearTransient()
 			}
-		} else {
-			st.layerAnimating = false
 		}
+
+		// The ripple itself is the pressed feedback; adding the 10% pressed layer on
+		// top would double it. Keep the pressed layer for keyboard, StateLayer-only,
+		// and ReduceMotion feedback where no wave spreads.
+		targetAlpha := resolveStateLayerTarget(false, opt.Dragged, pressed || st.pointerHeld, !withRipple || reduceMotion, focused, hovered)
+		layerAlpha, needFrame := st.halo.step(targetAlpha, now, reduceMotion)
 
 		clipRect := insetRect(r, opt.BorderInset)
 		clipRadii := insetRadii(radii, opt.BorderInset)
@@ -254,67 +323,81 @@ func attachOverlayFeedback(c *ui.Context, el ui.Element, withRipple bool, opt St
 			return
 		}
 
-		// Update active ripple waves before painting so settled waves are pruned promptly.
+		var stackWaves [maxActiveRipples]evaluatedWave
+		wavesToDraw := stackWaves[:0]
 		if withRipple && !reduceMotion && len(st.waves) > 0 {
 			kept := st.waves[:0]
 			for i := range st.waves {
 				w := st.waves[i]
 				ox, oy := rippleOrigin(&w, opt.BorderInset, clipRect)
-				_, _, fadeAlpha, animating, alive := evalRippleWave(&w, ox, oy, clipRect, now)
+				curR, enterAlpha, fadeAlpha, animating, alive := evalRippleWave(&w, ox, oy, clipRect, now)
 				if alive && fadeAlpha > 0.001 {
 					kept = append(kept, w)
 					if animating {
 						needFrame = true
+					}
+					if waveAlpha := float32(tokens.StatePressedOpacity) * enterAlpha * fadeAlpha; waveAlpha > 0.001 && curR > 0 {
+						wavesToDraw = append(wavesToDraw, evaluatedWave{
+							ox:        ox,
+							oy:        oy,
+							curR:      curR,
+							waveAlpha: waveAlpha,
+						})
 					}
 				}
 			}
 			st.waves = kept
 		}
 
-		paintInClip(p, clipRect, clipRadii, opt.Shape, func() {
-			if st.layerAlpha > 0.001 {
-				layerInk := ink.Alpha(st.layerAlpha)
-				if opt.Shape != nil {
-					if path := opt.Shape.ToPath(clipRect); path != nil {
-						p.FillPath(path, layerInk)
-					}
+		if needFrame {
+			p.After(16 * time.Millisecond)
+		}
+		if layerAlpha <= 0.001 && len(wavesToDraw) == 0 {
+			return
+		}
+
+		paintBody := func(polyPath *ui.Path) {
+			if layerAlpha > 0.001 {
+				layerInk := ink.Alpha(layerAlpha)
+				if polyPath != nil {
+					p.FillPath(polyPath, layerInk)
 				} else {
 					p.FillRadii(clipRect, clipRadii, layerInk)
 				}
 			}
 
-			if withRipple && !reduceMotion {
-				for i := range st.waves {
-					w := &st.waves[i]
-					ox, oy := rippleOrigin(w, opt.BorderInset, clipRect)
-					curR, enterAlpha, fadeAlpha, _, _ := evalRippleWave(w, ox, oy, clipRect, now)
-					waveAlpha := float32(tokens.StatePressedOpacity) * enterAlpha * fadeAlpha
-					if waveAlpha <= 0.001 || curR <= 0 {
-						continue
-					}
-					waveInk := ink.Alpha(waveAlpha)
-					cx, cy := ox/clipRect.W, oy/clipRect.H
-					if cx == 0 && cy == 0 {
-						// ui's RadialGradient reads the zero Point as the box
-						// center; nudge a top-left origin off it.
-						cx = 1e-4
-					}
-					p.FillRadialGradient(clipRect, ui.RadialGradient{
-						Center: ui.Point{X: cx, Y: cy},
-						Radius: curR,
-						Stops: []ui.GradientStop{
-							{Color: waveInk, At: 0},
-							{Color: waveInk, At: 0.80},
-							{Color: ui.Transparent, At: 1},
-						},
-					}, 0)
+			for i := range wavesToDraw {
+				w := &wavesToDraw[i]
+				waveInk := ink.Alpha(w.waveAlpha)
+				cx, cy := w.ox/clipRect.W, w.oy/clipRect.H
+				if cx == 0 && cy == 0 {
+					// ui's RadialGradient reads the zero Point as the box
+					// center; nudge a top-left origin off it.
+					cx = 1e-4
 				}
+				p.FillRadialGradient(clipRect, ui.RadialGradient{
+					Center: ui.Point{X: cx, Y: cy},
+					Radius: w.curR,
+					Stops: []ui.GradientStop{
+						{Color: waveInk, At: 0},
+						{Color: waveInk, At: 0.80},
+						{Color: ui.Transparent, At: 1},
+					},
+				}, 0)
 			}
-		})
-
-		if needFrame {
-			p.After(16 * time.Millisecond)
 		}
+
+		if opt.Shape != nil {
+			if path := opt.Shape.ToPath(clipRect); path != nil {
+				p.ClipPath(path, func() {
+					paintBody(path)
+				})
+			}
+			return
+		}
+		paintInClip(p, clipRect, clipRadii, nil, func() {
+			paintBody(nil)
+		})
 	})
 
 	return el

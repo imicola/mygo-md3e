@@ -134,14 +134,14 @@ func IconButton(c *ui.Context, label string, icon IconDraw, opts ...IconButtonOp
 	if el.Pressed() {
 		target = float32(spec.PressedRadius)
 	}
-	radius := el.AnimateTo(iconButtonCornerKey{}, target, th.Animation(motion.FastSpatial))
+	radius := animateWithTheme(el, th, iconButtonCornerKey{}, target, motion.FastSpatial)
 	el.Radius(radius)
 
 	borderInset := float32(0)
 	if pal.border.A > 0 {
 		borderInset = 1
 	}
-	AttachRipple(c, el, StateLayerOptions{
+	attachRippleWithTheme(th, el, StateLayerOptions{
 		Color:       pal.content,
 		Radius:      radius,
 		BorderInset: borderInset,
@@ -209,14 +209,14 @@ func ToggleIconButton(c *ui.Context, on *bool, label string, icon IconDraw, opts
 	if el.Pressed() {
 		target = float32(spec.PressedRadius)
 	}
-	radius := el.AnimateTo(toggleIconCornerKey{}, target, th.Animation(motion.FastSpatial))
+	radius := animateWithTheme(el, th, toggleIconCornerKey{}, target, motion.FastSpatial)
 	el.Radius(radius)
 
 	borderInset := float32(0)
 	if pal.border.A > 0 {
 		borderInset = 1
 	}
-	AttachRipple(c, el, StateLayerOptions{
+	attachRippleWithTheme(th, el, StateLayerOptions{
 		Color:       pal.content,
 		Radius:      radius,
 		BorderInset: borderInset,

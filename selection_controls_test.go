@@ -677,3 +677,89 @@ func TestRadioGroupDisabledPropagationAndColors(t *testing.T) {
 	checkGroup("group-option", false)
 	checkGroup("ancestor-disabled", true)
 }
+
+func TestSelectionControlsHoverZeroRebuildsAndSettles(t *testing.T) {
+	check := func(name string, buildFn func(c *ui.Context, on *bool, choice *string), centerFn func(t *testing.T, tt *ui.Tester) (float32, float32)) {
+		t.Run(name, func(t *testing.T) {
+			builds := 0
+			on := false
+			choice := "other"
+			tt := ui.NewTester(func(c *ui.Context) {
+				builds++
+				ThemeScope(c, nil, func() {
+					ui.Box(c).Size(240, 120).Background(ui.RGB(255, 255, 255)).Padding(20).Children(func() {
+						buildFn(c, &on, &choice)
+					})
+				})
+			}, 240, 120)
+
+			cx, cy := centerFn(t, tt)
+			b0 := builds
+			tt.Move(cx, cy)
+			if builds > b0+1 {
+				t.Fatalf("%s hover enter caused %d builds (expected at most 1 Tester settle build)", name, builds-b0)
+			}
+			afterEnter := builds
+			tt.Advance(300 * time.Millisecond)
+			if builds != afterEnter {
+				t.Fatalf("%s hover fade triggered %d rebuilds during Advance, want 0", name, builds-afterEnter)
+			}
+			if tt.FramePending() {
+				t.Fatalf("%s hover fade did not settle", name)
+			}
+
+			tt.Move(2, 2)
+			if builds > afterEnter+1 {
+				t.Fatalf("%s hover leave caused %d builds (expected at most 1 Tester settle build)", name, builds-afterEnter)
+			}
+			afterLeave := builds
+			tt.Advance(300 * time.Millisecond)
+			if builds != afterLeave {
+				t.Fatalf("%s hover leave fade triggered %d rebuilds during Advance, want 0", name, builds-afterLeave)
+			}
+			if tt.FramePending() {
+				t.Fatalf("%s hover leave fade did not settle", name)
+			}
+
+			// ReduceMotion must snap hover halo with zero pending frames.
+			tt.SetPreferences(ui.Preferences{ReduceMotion: true})
+			bRM := builds
+			tt.Move(cx, cy)
+			if tt.FramePending() {
+				t.Fatalf("%s ReduceMotion hover enter left frames pending", name)
+			}
+			if builds > bRM+1 {
+				t.Fatalf("%s ReduceMotion hover enter caused %d builds", name, builds-bRM)
+			}
+			bRM2 := builds
+			tt.Move(2, 2)
+			if tt.FramePending() {
+				t.Fatalf("%s ReduceMotion hover leave left frames pending", name)
+			}
+			if builds > bRM2+1 {
+				t.Fatalf("%s ReduceMotion hover leave caused %d builds", name, builds-bRM2)
+			}
+		})
+	}
+
+	check("switch", func(c *ui.Context, on *bool, _ *string) {
+		Switch(c, on, SwitchOptions{Label: "Wi-Fi"})
+	}, func(t *testing.T, tt *ui.Tester) (float32, float32) {
+		info := buttonInfo(t, tt, ui.RoleSwitch, "Wi-Fi")
+		return info.Bounds.X + 20, info.Bounds.Y + info.Bounds.H/2
+	})
+
+	check("checkbox", func(c *ui.Context, on *bool, _ *string) {
+		Checkbox(c, on, CheckboxOptions{Label: "Sync"})
+	}, func(t *testing.T, tt *ui.Tester) (float32, float32) {
+		info := buttonInfo(t, tt, ui.RoleCheckBox, "Sync")
+		return info.Bounds.X + 20, info.Bounds.Y + info.Bounds.H/2
+	})
+
+	check("radio", func(c *ui.Context, _ *bool, choice *string) {
+		Radio(c, choice, "a", "ChoiceA")
+	}, func(t *testing.T, tt *ui.Tester) (float32, float32) {
+		info := buttonInfo(t, tt, ui.RoleRadio, "ChoiceA")
+		return info.Bounds.X + 20, info.Bounds.Y + info.Bounds.H/2
+	})
+}

@@ -497,3 +497,44 @@ func TestFABMenuAncestorDisabledClosesAndOmitsOverlay(t *testing.T) {
 		t.Fatalf("clicking disabled trigger opened menu: open=%v clicks=%d", open, itemClicks)
 	}
 }
+
+func TestFABRapidToggleAndMidAnimationReduceMotion(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor)
+	expanded := true
+	visible := true
+	tt := ui.NewTester(func(c *ui.Context) {
+		ThemeScope(c, th, func() {
+			ui.Column(c).Size(320, 240).Padding(20).Gap(16).Children(func() {
+				FAB(c, "Add", mdicon.Add.Draw, FABOptions{Visible: &visible})
+				ExtendedFAB(c, "Compose", mdicon.Edit.Draw, ExtendedFABOptions{Expanded: &expanded})
+			})
+		})
+	}, 320, 240)
+
+	fullW := buttonInfo(t, tt, ui.RoleButton, "Compose").Bounds.W
+
+	// Rapidly reverse directions mid-animation without settling.
+	visible = false
+	expanded = false
+	tt.Frame()
+	tt.Advance(32 * time.Millisecond)
+	visible = true
+	expanded = true
+	tt.Frame()
+	tt.Advance(24 * time.Millisecond)
+	expanded = false
+	tt.Frame()
+	tt.Advance(16 * time.Millisecond)
+
+	// Flip ReduceMotion ON mid-flight: spatial dimensions must snap immediately to target.
+	tt.SetPreferences(ui.Preferences{ReduceMotion: true})
+	tt.Frame()
+	tt.Advance(200 * time.Millisecond)
+	if tt.FramePending() {
+		t.Fatal("mid-flight ReduceMotion switch left FAB animations pending")
+	}
+	collapsedW := buttonInfo(t, tt, ui.RoleButton, "Compose").Bounds.W
+	if collapsedW >= fullW {
+		t.Fatalf("ExtendedFAB did not snap collapsed after mid-flight ReduceMotion: collapsed=%v full=%v", collapsedW, fullW)
+	}
+}

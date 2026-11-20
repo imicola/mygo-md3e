@@ -194,12 +194,12 @@ func buildTextField(c *ui.Context, value *string, multiline bool, o TextFieldOpt
 		trailing    ui.Element
 		hasTrailing bool
 	)
-	labelStyle := TypeStyleOf(c, tokens.BodyLarge)
+	var labelStyle TypeStyleMetrics
+	if o.Label != "" {
+		labelStyle = typeStyleOfWithTheme(th, tokens.BodyLarge)
+	}
 	spatial := th.Animation(motion.FastSpatial)
 	effects := th.Animation(motion.FastEffects)
-	if th.ReduceMotion {
-		spatial, effects = motion.Snap, motion.Snap
-	}
 
 	outer.Children(func() {
 		field = ui.Row(c).
@@ -216,16 +216,15 @@ func buildTextField(c *ui.Context, value *string, multiline bool, o TextFieldOpt
 			field.Padding(textFieldIconSize*scaleUp, 0, 8*scaleUp, 0)
 		}
 		field.PaddingStart(textFieldPad).PaddingEnd(textFieldPad)
-		// Affixes show while the field is focused or holds text. The focus is
-		// read from the state tree, before the input is built, so a prefix can
-		// precede the input in the row without changing its keyed identity.
-		showAffix := field.FocusWithin() || *value != ""
+		// Affixes show while the field is focused or holds text. Skip FocusWithin
+		// completely when neither affix is configured.
+		showAffix := (o.Prefix != "" || o.Suffix != "") && (*value != "" || field.FocusWithin())
 		field.Children(func() {
 			if o.LeadingIcon != nil {
 				drawIconBox(c, o.LeadingIcon, textFieldIconSize, variationInk)
 			}
 			if showAffix && o.Prefix != "" {
-				ApplyTypeStyle(c, ui.Text(c, o.Prefix).NoWrap().Shrink(0).TextColor(variationInk), tokens.BodyLarge)
+				applyTypeStyleWithTheme(th, ui.Text(c, o.Prefix).NoWrap().Shrink(0).TextColor(variationInk), tokens.BodyLarge)
 			}
 			c.Key(textFieldInputKey{})
 			if multiline {
@@ -240,7 +239,7 @@ func buildTextField(c *ui.Context, value *string, multiline bool, o TextFieldOpt
 				CaretColor(cs.Primary).
 				PlaceholderColor(variationInk).
 				Grow(1)
-			ApplyTypeStyle(c, input, tokens.BodyLarge)
+			applyTypeStyleWithTheme(th, input, tokens.BodyLarge)
 			if multiline {
 				input.AlignSelf(ui.Stretch)
 			}
@@ -274,7 +273,7 @@ func buildTextField(c *ui.Context, value *string, multiline bool, o TextFieldOpt
 			}
 
 			if showAffix && o.Suffix != "" {
-				ApplyTypeStyle(c, ui.Text(c, o.Suffix).NoWrap().Shrink(0).TextColor(variationInk), tokens.BodyLarge)
+				applyTypeStyleWithTheme(th, ui.Text(c, o.Suffix).NoWrap().Shrink(0).TextColor(variationInk), tokens.BodyLarge)
 			}
 			if o.TrailingIcon != nil {
 				if o.OnTrailing != nil {
@@ -287,7 +286,7 @@ func buildTextField(c *ui.Context, value *string, multiline bool, o TextFieldOpt
 						Disabled(disabled).
 						Label(labelOr(o.TrailingLabel, "Action")).
 						TextColor(variationInk)
-					AttachRipple(c, trailing, StateLayerOptions{
+					attachRippleWithTheme(th, trailing, StateLayerOptions{
 						Color:    variationInk,
 						Radius:   20,
 						Disabled: disabled,
@@ -303,17 +302,22 @@ func buildTextField(c *ui.Context, value *string, multiline bool, o TextFieldOpt
 	})
 
 	focused := input.Focused()
-	composing := input.Composing()
-	floated := focused || *value != "" || composing
+	floated := false
 	if o.Label == "" {
 		// Without a label the placeholder is the only cue and always shows.
 		input.Placeholder(o.Placeholder)
-	} else if floated {
-		input.Placeholder(o.Placeholder)
+	} else {
+		floated = focused || *value != "" || input.Composing()
+		if floated {
+			input.Placeholder(o.Placeholder)
+		}
 	}
 
-	labelT := clampF32(field.AnimateTo(textFieldLabelKey{}, boolFloat(floated), spatial), 0, 1.1)
-	indicatorT := clampF32(field.AnimateTo(textFieldIndicatorKey{}, boolFloat(focused && !disabled), effects), 0, 1)
+	var labelT float32
+	if o.Label != "" {
+		labelT = clampF32(animateValue(field, textFieldLabelKey{}, boolFloat(floated), spatial, th.ReduceMotion), 0, 1.1)
+	}
+	indicatorT := clampF32(animateValue(field, textFieldIndicatorKey{}, boolFloat(focused && !disabled), effects, th.ReduceMotion), 0, 1)
 
 	if field.Clicked() && !disabled {
 		// Any part of the field, its padding and its floating label too,
@@ -484,12 +488,12 @@ func buildTextField(c *ui.Context, value *string, multiline bool, o TextFieldOpt
 				AlignItems(ui.Center)
 			row.Children(func() {
 				if text != "" {
-					ApplyTypeStyle(c, ui.Text(c, text).NoWrap().Grow(1).TextColor(textColor).AccessHidden(true), tokens.BodySmall)
+					applyTypeStyleWithTheme(th, ui.Text(c, text).NoWrap().Grow(1).TextColor(textColor).AccessHidden(true), tokens.BodySmall)
 				} else {
 					ui.Box(c).Grow(1)
 				}
 				if counter != "" {
-					ApplyTypeStyle(c, ui.Text(c, counter).NoWrap().Shrink(0).TextColor(textColor).AccessHidden(true), tokens.BodySmall)
+					applyTypeStyleWithTheme(th, ui.Text(c, counter).NoWrap().Shrink(0).TextColor(textColor).AccessHidden(true), tokens.BodySmall)
 				}
 			})
 		})

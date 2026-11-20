@@ -1,6 +1,8 @@
 package md3e
 
 import (
+	"time"
+
 	"github.com/egoist/mygo/ui"
 
 	"mygo-md3e/internal/mdicon"
@@ -114,14 +116,12 @@ func Switch(c *ui.Context, on *bool, opts ...SwitchOptions) ui.Element {
 	}
 
 	onNow := *on
+	thReduceMotion := th.ReduceMotion
 	effects := th.Animation(motion.FastEffects)
 	spatial := th.Animation(motion.FastSpatial)
-	if th.ReduceMotion {
-		effects, spatial = motion.Snap, motion.Snap
-	}
 
-	onP := el.AnimateTo(switchOnKey{}, boolFloat(onNow), effects)
-	pos := el.AnimateTo(switchPosKey{}, boolFloat(onNow), spatial)
+	onP := animateValue(el, switchOnKey{}, boolFloat(onNow), effects, thReduceMotion)
+	pos := animateValue(el, switchPosKey{}, boolFloat(onNow), spatial, thReduceMotion)
 	offSize := float32(switchThumbOff)
 	if o.OffIcon != nil {
 		offSize = switchThumbOn
@@ -130,23 +130,13 @@ func Switch(c *ui.Context, on *bool, opts ...SwitchOptions) ui.Element {
 	if onNow {
 		thumbTarget = switchThumbOn
 	}
-	pressed := el.Pressed()
+	pressed := !disabled && el.Pressed()
 	if pressed {
 		thumbTarget = switchThumbPressed
 	}
-	thumbSize := el.AnimateTo(switchThumbKey{}, thumbTarget, spatial)
+	thumbSize := animateValue(el, switchThumbKey{}, thumbTarget, spatial, thReduceMotion)
 
-	haloTarget := float32(0)
-	switch {
-	case disabled:
-	case pressed:
-		haloTarget = float32(tokens.StatePressedOpacity)
-	case el.FocusVisible():
-		haloTarget = float32(tokens.StateFocusOpacity)
-	case el.Hovered():
-		haloTarget = float32(tokens.StateHoverOpacity)
-	}
-	halo := el.AnimateTo(switchHaloKey{}, haloTarget, effects)
+	haloSt := ui.Local(el, switchHaloKey{}, func() haloFadeState { return haloFadeState{} })
 
 	onIcon := o.OnIcon
 	if onIcon == nil {
@@ -155,29 +145,45 @@ func Switch(c *ui.Context, on *bool, opts ...SwitchOptions) ui.Element {
 	offIcon := o.OffIcon
 	rtl := c.Direction() == ui.RightToLeft
 	haloInk := cs.OnSurfaceVariant
+	paintSnap := switchPaint{
+		onP:        clampF32(onP, 0, 1),
+		pos:        clampF32(pos, 0, 1),
+		thumb:      clampF32(thumbSize, 0, switchTrackHeight),
+		haloInk:    haloInk,
+		onTrack:    onTrack,
+		offTrack:   offTrack,
+		onThumb:    onThumb,
+		offThumb:   offThumb,
+		offBorder:  offBorder,
+		onIcon:     onIcon,
+		offIcon:    offIcon,
+		onIconInk:  onIconInk,
+		offIconInk: offIconInk,
+		rtl:        rtl,
+	}
 
 	el.Children(func() {
 		ui.Box(c).Size(switchTrackWidth, switchTrackHeight).Shrink(0).Draw(func(p *ui.Painter, r ui.Rect) {
-			drawSwitch(p, r, switchPaint{
-				onP:        clampF32(onP, 0, 1),
-				pos:        clampF32(pos, 0, 1),
-				thumb:      clampF32(thumbSize, 0, switchTrackHeight),
-				halo:       clampF32(halo, 0, 1),
-				haloInk:    haloInk,
-				onTrack:    onTrack,
-				offTrack:   offTrack,
-				onThumb:    onThumb,
-				offThumb:   offThumb,
-				offBorder:  offBorder,
-				onIcon:     onIcon,
-				offIcon:    offIcon,
-				onIconInk:  onIconInk,
-				offIconInk: offIconInk,
-				rtl:        rtl,
-			})
+			if !el.Valid() {
+				return
+			}
+			hovered := el.Hovered() && !disabled
+			pressedDraw := !disabled && (pressed || el.Pressed())
+			focusedDraw := !disabled && el.FocusVisible()
+			targetHalo := resolveStateLayerTarget(disabled, false, pressedDraw, true, focusedDraw, hovered)
+			if disabled {
+				haloSt.reset()
+			}
+			halo, needFrame := haloSt.step(targetHalo, p.Now(), thReduceMotion || p.Preferences().ReduceMotion)
+			if needFrame {
+				p.After(16 * time.Millisecond)
+			}
+			paintCfg := paintSnap
+			paintCfg.halo = clampF32(halo, 0, 1)
+			drawSwitch(p, r, paintCfg)
 		})
 		if o.Label != "" {
-			ApplyTypeStyle(c, ui.Text(c, o.Label).NoWrap().TextColor(ink), tokens.LabelLarge)
+			applyTypeStyleWithTheme(th, ui.Text(c, o.Label).NoWrap().TextColor(ink), tokens.LabelLarge)
 		}
 	})
 	return el
@@ -210,7 +216,7 @@ func drawSwitch(p *ui.Painter, r ui.Rect, s switchPaint) {
 	}
 	radius := float32(switchTrackHeight) / 2
 	cy := r.Y + r.H/2
-	track := s.offTrack.Mix(s.onTrack, s.onP)
+	track := s.offTrack.MixOklab(s.onTrack, s.onP)
 	p.Fill(r, track, radius)
 	if borderA := 1 - s.onP; borderA > 0.01 && s.offBorder.A > 0 {
 		p.Stroke(r, s.offBorder, radius, 2)
@@ -230,7 +236,7 @@ func drawSwitch(p *ui.Painter, r ui.Rect, s switchPaint) {
 
 	ts := s.thumb
 	thumb := ui.Rect{X: cx - ts/2, Y: cy - ts/2, W: ts, H: ts}
-	thumbInk := s.offThumb.Mix(s.onThumb, s.onP)
+	thumbInk := s.offThumb.MixOklab(s.onThumb, s.onP)
 	p.Fill(thumb, thumbInk, ts/2)
 
 	iconSide := float32(16)

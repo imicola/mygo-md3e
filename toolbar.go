@@ -184,7 +184,7 @@ func floatingToolbarBar(c *ui.Context, items []FloatingToolbarItem, o FloatingTo
 		shown = min(shown, 1)
 	}
 	length := float32(floatingToolbarPadding*2 + shown*floatingToolbarItem + max(shown-1, 0)*floatingToolbarGap)
-	animated := bar.AnimateTo(toolbarLengthKey{}, length, th.Animation(motion.DefaultSpatial))
+	animated := animateWithTheme(bar, th, toolbarLengthKey{}, length, motion.DefaultSpatial)
 	if o.Orientation == ToolbarVertical {
 		bar.Height(animated)
 	} else {
@@ -196,8 +196,8 @@ func floatingToolbarBar(c *ui.Context, items []FloatingToolbarItem, o FloatingTo
 		if !visible {
 			scaleTarget, fadeTarget = 0.6, 0
 		}
-		scale := bar.AnimateTo(toolbarScaleKey{}, scaleTarget, th.Animation(motion.FastSpatial))
-		fade := bar.AnimateTo(toolbarFadeKey{}, fadeTarget, th.Animation(motion.FastEffects))
+		scale := animateWithTheme(bar, th, toolbarScaleKey{}, scaleTarget, motion.FastSpatial)
+		fade := animateWithTheme(bar, th, toolbarFadeKey{}, fadeTarget, motion.FastEffects)
 		bar.Scale(scale, scale).Opacity(fade)
 		if !visible {
 			bar.Disabled(true)
@@ -226,7 +226,7 @@ func floatingToolbarBar(c *ui.Context, items []FloatingToolbarItem, o FloatingTo
 				itemInk = ink.Alpha(float32(tokens.DisabledContentOpacity))
 			}
 			btn.Disabled(item.Disabled).TextColor(itemInk).Radius(floatingToolbarItem / 2)
-			AttachRipple(c, btn, StateLayerOptions{
+			attachRippleWithTheme(th, btn, StateLayerOptions{
 				Color:    itemInk,
 				Radius:   floatingToolbarItem / 2,
 				Disabled: disabled,

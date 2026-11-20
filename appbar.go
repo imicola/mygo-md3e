@@ -260,7 +260,7 @@ func appBarIconSide(c *ui.Context, th *Theme, label string, icon IconDraw, onCli
 		ink = ink.Alpha(float32(tokens.DisabledContentOpacity))
 	}
 	btn.Disabled(disabled).TextColor(ink).Radius(appBarIconSize / 2)
-	AttachRipple(c, btn, StateLayerOptions{Color: ink, Radius: appBarIconSize / 2, Disabled: disabled})
+	attachRippleWithTheme(th, btn, StateLayerOptions{Color: ink, Radius: appBarIconSize / 2, Disabled: disabled})
 	clicked := btn.Clicked()
 	btn.Children(func() {
 		drawIconBox(c, icon, 24, ink)
@@ -378,7 +378,7 @@ func SearchAppBar(c *ui.Context, query *string, opts ...SearchAppBarOptions) ui.
 				Label(leadingLabel)
 			leadingDisabled := disabled || btn.IsDisabled()
 			btn.Disabled(o.Disabled).TextColor(fieldInk).Radius(appBarIconSize / 2)
-			AttachRipple(c, btn, StateLayerOptions{Color: fieldInk, Radius: appBarIconSize / 2, Disabled: leadingDisabled})
+			attachRippleWithTheme(th, btn, StateLayerOptions{Color: fieldInk, Radius: appBarIconSize / 2, Disabled: leadingDisabled})
 			clicked := btn.Clicked()
 			btn.Children(func() {
 				drawIconBox(c, leadingIcon, 24, fieldInk)
@@ -400,7 +400,7 @@ func SearchAppBar(c *ui.Context, query *string, opts ...SearchAppBarOptions) ui.
 			TextColor(fieldInk).
 			CaretColor(cs.Primary).
 			Disabled(o.Disabled)
-		ApplyTypeStyle(c, input, tokens.BodyLarge, false)
+		applyTypeStyleWithTheme(th, input, tokens.BodyLarge, false)
 		if o.AutoFocus {
 			input.AutoFocus()
 		}
@@ -414,7 +414,7 @@ func SearchAppBar(c *ui.Context, query *string, opts ...SearchAppBarOptions) ui.
 				Size(appBarIconSize, appBarIconSize).
 				Label("Clear search")
 			clear.Disabled(o.Disabled).TextColor(fieldInk).Radius(appBarIconSize / 2)
-			AttachRipple(c, clear, StateLayerOptions{Color: fieldInk, Radius: appBarIconSize / 2, Disabled: o.Disabled})
+			attachRippleWithTheme(th, clear, StateLayerOptions{Color: fieldInk, Radius: appBarIconSize / 2, Disabled: o.Disabled})
 			clicked := clear.Clicked()
 			clear.Children(func() {
 				drawIconBox(c, mdicon.Clear.Draw, 24, fieldInk)

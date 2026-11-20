@@ -120,7 +120,7 @@ func buildActionChip(c *ui.Context, label string, o ChipOptions, panicMsg string
 	if pal.border.A > 0 {
 		borderInset = 1
 	}
-	AttachRipple(c, el, StateLayerOptions{
+	attachRippleWithTheme(th, el, StateLayerOptions{
 		Color:       pal.content,
 		Radius:      chipRadius,
 		BorderInset: borderInset,
@@ -134,7 +134,7 @@ func buildActionChip(c *ui.Context, label string, o ChipOptions, panicMsg string
 		if o.LeadingIcon != nil {
 			drawIconBox(c, o.LeadingIcon, chipIconSize, pal.icon)
 		}
-		ApplyTypeStyle(c, ui.Text(c, label).NoWrap().Shrink(0).TextColor(pal.content), tokens.LabelLarge)
+		applyTypeStyleWithTheme(th, ui.Text(c, label).NoWrap().Shrink(0).TextColor(pal.content), tokens.LabelLarge)
 		if o.TrailingIcon != nil {
 			drawIconBox(c, o.TrailingIcon, chipIconSize, pal.icon)
 		}
@@ -226,11 +226,8 @@ func FilterChip(c *ui.Context, selected *bool, label string, opts ...FilterChipO
 
 	spatial := th.Animation(motion.FastSpatial)
 	effects := th.Animation(motion.FastEffects)
-	if th.ReduceMotion {
-		spatial, effects = motion.Snap, motion.Snap
-	}
-	selectT := clampF32(el.AnimateTo(filterSelectKey{}, boolFloat(*selected), effects), 0, 1)
-	checkT := clampF32(el.AnimateTo(filterCheckKey{}, boolFloat(*selected), spatial), 0, 1.1)
+	selectT := clampF32(animateValue(el, filterSelectKey{}, boolFloat(*selected), effects, th.ReduceMotion), 0, 1)
+	checkT := clampF32(animateValue(el, filterCheckKey{}, boolFloat(*selected), spatial, th.ReduceMotion), 0, 1.1)
 
 	if o.Elevated && !disabled {
 		ApplyElevationShadows(th, el, tokens.Level1)
@@ -239,8 +236,10 @@ func FilterChip(c *ui.Context, selected *bool, label string, opts ...FilterChipO
 	el.Draw(func(p *ui.Painter, r ui.Rect) {
 		drawFilterChip(p, r, selectT, pal)
 	})
-	AttachRipple(c, el, StateLayerOptions{
-		Color:    pal.content.Mix(pal.selectedContent, selectT),
+	content := pal.content.MixOklab(pal.selectedContent, selectT)
+	iconColor := pal.icon.MixOklab(pal.selectedContent, selectT)
+	attachRippleWithTheme(th, el, StateLayerOptions{
+		Color:    content,
 		Radius:   chipRadius,
 		Disabled: disabled,
 	})
@@ -248,8 +247,6 @@ func FilterChip(c *ui.Context, selected *bool, label string, opts ...FilterChipO
 	name := labelOr(o.Label, label)
 	el.Label(name)
 	changed := el.Changed()
-	content := pal.content.Mix(pal.selectedContent, selectT)
-	iconColor := pal.icon.Mix(pal.selectedContent, selectT)
 	showIcon := o.LeadingIcon != nil || checkT > 0.001
 	el.Children(func() {
 		if showIcon {
@@ -268,7 +265,7 @@ func FilterChip(c *ui.Context, selected *bool, label string, opts ...FilterChipO
 				}
 			})
 		}
-		ApplyTypeStyle(c, ui.Text(c, label).NoWrap().Shrink(0).TextColor(content), tokens.LabelLarge)
+		applyTypeStyleWithTheme(th, ui.Text(c, label).NoWrap().Shrink(0).TextColor(content), tokens.LabelLarge)
 		if o.TrailingIcon != nil {
 			drawIconBox(c, o.TrailingIcon, chipIconSize, iconColor)
 		}
@@ -393,7 +390,7 @@ func InputChip(c *ui.Context, label string, opts ...InputChipOptions) ui.Element
 			PaddingEnd(4).
 			Label(labelOr(o.Label, label))
 		body.TextColor(bodyInk)
-		AttachRipple(c, body, StateLayerOptions{
+		attachRippleWithTheme(th, body, StateLayerOptions{
 			Color:    bodyInk,
 			Radii:    bodyRadii,
 			HasRadii: true,
@@ -415,7 +412,7 @@ func InputChip(c *ui.Context, label string, opts ...InputChipOptions) ui.Element
 					o.LeadingIcon(p, r, iconInk)
 				})
 			}
-			ApplyTypeStyle(c, ui.Text(c, label).NoWrap().Shrink(0).TextColor(bodyInk), tokens.LabelLarge)
+			applyTypeStyleWithTheme(th, ui.Text(c, label).NoWrap().Shrink(0).TextColor(bodyInk), tokens.LabelLarge)
 			if o.TrailingIcon != nil {
 				drawIconBox(c, o.TrailingIcon, chipIconSize, iconInk)
 			}
@@ -429,7 +426,7 @@ func InputChip(c *ui.Context, label string, opts ...InputChipOptions) ui.Element
 			Disabled(disabled).
 			Label(removeLabel).
 			TextColor(closeInk)
-		AttachRipple(c, closeEl, StateLayerOptions{
+		attachRippleWithTheme(th, closeEl, StateLayerOptions{
 			Color:    closeInk,
 			Radii:    closeRadii,
 			HasRadii: true,

@@ -756,3 +756,153 @@ func TestRangeSliderClampOrderAndCoincidentCenterDragLTRAndRTL(t *testing.T) {
 		t.Fatalf("RTL right drag from coincident center gave low=%v high=%v, want low<50 high=50", low, high)
 	}
 }
+
+func TestSlidersHoverZeroRebuildsAndSettles(t *testing.T) {
+	t.Run("slider", func(t *testing.T) {
+		builds := 0
+		val := 50.0
+		tt := ui.NewTester(func(c *ui.Context) {
+			builds++
+			ThemeScope(c, nil, func() {
+				ui.Box(c).Size(340, 120).Background(ui.RGB(255, 255, 255)).Padding(20).Children(func() {
+					Slider(c, &val, 0, 100, SliderOptions{Label: "Vol"})
+				})
+			})
+		}, 340, 120)
+
+		b := buttonInfo(t, tt, ui.RoleSlider, "Vol").Bounds
+		cx, cy := sliderX(b, 0.5), b.Y+b.H/2
+		b0 := builds
+
+		tt.Move(cx, cy)
+		if builds > b0+1 {
+			t.Fatalf("Slider hover enter caused %d builds (expected at most 1 Tester settle build)", builds-b0)
+		}
+		afterEnter := builds
+		tt.Advance(300 * time.Millisecond)
+		if builds != afterEnter {
+			t.Fatalf("Slider hover settle caused %d rebuilds during Advance, want 0", builds-afterEnter)
+		}
+		if tt.FramePending() {
+			t.Fatal("Slider hover halo did not settle")
+		}
+		// Halo ring around thumb must visibly tint white canvas above track.
+		if px := tt.Image().RGBAAt(int(cx+8), int(cy-12)); px.R >= 253 {
+			t.Fatalf("expected Slider hover halo above track, got %+v", px)
+		}
+
+		tt.Move(2, 2)
+		if builds > afterEnter+1 {
+			t.Fatalf("Slider hover leave caused %d builds (expected at most 1 Tester settle build)", builds-afterEnter)
+		}
+		afterLeave := builds
+		tt.Advance(300 * time.Millisecond)
+		if builds != afterLeave {
+			t.Fatalf("Slider hover leave settle caused %d rebuilds during Advance, want 0", builds-afterLeave)
+		}
+		if tt.FramePending() {
+			t.Fatal("Slider hover leave did not settle")
+		}
+
+		tt.SetPreferences(ui.Preferences{ReduceMotion: true})
+		bRM := builds
+		tt.Move(cx, cy)
+		if tt.FramePending() {
+			t.Fatal("ReduceMotion Slider hover enter left frames pending")
+		}
+		if builds > bRM+1 {
+			t.Fatalf("ReduceMotion Slider hover enter caused %d builds", builds-bRM)
+		}
+		bRM2 := builds
+		tt.Move(2, 2)
+		if tt.FramePending() {
+			t.Fatal("ReduceMotion Slider hover leave left frames pending")
+		}
+		if builds > bRM2+1 {
+			t.Fatalf("ReduceMotion Slider hover leave caused %d builds", builds-bRM2)
+		}
+	})
+
+	t.Run("range-slider", func(t *testing.T) {
+		builds := 0
+		low, high := 25.0, 75.0
+		tt := ui.NewTester(func(c *ui.Context) {
+			builds++
+			ThemeScope(c, nil, func() {
+				ui.Box(c).Size(340, 120).Background(ui.RGB(255, 255, 255)).Padding(20).Children(func() {
+					RangeSlider(c, &low, &high, 0, 100, RangeSliderOptions{Label: "Range"})
+				})
+			})
+		}, 340, 120)
+
+		gb := buttonInfo(t, tt, ui.RoleGroup, "Range").Bounds
+		lx, hx, cy := sliderX(gb, 0.25), sliderX(gb, 0.75), gb.Y+gb.H/2
+		b0 := builds
+
+		tt.Move(lx, cy)
+		if builds > b0+1 {
+			t.Fatalf("RangeSlider Min hover enter caused %d builds (expected at most 1 Tester settle build)", builds-b0)
+		}
+		afterMin := builds
+		tt.Advance(300 * time.Millisecond)
+		if builds != afterMin {
+			t.Fatalf("RangeSlider Min handle hover caused %d rebuilds during Advance, want 0", builds-afterMin)
+		}
+		if tt.FramePending() {
+			t.Fatal("RangeSlider Min hover did not settle")
+		}
+		if px := tt.Image().RGBAAt(int(lx+8), int(cy-12)); px.R >= 253 {
+			t.Fatalf("expected RangeSlider Min hover halo above track, got %+v", px)
+		}
+
+		tt.Move(hx, cy)
+		if builds > afterMin+1 {
+			t.Fatalf("RangeSlider Max hover enter caused %d builds (expected at most 1 Tester settle build)", builds-afterMin)
+		}
+		afterMax := builds
+		tt.Advance(300 * time.Millisecond)
+		if builds != afterMax {
+			t.Fatalf("RangeSlider Max handle hover caused %d rebuilds during Advance, want 0", builds-afterMax)
+		}
+		if tt.FramePending() {
+			t.Fatal("RangeSlider Max hover did not settle")
+		}
+		if px := tt.Image().RGBAAt(int(hx+8), int(cy-12)); px.R >= 253 {
+			t.Fatalf("expected RangeSlider Max hover halo above track, got %+v", px)
+		}
+
+		tt.Move(2, 2)
+		if builds > afterMax+1 {
+			t.Fatalf("RangeSlider hover leave caused %d builds (expected at most 1 Tester settle build)", builds-afterMax)
+		}
+		afterLeave := builds
+		tt.Advance(300 * time.Millisecond)
+		if builds != afterLeave {
+			t.Fatalf("RangeSlider hover leave caused %d rebuilds during Advance, want 0", builds-afterLeave)
+		}
+		if tt.FramePending() {
+			t.Fatal("RangeSlider hover leave did not settle")
+		}
+		if px := tt.Image().RGBAAt(int(hx+8), int(cy-12)); px.R < 254 {
+			t.Fatalf("RangeSlider Max halo lingered after hover leave: %+v", px)
+		}
+
+		tt.SetPreferences(ui.Preferences{ReduceMotion: true})
+		bRM := builds
+		tt.Move(lx, cy)
+		if tt.FramePending() {
+			t.Fatal("ReduceMotion RangeSlider hover enter left frames pending")
+		}
+		if builds > bRM+1 {
+			t.Fatalf("ReduceMotion RangeSlider hover enter caused %d builds", builds-bRM)
+		}
+		bRM2 := builds
+		tt.Move(2, 2)
+		if tt.FramePending() {
+			t.Fatal("ReduceMotion RangeSlider hover leave left frames pending")
+		}
+		if builds > bRM2+1 {
+			t.Fatalf("ReduceMotion RangeSlider hover leave caused %d builds", builds-bRM2)
+		}
+	})
+}

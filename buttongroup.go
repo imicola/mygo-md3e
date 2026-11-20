@@ -191,7 +191,7 @@ func buildButtonGroup(c *ui.Context, items []ButtonGroupItem, o ButtonGroupOptio
 			// The Standard group widens the pressed button with the Fast
 			// Spatial spring, its neighbors giving way by the same total.
 			if o.Kind == ButtonGroupStandard {
-				expand := el.AnimateTo(groupStateKey{}, groupExpandTarget(pressed[i], anyPressed, n), th.Animation(motion.FastSpatial))
+				expand := animateWithTheme(el, th, groupStateKey{}, groupExpandTarget(pressed[i], anyPressed, n), motion.FastSpatial)
 				el.PaddingX(max(pad+expand, 0))
 			}
 
@@ -216,7 +216,7 @@ func buildButtonGroup(c *ui.Context, items []ButtonGroupItem, o ButtonGroupOptio
 			}
 			var radii [4]float32
 			for k := 0; k < 4; k++ {
-				radii[k] = el.AnimateTo(groupCornerKey{i: k}, target[k], th.Animation(motion.FastSpatial))
+				radii[k] = animateWithTheme(el, th, groupCornerKey{i: k}, target[k], motion.FastSpatial)
 			}
 			el.Radius(radii[0], radii[1], radii[2], radii[3])
 
@@ -224,7 +224,7 @@ func buildButtonGroup(c *ui.Context, items []ButtonGroupItem, o ButtonGroupOptio
 			if pal.border.A > 0 {
 				borderInset = 1
 			}
-			AttachRipple(c, el, StateLayerOptions{
+			attachRippleWithTheme(th, el, StateLayerOptions{
 				Color:       pal.content,
 				Radii:       radii,
 				HasRadii:    true,
@@ -238,7 +238,7 @@ func buildButtonGroup(c *ui.Context, items []ButtonGroupItem, o ButtonGroupOptio
 					drawIconBox(c, item.LeadingIcon, float32(spec.IconSize), pal.content)
 				}
 				if item.Label != "" {
-					ApplyTypeStyle(c, ui.Text(c, item.Label).NoWrap(), buttonTypeRole(o.Size))
+					applyTypeStyleWithTheme(th, ui.Text(c, item.Label).NoWrap(), buttonTypeRole(o.Size))
 				}
 				if item.TrailingIcon != nil {
 					drawIconBox(c, item.TrailingIcon, float32(spec.IconSize), pal.content)

@@ -706,3 +706,44 @@ func TestSearchAppBarClearDisappearPreservesTrailingFocus(t *testing.T) {
 		t.Fatal("SearchAppBar trailing button lost focus when Clear button disappeared")
 	}
 }
+
+func TestToolbarRapidToggleAndMidAnimationReduceMotion(t *testing.T) {
+	expanded := true
+	visible := true
+	var clicks [2]int
+	tt := ui.NewTester(func(c *ui.Context) {
+		ThemeScope(c, nil, func() {
+			ui.Box(c).Size(420, 160).Padding(20).Children(func() {
+				FloatingToolbar(c, toolbarItems(&clicks), FloatingToolbarOptions{
+					Label:    "Tools",
+					Expanded: &expanded,
+					Visible:  &visible,
+				})
+			})
+		})
+	}, 420, 160)
+
+	fullW := buttonInfo(t, tt, ui.RoleToolbar, "Tools").Bounds.W
+
+	expanded = false
+	tt.Frame()
+	tt.Advance(24 * time.Millisecond)
+	expanded = true
+	tt.Frame()
+	tt.Advance(24 * time.Millisecond)
+	expanded = false
+	visible = false
+	tt.Frame()
+	tt.Advance(16 * time.Millisecond)
+
+	tt.SetPreferences(ui.Preferences{ReduceMotion: true})
+	tt.Frame()
+	tt.Advance(300 * time.Millisecond)
+	if tt.FramePending() {
+		t.Fatal("mid-flight ReduceMotion switch left FloatingToolbar animations pending")
+	}
+	collapsedW := buttonInfo(t, tt, ui.RoleToolbar, "Tools").Bounds.W
+	if collapsedW >= fullW {
+		t.Fatalf("FloatingToolbar did not converge to collapsed width: got=%v full=%v", collapsedW, fullW)
+	}
+}

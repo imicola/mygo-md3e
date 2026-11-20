@@ -1,6 +1,8 @@
 package md3e
 
 import (
+	"time"
+
 	"github.com/egoist/mygo/ui"
 
 	"mygo-md3e/motion"
@@ -168,44 +170,48 @@ func buildCheckbox(c *ui.Context, el ui.Element, on, mixed bool, o CheckboxOptio
 		border = cs.OnSurface.Alpha(float32(tokens.DisabledContentOpacity))
 	}
 
+	thReduceMotion := th.ReduceMotion
 	effects := th.Animation(motion.FastEffects)
 	spatial := th.Animation(motion.FastSpatial)
-	if th.ReduceMotion {
-		effects, spatial = motion.Snap, motion.Snap
-	}
-	fill := el.AnimateTo(checkboxFillKey{}, boolFloat(on || mixed), effects)
-	check := el.AnimateTo(checkboxCheckKey{}, boolFloat(on), spatial)
-	dash := el.AnimateTo(checkboxMixedKey{}, boolFloat(mixed), spatial)
+	fill := animateValue(el, checkboxFillKey{}, boolFloat(on || mixed), effects, thReduceMotion)
+	check := animateValue(el, checkboxCheckKey{}, boolFloat(on), spatial, thReduceMotion)
+	dash := animateValue(el, checkboxMixedKey{}, boolFloat(mixed), spatial, thReduceMotion)
 
-	haloTarget := float32(0)
-	switch {
-	case disabled:
-	case el.Pressed():
-		haloTarget = float32(tokens.StatePressedOpacity)
-	case el.FocusVisible():
-		haloTarget = float32(tokens.StateFocusOpacity)
-	case el.Hovered():
-		haloTarget = float32(tokens.StateHoverOpacity)
-	}
-	halo := el.AnimateTo(checkboxHaloKey{}, haloTarget, effects)
+	haloSt := ui.Local(el, checkboxHaloKey{}, func() haloFadeState { return haloFadeState{} })
 	haloInk := cs.OnSurfaceVariant
+	paintSnap := checkboxPaint{
+		fill:    clampF32(fill, 0, 1),
+		check:   clampF32(check, 0, 1),
+		dash:    clampF32(dash, 0, 1),
+		haloInk: haloInk,
+		bgOff:   bgOff,
+		bgOn:    bgOn,
+		border:  border,
+		ink:     content,
+	}
 
 	el.Children(func() {
 		ui.Box(c).Size(target, target).Shrink(0).Draw(func(p *ui.Painter, r ui.Rect) {
-			drawCheckbox(p, r, checkboxPaint{
-				fill:    clampF32(fill, 0, 1),
-				check:   clampF32(check, 0, 1),
-				dash:    clampF32(dash, 0, 1),
-				halo:    clampF32(halo, 0, 1),
-				haloInk: haloInk,
-				bgOff:   bgOff,
-				bgOn:    bgOn,
-				border:  border,
-				ink:     content,
-			})
+			if !el.Valid() {
+				return
+			}
+			hovered := el.Hovered() && !disabled
+			pressed := !disabled && el.Pressed()
+			focused := !disabled && el.FocusVisible()
+			targetHalo := resolveStateLayerTarget(disabled, false, pressed, true, focused, hovered)
+			if disabled {
+				haloSt.reset()
+			}
+			halo, needFrame := haloSt.step(targetHalo, p.Now(), thReduceMotion || p.Preferences().ReduceMotion)
+			if needFrame {
+				p.After(16 * time.Millisecond)
+			}
+			paintCfg := paintSnap
+			paintCfg.halo = clampF32(halo, 0, 1)
+			drawCheckbox(p, r, paintCfg)
 		})
 		if o.Label != "" {
-			ApplyTypeStyle(c, ui.Text(c, o.Label).NoWrap().TextColor(ink), tokens.LabelLarge)
+			applyTypeStyleWithTheme(th, ui.Text(c, o.Label).NoWrap().TextColor(ink), tokens.LabelLarge)
 		}
 	})
 	return el
@@ -222,7 +228,7 @@ func drawCheckbox(p *ui.Painter, r ui.Rect, s checkboxPaint) {
 	paintHalo(p, cx, cy, checkboxHaloDiameter/2, s.haloInk, s.halo)
 
 	box := ui.Rect{X: cx - side/2, Y: cy - side/2, W: side, H: side}
-	bg := s.bgOff.Mix(s.bgOn, s.fill)
+	bg := s.bgOff.MixOklab(s.bgOn, s.fill)
 	if bg.A > 0 {
 		p.Fill(box, bg, checkboxBoxRadius)
 	}

@@ -164,10 +164,10 @@ func FAB(c *ui.Context, label string, icon IconDraw, opts ...FABOptions) ui.Elem
 	if el.Pressed() {
 		radius = spec.PressedRadius
 	}
-	corner := el.AnimateTo(fabCornerKey{}, radius, th.Animation(motion.FastSpatial))
+	corner := animateWithTheme(el, th, fabCornerKey{}, radius, motion.FastSpatial)
 	el.Radius(corner)
 
-	AttachRipple(c, el, StateLayerOptions{
+	attachRippleWithTheme(th, el, StateLayerOptions{
 		Color:    pal.content,
 		Radius:   corner,
 		Disabled: disabled,
@@ -178,8 +178,8 @@ func FAB(c *ui.Context, label string, icon IconDraw, opts ...FABOptions) ui.Elem
 		if !visible {
 			scaleTarget, fadeTarget = 0.6, 0
 		}
-		scale := el.AnimateTo(fabScaleKey{}, scaleTarget, th.Animation(motion.DefaultSpatial))
-		fade := el.AnimateTo(fabFadeKey{}, fadeTarget, th.Animation(motion.FastEffects))
+		scale := animateWithTheme(el, th, fabScaleKey{}, scaleTarget, motion.DefaultSpatial)
+		fade := animateWithTheme(el, th, fabFadeKey{}, fadeTarget, motion.FastEffects)
 		el.Scale(scale, scale).Opacity(fade)
 	}
 
@@ -290,12 +290,12 @@ func ExtendedFAB(c *ui.Context, label string, icon IconDraw, opts ...ExtendedFAB
 		ApplyElevationShadows(th, el, elevation)
 	}
 
-	p := el.AnimateTo(extFabOpenKey{}, progress, th.Animation(motion.DefaultSpatial))
+	p := animateWithTheme(el, th, extFabOpenKey{}, progress, motion.DefaultSpatial)
 	radiusTarget := spec.Radius
 	if el.Pressed() {
 		radiusTarget = spec.PressedRadius
 	}
-	radius := el.AnimateTo(extFabRadiusKey{}, radiusTarget, th.Animation(motion.FastSpatial))
+	radius := animateWithTheme(el, th, extFabRadiusKey{}, radiusTarget, motion.FastSpatial)
 	el.Radius(radius)
 
 	// The width springs between the square icon-only button and the full
@@ -309,10 +309,10 @@ func ExtendedFAB(c *ui.Context, label string, icon IconDraw, opts ...ExtendedFAB
 	el.Width(width).PaddingX(pad).Gap(gapNow).Justify(ui.Start)
 	labelFade := float32(1)
 	if o.Expanded != nil {
-		labelFade = el.AnimateTo(extFabFadeKey{}, progress, th.Animation(motion.FastEffects))
+		labelFade = animateWithTheme(el, th, extFabFadeKey{}, progress, motion.FastEffects)
 	}
 
-	AttachRipple(c, el, StateLayerOptions{
+	attachRippleWithTheme(th, el, StateLayerOptions{
 		Color:    pal.content,
 		Radius:   radius,
 		Disabled: disabled,
@@ -322,7 +322,7 @@ func ExtendedFAB(c *ui.Context, label string, icon IconDraw, opts ...ExtendedFAB
 		if icon != nil {
 			drawIconBox(c, icon, spec.IconSize, pal.content)
 		}
-		name := ApplyTypeStyle(c, ui.Text(c, label).NoWrap().Shrink(0), role)
+		name := applyTypeStyleWithTheme(th, ui.Text(c, label).NoWrap().Shrink(0), role)
 		if o.Expanded != nil {
 			name.Opacity(labelFade)
 		}
