@@ -199,7 +199,7 @@
     - `splitbutton_test.go` 验证主动作点击与 Arrow 展开/收起状态、RTL 下的左右圆角镜像及无障碍角色树。
   - **Commit**：`feat(actions): [T4.3] implement Expressive ButtonGroup and morphing SplitButton`
 
-- [ ] **T4.4：实现 FAB、ExtendedFAB 与 FABMenu**
+- [x] **T4.4：实现 FAB、ExtendedFAB 与 FABMenu**
   - **交付物**：`fab.go`、`fabmenu.go`、`fab_test.go`
   - **核心能力**：
     - `FAB`（`SizeSmall` 40 / `SizeMedium` 56 / `SizeLarge` 96）与 `ExtendedFAB`（支持可折叠展开标签）；支持 `PrimaryContainer`/`SecondaryContainer`/`TertiaryContainer`/`Surface` 配色方案；
