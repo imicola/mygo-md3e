@@ -72,6 +72,10 @@ type listCornerKey struct{ i int }
 
 type listSelectKey struct{}
 
+// listTrailingKey gives the trailing slot a stable container identity, so a
+// Meta text appearing or disappearing never re-keys the control inside it.
+type listTrailingKey struct{}
+
 // List builds a Material Design 3 Expressive list: a ui.RoleList of
 // ui.RoleListItem rows, each with an optional overline, headline, supporting
 // text, leading slot (icon, avatar or control), trailing meta and control.
@@ -235,7 +239,9 @@ func listRow(c *ui.Context, th *Theme, item *ListItem, i, n int, o ListOptions) 
 		}
 		ui.Column(c).Grow(1).AlignItems(ui.Start).Gap(2).Children(func() {
 			if item.Overline != "" {
-				applyTypeStyleWithTheme(th, ui.Text(c, item.Overline).NoWrap(), tokens.LabelSmall)
+				over := ui.Text(c, item.Overline).NoWrap()
+				applyTypeStyleWithTheme(th, over, tokens.LabelSmall)
+				over.TextColor(supporting)
 			}
 			if item.Headline != "" {
 				h := ui.Text(c, item.Headline).NoWrap()
@@ -254,9 +260,12 @@ func listRow(c *ui.Context, th *Theme, item *ListItem, i, n int, o ListOptions) 
 			m.TextColor(supporting)
 		}
 		if item.Trailing != nil {
-			if el := item.Trailing(); el.Valid() {
-				el.Shrink(0)
-			}
+			slot := ui.Row(c).Key(listTrailingKey{}).Shrink(0).AlignItems(ui.Center)
+			slot.Children(func() {
+				if el := item.Trailing(); el.Valid() {
+					el.Shrink(0)
+				}
+			})
 		}
 	})
 	if clicked && !disabled {

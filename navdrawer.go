@@ -112,11 +112,9 @@ func modalNavigationDrawer(c *ui.Context, th *Theme, items []NavigationDrawerIte
 	if open == nil {
 		open = ui.Local(anchor, navDrawerOpenKey{}, func() bool { return false })
 	}
-	disabled := o.Disabled || anchor.IsDisabled()
-	if disabled {
-		*open = false
-	}
-	if !*open {
+	// A disabled drawer leaves the caller's open state alone: re-enabling it
+	// brings the drawer back as it was, rather than silently closing it.
+	if o.Disabled || anchor.IsDisabled() || !*open {
 		return anchor
 	}
 	rtl := c.Direction() == ui.RightToLeft
@@ -154,9 +152,12 @@ func modalNavigationDrawer(c *ui.Context, th *Theme, items []NavigationDrawerIte
 			var offset float32
 			reduce := th.ReduceMotion || c.Preferences().ReduceMotion
 			if dx, _, ok := panel.Dragged(); ok {
-				// Only drags toward the drawer's own edge move it.
-				if dx*sign > 0 {
-					*drag += dx
+				// Follow the pointer both ways, dragging out and back, but
+				// clamp movement past the open baseline so the panel never
+				// drifts away from the drawer's edge.
+				*drag += dx
+				if *drag*sign < 0 {
+					*drag = 0
 				}
 				offset = panel.Jump(navDrawerOffsetKey{}, *drag)
 			} else {
@@ -200,11 +201,14 @@ func inlineNavigationDrawer(c *ui.Context, th *Theme, items []NavigationDrawerIt
 	if *open {
 		target = width
 	}
-	root.Width(animateWithTheme(root, th, navDrawerWidthKey{}, target, motion.DefaultSpatial))
+	openWidth := animateWithTheme(root, th, navDrawerWidthKey{}, target, motion.DefaultSpatial)
+	root.Width(openWidth)
 	root.Disabled(o.Disabled)
 
-	// A closed drawer keeps its contents out of the focus order.
-	if *open {
+	// Keep the content clipped inside the shrinking panel while it animates
+	// closed, so no empty strip shows; once it has settled at zero width the
+	// contents leave the focus order and the access tree entirely.
+	if *open || openWidth > 0.5 {
 		root.Children(func() {
 			navDrawerContent(c, th, items, o)
 		})

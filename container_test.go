@@ -1,6 +1,7 @@
 package md3e
 
 import (
+	"math"
 	"sort"
 	"testing"
 	"time"
@@ -344,6 +345,74 @@ func TestSegmentedListReduceMotion(t *testing.T) {
 	}
 	if !pixelFilled(tt, int(beta.Bounds.X)+4, int(beta.Bounds.Y)+3) {
 		t.Fatal("the reduced-motion row did not settle back to its small corner")
+	}
+}
+
+// TestListTrailingSwitchKeepsItsPlace checks a trailing Switch keeps its own
+// identity and place as the row's Meta text comes and goes, and that using it
+// never chooses the row.
+func TestListTrailingSwitchKeepsItsPlace(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor)
+	selected := -1
+	clicks := 0
+	sync := false
+	meta := ""
+	build := func(c *ui.Context) {
+		list := List(c, []ListItem{
+			{
+				Headline: "Notifications",
+				Meta:     meta,
+				OnClick:  func() { clicks++ },
+				Trailing: func() ui.Element {
+					return Switch(c.Key("notifications-switch"), &sync, SwitchOptions{Label: "Sync"})
+				},
+			},
+			{Headline: "Bluetooth"},
+		}, ListOptions{Label: "Rows", Selected: &selected})
+		list.Width(320)
+	}
+	tt := containerCanvas(th, build)
+	tt.Advance(time.Second)
+	info, ok := tt.AccessByRole(ui.RoleSwitch, "Sync")
+	if !ok {
+		t.Fatal("the trailing switch is not in the access tree")
+	}
+	toggle := func(what string) {
+		t.Helper()
+		info, ok = tt.AccessByRole(ui.RoleSwitch, "Sync")
+		if !ok {
+			t.Fatalf("%s: the trailing switch left the access tree", what)
+		}
+		tt.ClickAt(info.Bounds.X+info.Bounds.W/2, info.Bounds.Y+info.Bounds.H/2)
+		tt.Advance(time.Second)
+	}
+	toggle("first click")
+	if !sync {
+		t.Fatal("clicking the trailing switch does not toggle it")
+	}
+	if clicks != 0 || selected != -1 {
+		t.Fatalf("the trailing switch chose the row (OnClick %d, selected %d)", clicks, selected)
+	}
+
+	meta = "2 devices"
+	tt.Frame()
+	tt.Advance(300 * time.Millisecond)
+	after, ok := tt.AccessByRole(ui.RoleSwitch, "Sync")
+	if !ok {
+		t.Fatal("showing Meta removed the trailing switch")
+	}
+	if math.Abs(float64(after.Bounds.X-info.Bounds.X)) > 0.5 {
+		t.Fatalf("Meta moved the switch from x %.1f to %.1f", info.Bounds.X, after.Bounds.X)
+	}
+	toggle("second click")
+	if sync {
+		t.Fatal("the trailing switch stopped responding after Meta appeared")
+	}
+	if clicks != 0 || selected != -1 {
+		t.Fatalf("the trailing switch chose the row after Meta appeared (OnClick %d, selected %d)", clicks, selected)
+	}
+	if tt.FramePending() {
+		t.Fatal("the list keeps asking for frames after the switch settles")
 	}
 }
 

@@ -150,6 +150,95 @@ func TestNavigationBarLabelsAndRTL(t *testing.T) {
 	}
 }
 
+// TestNavigationBarRTLArrowKeys checks the horizontal arrows mirror right to
+// left: Left moves to the next destination and Right to the previous one.
+func TestNavigationBarRTLArrowKeys(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor)
+	selected := 0
+	tt := navigationCanvas(th, 480, 320, navBar(&selected, nil, NavigationLabelsAlways))
+	tt.SetDirection(ui.RightToLeft)
+	tt.Advance(300 * time.Millisecond)
+
+	home := tabInfo(t, tt, "Home")
+	tt.ClickAt(home.Bounds.X+home.Bounds.W/2, home.Bounds.Y+home.Bounds.H/2)
+	if !tt.Focused("Home") {
+		t.Fatal("the right-to-left click does not focus the destination")
+	}
+	tt.Key(0, ui.KeyLeft)
+	if !tt.Focused("Search") {
+		t.Fatal("Left does not move to the next destination right to left")
+	}
+	tt.Key(0, ui.KeyLeft)
+	if !tt.Focused("Saved") {
+		t.Fatal("Left again does not move to the last destination")
+	}
+	tt.Key(0, ui.KeyRight)
+	if !tt.Focused("Search") {
+		t.Fatal("Right does not move back a destination right to left")
+	}
+	tt.Key(0, ui.KeyEnter)
+	tt.Advance(300 * time.Millisecond)
+	if selected != 1 {
+		t.Fatalf("Enter chose %d, want 1", selected)
+	}
+}
+
+// TestModalNavigationDrawerDisabledKeepsOpenState checks a disabled modal
+// drawer, by its option or by an ancestor, leaves the caller's open state
+// alone so that re-enabling it brings the drawer back.
+func TestModalNavigationDrawerDisabledKeepsOpenState(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor)
+	cases := []struct {
+		name  string
+		build func(c *ui.Context, open, disabled *bool)
+	}{
+		{
+			name: "option",
+			build: func(c *ui.Context, open, disabled *bool) {
+				NavigationDrawer(c, drawerItems(false), NavigationDrawerOptions{
+					Modal: true, Open: open, Label: "Drawer", Disabled: *disabled,
+				})
+			},
+		},
+		{
+			name: "ancestor",
+			build: func(c *ui.Context, open, disabled *bool) {
+				ui.Column(c).Disabled(*disabled).Children(func() {
+					NavigationDrawer(c, drawerItems(false), NavigationDrawerOptions{
+						Modal: true, Open: open, Label: "Drawer",
+					})
+				})
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			open := true
+			disabled := true
+			tt := navigationCanvas(th, 600, 400, func(c *ui.Context) {
+				tc.build(c, &open, &disabled)
+			})
+			tt.Frame()
+			if _, ok := tt.AccessByRole(ui.RoleDialog, "Drawer"); ok {
+				t.Fatal("a disabled drawer still shows")
+			}
+			if !open {
+				t.Fatal("disabling the drawer rewrote the caller's open state")
+			}
+
+			disabled = false
+			tt.Frame()
+			tt.Advance(300 * time.Millisecond)
+			if _, ok := tt.AccessByRole(ui.RoleDialog, "Drawer"); !ok {
+				t.Fatal("re-enabling does not restore the open drawer")
+			}
+			if !open {
+				t.Fatal("the restored drawer lost the caller's open state")
+			}
+		})
+	}
+}
+
 // TestNavigationRailExpandAndCollapse checks the 80 and 256 DIP widths, the
 // sprung transition settling, the header FAB slot, and selection.
 func TestNavigationRailExpandAndCollapse(t *testing.T) {
