@@ -338,7 +338,7 @@
     - `Carousel` 测试覆盖拖拽切换主焦点项后各槽位尺寸动态重分配并最终停止动画。
   - **Commit**：`feat(nav-media): [T7.3] implement sliding-indicator Tabs and Expressive Carousel`
 
-- [ ] **T7.4：实现 Dialog、BottomSheet 与 Expressive Menu**
+- [x] **T7.4：实现 Dialog、BottomSheet 与 Expressive Menu**
   - **交付物**：`dialog.go`、`sheet.go`、`menu.go`、`overlay_test.go`
   - **核心能力**：
     - `AlertDialog`（基于 `ui.DialogBase`：图标槽、大标题、正文、可滚动内容、Confirm/Dismiss 按钮区、弹簧缩放淡入淡出）与 `FullScreenDialog`（顶栏关闭与保存动作）；
