@@ -98,8 +98,8 @@ func loadingChainCrosses(cubics []shape.Cubic) (shape.Point, shape.Point, shape.
 	return shape.Point{}, shape.Point{}, shape.Point{}, shape.Point{}, false
 }
 
-// loadingBoxDiff counts the pixels of two frames that differ inside box.
-func loadingBoxDiff(a, b *image.RGBA, box ui.Rect) int {
+// indicatorBoxDiff counts the pixels of two frames that differ inside box.
+func indicatorBoxDiff(a, b *image.RGBA, box ui.Rect) int {
 	different := 0
 	for y := int(box.Y) + 1; y < int(box.Y+box.H)-1; y++ {
 		for x := int(box.X) + 1; x < int(box.X+box.W)-1; x++ {
@@ -112,8 +112,8 @@ func loadingBoxDiff(a, b *image.RGBA, box ui.Rect) int {
 	return different
 }
 
-// loadingOverflowPixels reports how many pixels around box paint outside it.
-func loadingOverflowPixels(img *image.RGBA, box ui.Rect) int {
+// indicatorOverflowPixels reports how many pixels around box paint outside it.
+func indicatorOverflowPixels(img *image.RGBA, box ui.Rect) int {
 	count := 0
 	for y := int(box.Y) - 2; y < int(box.Y+box.H)+2; y++ {
 		for x := int(box.X) - 2; x < int(box.X+box.W)+2; x++ {
@@ -146,26 +146,26 @@ func TestLoadingIndicatorAnimates(t *testing.T) {
 		t.Fatalf("indeterminate indicator reports value %v", info.Now)
 	}
 	first := tt.Image()
-	if n := loadingOverflowPixels(first, info.Bounds); n != 0 {
+	if n := indicatorOverflowPixels(first, info.Bounds); n != 0 {
 		t.Fatalf("first frame paints %d pixels outside its box", n)
 	}
 
 	tt.Advance(300 * time.Millisecond)
 	mid := tt.Image()
-	if n := loadingOverflowPixels(mid, info.Bounds); n != 0 {
+	if n := indicatorOverflowPixels(mid, info.Bounds); n != 0 {
 		t.Fatalf("300ms frame paints %d pixels outside its box", n)
 	}
 	tt.Advance(350 * time.Millisecond)
 	late := tt.Image()
-	if n := loadingOverflowPixels(late, info.Bounds); n != 0 {
+	if n := indicatorOverflowPixels(late, info.Bounds); n != 0 {
 		t.Fatalf("650ms frame paints %d pixels outside its box", n)
 	}
 
 	area := int(info.Bounds.W) * int(info.Bounds.H)
-	if n := loadingBoxDiff(first, mid, info.Bounds); n < area/20 {
+	if n := indicatorBoxDiff(first, mid, info.Bounds); n < area/20 {
 		t.Fatalf("0ms to 300ms changed %d pixels, want a visible morph", n)
 	}
-	if n := loadingBoxDiff(mid, late, info.Bounds); n < area/20 {
+	if n := indicatorBoxDiff(mid, late, info.Bounds); n < area/20 {
 		t.Fatalf("300ms to 650ms changed %d pixels, want a visible morph", n)
 	}
 }
@@ -218,7 +218,7 @@ func TestLoadingPausedAndReduceMotionAreStill(t *testing.T) {
 	if tt.FramePending() {
 		t.Fatal("a paused indicator asks for frames after time passes")
 	}
-	if n := loadingBoxDiff(before, tt.Image(), ui.Rect{X: 0, Y: 0, W: 320, H: 200}); n != 0 {
+	if n := indicatorBoxDiff(before, tt.Image(), ui.Rect{X: 0, Y: 0, W: 320, H: 200}); n != 0 {
 		t.Fatalf("a paused indicator repainted %d pixels", n)
 	}
 	loadingInfo(t, tt, "Paused")
@@ -235,7 +235,7 @@ func TestLoadingPausedAndReduceMotionAreStill(t *testing.T) {
 	if still.FramePending() {
 		t.Fatal("a reduced-motion indicator asks for frames after time passes")
 	}
-	if n := loadingBoxDiff(first, still.Image(), ui.Rect{X: 0, Y: 0, W: 320, H: 200}); n != 0 {
+	if n := indicatorBoxDiff(first, still.Image(), ui.Rect{X: 0, Y: 0, W: 320, H: 200}); n != 0 {
 		t.Fatalf("a reduced-motion indicator repainted %d pixels", n)
 	}
 }

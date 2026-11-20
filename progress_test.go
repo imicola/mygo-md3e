@@ -1,0 +1,342 @@
+package md3e
+
+import (
+	"image"
+	"image/color"
+	"math"
+	"testing"
+	"time"
+
+	"github.com/egoist/mygo/ui"
+)
+
+// progressCanvas builds a 420x300 white canvas holding build's indicators in a
+// 320 DIP wide column.
+func progressCanvas(th *Theme, build func(c *ui.Context)) *ui.Tester {
+	return ui.NewTester(func(c *ui.Context) {
+		ThemeScope(c, th, func() {
+			ui.Box(c).Size(420, 300).Background(canvasRGB).Padding(24).AlignItems(ui.Start).Children(func() {
+				ui.Column(c).Width(320).Gap(24).Children(func() {
+					build(c)
+				})
+			})
+		})
+	}, 420, 300)
+}
+
+// progressInfo returns an indicator's access info by name.
+func progressInfo(t *testing.T, tt *ui.Tester, name string) ui.AccessInfo {
+	t.Helper()
+	info, ok := tt.AccessByRole(ui.RoleProgress, name)
+	if !ok {
+		t.Fatalf("%q progress indicator not in the access tree", name)
+	}
+	return info
+}
+
+// progressClass classifies a pixel on a bar as active, track, or neither. The
+// track's tolerance is tight: a light antialiased edge of the active color can
+// land near SurfaceContainerHighest otherwise.
+func progressClass(px color.RGBA, active, track ui.Color) byte {
+	switch {
+	case absColorDiff(px, rgbOf(active)) <= 30:
+		return 'a'
+	case absColorDiff(px, rgbOf(track)) <= 8:
+		return 't'
+	}
+	return '.'
+}
+
+// progressRow returns the classes along one row of an image.
+func progressRow(img *image.RGBA, y int, x0, x1 int, active, track ui.Color) []byte {
+	row := make([]byte, 0, x1-x0)
+	for x := x0; x < x1; x++ {
+		row = append(row, progressClass(img.RGBAAt(x, y), active, track))
+	}
+	return row
+}
+
+// progressRuns returns the start and end indexes of each run of b in row.
+func progressRuns(row []byte, b byte) [][2]int {
+	var runs [][2]int
+	start := -1
+	for i, v := range row {
+		if v == b && start < 0 {
+			start = i
+		}
+		if v != b && start >= 0 {
+			runs = append(runs, [2]int{start, i - 1})
+			start = -1
+		}
+	}
+	if start >= 0 {
+		runs = append(runs, [2]int{start, len(row) - 1})
+	}
+	return runs
+}
+
+// progressRunsAtLeast returns the runs of b in row that are at least minLen
+// bytes long, skipping the antialiased specks a stroke's edge leaves.
+func progressRunsAtLeast(row []byte, b byte, minLen int) [][2]int {
+	var runs [][2]int
+	for _, r := range progressRuns(row, b) {
+		if r[1]-r[0]+1 >= minLen {
+			runs = append(runs, r)
+		}
+	}
+	return runs
+}
+
+// progressInk returns the bounding box of pixels of class b in box.
+func progressInk(img *image.RGBA, box ui.Rect, b byte, active, track ui.Color) (ui.Rect, int) {
+	minX, minY := int(box.X+box.W), int(box.Y+box.H)
+	maxX, maxY := int(box.X), int(box.Y)
+	count := 0
+	for y := int(box.Y); y < int(box.Y+box.H); y++ {
+		for x := int(box.X); x < int(box.X+box.W); x++ {
+			if progressClass(img.RGBAAt(x, y), active, track) == b {
+				count++
+				minX, minY = min(minX, x), min(minY, y)
+				maxX, maxY = max(maxX, x), max(maxY, y)
+			}
+		}
+	}
+	return ui.Rect{X: float32(minX), Y: float32(minY), W: float32(maxX - minX + 1), H: float32(maxY - minY + 1)}, count
+}
+
+// TestLinearWavyDeterminate checks the active length tracks the value, the wave
+// anchors at its ends, the track gap is clear, and the stop dot sits at the far
+// end.
+func TestLinearWavyDeterminate(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor)
+	cs := th.Colors
+	track := cs.SurfaceContainerHighest
+	if track.A == 0 {
+		track = cs.SurfaceVariant
+	}
+	tt := progressCanvas(th, func(c *ui.Context) {
+		LinearWavyProgress(c, 0, ProgressOptions{Label: "Zero"})
+		LinearWavyProgress(c, 0.5, ProgressOptions{Label: "Half"})
+		LinearWavyProgress(c, 1, ProgressOptions{Label: "Full"})
+	})
+	for _, name := range []string{"Zero", "Half", "Full"} {
+		info := progressInfo(t, tt, name)
+		if info.Min != 0 || info.Max != 1 {
+			t.Fatalf("%s range %v..%v, want 0..1", name, info.Min, info.Max)
+		}
+		if n := indicatorOverflowPixels(tt.Image(), info.Bounds); n != 0 {
+			t.Fatalf("%s paints %d pixels outside its box", name, n)
+		}
+	}
+	img := tt.Image()
+	zero := progressInfo(t, tt, "Zero")
+	half := progressInfo(t, tt, "Half")
+	full := progressInfo(t, tt, "Full")
+
+	// Zero: no active ink, only the track and its end dot.
+	row := progressRow(img, int(zero.Bounds.Y+zero.Bounds.H/2), int(zero.Bounds.X), int(zero.Bounds.X+zero.Bounds.W), cs.Primary, track)
+	if runs := progressRuns(row, 'a'); len(runs) != 0 {
+		t.Fatalf("value 0 paints active ink in %v", runs)
+	}
+	if runs := progressRuns(row, 't'); len(runs) < 2 {
+		t.Fatalf("value 0 has %d track runs, want the track and the stop dot", len(runs))
+	}
+
+	// Half: the active segment spans half the bar, its wave bulges, and its
+	// ends sit on the center line.
+	ink, count := progressInk(img, half.Bounds, 'a', cs.Primary, track)
+	if count == 0 {
+		t.Fatal("half paints no active ink")
+	}
+	wantLen := half.Bounds.W / 2
+	if math.Abs(float64(ink.W-wantLen)) > 8 {
+		t.Fatalf("half's active ink is %.1f DIP wide, want about %.1f", ink.W, wantLen)
+	}
+	if ink.H < 8 || ink.H > half.Bounds.H {
+		t.Fatalf("half's wave spans %.1f DIP high, want an anchored wave taller than the 4 DIP stroke", ink.H)
+	}
+	// The wave is pinned to the center line at the start.
+	start := int(ink.X) + 1
+	run := 0
+	for y := int(half.Bounds.Y); y < int(half.Bounds.Y+half.Bounds.H); y++ {
+		if progressClass(img.RGBAAt(start, y), cs.Primary, track) == 'a' {
+			run++
+		}
+	}
+	if run > 7 {
+		t.Fatalf("the wave is %d DIP high at its start, want it anchored to the stroke", run)
+	}
+
+	// The track gap and the stop dot: two track runs on the center line, the
+	// last a short dot at the far end.
+	row = progressRow(img, int(half.Bounds.Y+half.Bounds.H/2), int(half.Bounds.X), int(half.Bounds.X+half.Bounds.W), cs.Primary, track)
+	trackRuns := progressRunsAtLeast(row, 't', 3)
+	if len(trackRuns) < 2 {
+		t.Fatalf("half has %d track runs, want the track and the stop dot", len(trackRuns))
+	}
+	last := trackRuns[len(trackRuns)-1]
+	if last[1]-last[0]+1 > 8 || last[1] < len(row)-3 {
+		t.Fatalf("the stop dot spans %v, want a short dot at the far end", last)
+	}
+	if gap := trackRuns[0][0] - (int(ink.X+ink.W) - int(half.Bounds.X)) - 1; gap < 2 {
+		t.Fatalf("the track gap is %d DIP, want a clear gap", gap)
+	}
+
+	// Full: the bar reaches the far end.
+	fullInk, _ := progressInk(img, full.Bounds, 'a', cs.Primary, track)
+	if fullInk.W < full.Bounds.W-3 {
+		t.Fatalf("value 1's ink is %.1f DIP wide, want the whole %.1f", fullInk.W, full.Bounds.W)
+	}
+	if fullInk.X+fullInk.W < full.Bounds.X+full.Bounds.W-3 {
+		t.Fatalf("value 1 stops %.1f DIP short of the end", full.Bounds.X+full.Bounds.W-fullInk.X-fullInk.W)
+	}
+}
+
+// TestLinearWavyIndeterminateFlows checks an indeterminate bar paints a moving
+// band, and that reduced motion stills it without extra frames.
+func TestLinearWavyIndeterminateFlows(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor)
+	tt := progressCanvas(th, func(c *ui.Context) {
+		LinearWavyProgress(c, -1, ProgressOptions{Label: "Flow"})
+	})
+	info := progressInfo(t, tt, "Flow")
+	if info.Now >= info.Min {
+		t.Fatalf("indeterminate bar reports value %v", info.Now)
+	}
+	if n := indicatorOverflowPixels(tt.Image(), info.Bounds); n != 0 {
+		t.Fatalf("indeterminate bar paints %d pixels outside its box", n)
+	}
+	first := tt.Image()
+	tt.Advance(300 * time.Millisecond)
+	if n := indicatorBoxDiff(first, tt.Image(), info.Bounds); n < 20 {
+		t.Fatalf("the indeterminate band moved only %d pixels", n)
+	}
+
+	stillTh := ThemeFromSeed(DefaultSeedColor, ThemeOptions{ReduceMotion: true})
+	still := progressCanvas(stillTh, func(c *ui.Context) {
+		LinearWavyProgress(c, -1, ProgressOptions{Label: "Still"})
+		CircularWavyProgress(c, -1, ProgressOptions{Label: "StillRing"})
+	})
+	if still.FramePending() {
+		t.Fatal("reduced-motion indeterminate indicators ask for frames")
+	}
+	before := still.Image()
+	still.Advance(time.Second)
+	if still.FramePending() {
+		t.Fatal("reduced-motion indeterminate indicators keep asking for frames")
+	}
+	if n := indicatorBoxDiff(before, still.Image(), ui.Rect{W: 420, H: 300}); n != 0 {
+		t.Fatalf("reduced-motion indicators repainted %d pixels", n)
+	}
+}
+
+// TestLinearProgressRTL checks both linear indicators fill from the right and
+// put the stop dot at the left end.
+func TestLinearProgressRTL(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor)
+	cs := th.Colors
+	track := cs.SurfaceContainerHighest
+	if track.A == 0 {
+		track = cs.SurfaceVariant
+	}
+	tt := progressCanvas(th, func(c *ui.Context) {
+		LinearProgress(c, 0.5, ProgressOptions{Label: "RightFill"})
+		LinearWavyProgress(c, 0.5, ProgressOptions{Label: "RightWave"})
+	})
+	tt.SetDirection(ui.RightToLeft)
+	img := tt.Image()
+	for _, name := range []string{"RightFill", "RightWave"} {
+		info := progressInfo(t, tt, name)
+		ink, count := progressInk(img, info.Bounds, 'a', cs.Primary, track)
+		if count == 0 {
+			t.Fatalf("%s paints no active ink", name)
+		}
+		mid := (ink.X + ink.W/2) - info.Bounds.X
+		if float64(mid) < float64(info.Bounds.W)*0.6 {
+			t.Fatalf("%s's active ink centers at %.1f, want it on the right half", name, mid)
+		}
+		if ink.X+ink.W < info.Bounds.X+info.Bounds.W-3 {
+			t.Fatalf("%s stops %.1f DIP before the right edge", name, info.Bounds.X+info.Bounds.W-ink.X-ink.W)
+		}
+		row := progressRow(img, int(info.Bounds.Y+info.Bounds.H/2), int(info.Bounds.X), int(info.Bounds.X+info.Bounds.W), cs.Primary, track)
+		trackRuns := progressRunsAtLeast(row, 't', 3)
+		if len(trackRuns) < 2 {
+			t.Fatalf("%s has %d track runs, want the track and the left-end stop dot", name, len(trackRuns))
+		}
+		first := trackRuns[0]
+		if first[0] > 3 || first[1]-first[0]+1 > 8 {
+			t.Fatalf("%s's stop dot spans %v, want it at the left end", name, first)
+		}
+	}
+}
+
+// TestCircularWavyProgress checks the determinate ring paints inside its box and
+// that the indeterminate ring moves and waves over time.
+func TestCircularWavyProgress(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor)
+	tt := progressCanvas(th, func(c *ui.Context) {
+		ui.Row(c).Gap(24).Children(func() {
+			CircularWavyProgress(c, 0.5, ProgressOptions{Label: "HalfRing"})
+			CircularProgress(c, 0.5, ProgressOptions{Label: "PlainRing"})
+			CircularWavyProgress(c, -1, ProgressOptions{Label: "SpinRing"})
+		})
+	})
+	cs := th.Colors
+	track := cs.SurfaceContainerHighest
+	if track.A == 0 {
+		track = cs.SurfaceVariant
+	}
+	half := progressInfo(t, tt, "HalfRing")
+	if n := indicatorOverflowPixels(tt.Image(), half.Bounds); n != 0 {
+		t.Fatalf("circular indicator paints %d pixels outside its box", n)
+	}
+	if _, count := progressInk(tt.Image(), half.Bounds, 'a', cs.Primary, track); count < 60 {
+		t.Fatalf("the determinate ring paints only %d active pixels", count)
+	}
+	plain := progressInfo(t, tt, "PlainRing")
+	if n := indicatorOverflowPixels(tt.Image(), plain.Bounds); n != 0 {
+		t.Fatalf("plain ring paints %d pixels outside its box", n)
+	}
+	spin := progressInfo(t, tt, "SpinRing")
+	first := tt.Image()
+	tt.Advance(300 * time.Millisecond)
+	second := tt.Image()
+	if n := indicatorBoxDiff(first, second, spin.Bounds); n < 30 {
+		t.Fatalf("the spinning ring moved only %d pixels", n)
+	}
+	if n := indicatorOverflowPixels(second, spin.Bounds); n != 0 {
+		t.Fatalf("the spinning ring paints %d pixels outside its box", n)
+	}
+}
+
+// TestProgressAccessAndBounds checks the range exposed to assistive technology,
+// NaN normalization, disabled state, and a determinate value settling.
+func TestProgressAccessAndBounds(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor)
+	tt := progressCanvas(th, func(c *ui.Context) {
+		LinearProgress(c, 0.5, ProgressOptions{Label: "Upload"})
+		LinearWavyProgress(c, math.NaN(), ProgressOptions{Label: "Broken"})
+		CircularProgress(c, 0.5, ProgressOptions{Label: "Off", Disabled: true})
+		LinearProgress(c, 0.25, ProgressOptions{Label: "Settle"})
+	})
+	tt.Advance(time.Second)
+	if tt.FramePending() {
+		t.Fatal("determinate indicators keep asking for frames")
+	}
+	upload := progressInfo(t, tt, "Upload")
+	if upload.Min != 0 || upload.Max != 1 || math.Abs(upload.Now-0.5) > 1e-6 {
+		t.Fatalf("Upload range %v..%v at %v, want 0..1 at 0.5", upload.Min, upload.Max, upload.Now)
+	}
+	broken := progressInfo(t, tt, "Broken")
+	if broken.Now != 0 {
+		t.Fatalf("NaN value reads %v, want 0", broken.Now)
+	}
+	off := progressInfo(t, tt, "Off")
+	if !off.Disabled {
+		t.Fatal("a disabled indicator does not read as disabled")
+	}
+	settle := progressInfo(t, tt, "Settle")
+	if math.Abs(settle.Now-0.25) > 1e-6 {
+		t.Fatalf("Settle reads %v, want 0.25", settle.Now)
+	}
+}

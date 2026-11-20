@@ -280,7 +280,7 @@
     - 无障碍角色 `RoleProgress` 检出。
   - **Commit**：`feat(loading): [T6.1] implement shape-morphing MD3E LoadingIndicator`
 
-- [ ] **T6.2：实现 Wavy 与标准 Linear / Circular 进度指示器**
+- [x] **T6.2：实现 Wavy 与标准 Linear / Circular 进度指示器**
   - **交付物**：`progress.go`、`progress_test.go`
   - **核心能力**：
     - `LinearProgress` & `LinearWavyProgress`（确定态 `0..1` 与不确定态 `< 0`）：正弦波浪活跃段、端点平滑振幅收敛（接近 `0` 或 `1` 时渐平）、Track Gap 间隙与末端停靠圆点、支持 RTL；
