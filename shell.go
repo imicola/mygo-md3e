@@ -1,6 +1,7 @@
 package md3e
 
 import (
+	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 
 	"github.com/imicola/mygo-md3e/tokens"
@@ -8,6 +9,10 @@ import (
 
 // WindowController is the minimal native window interface satisfied directly by
 // *mygo.Window without coupling package md3e to the platform window backend.
+// When the bound window also implements the optional
+// SetWindowButtonsTheme(mygo.ThemeSource) method (as *mygo.Window does),
+// WindowTitleBar automatically syncs native system caption button appearance
+// with the active light/dark theme whenever system buttons are visible.
 type WindowController interface {
 	Minimize()
 	ToggleMaximize()
@@ -16,11 +21,22 @@ type WindowController interface {
 	SetAlwaysOnTop(v bool)
 }
 
+type windowButtonsThemeController interface {
+	SetWindowButtonsTheme(mygo.ThemeSource)
+}
+
 // WindowTitleBarOptions configures WindowTitleBar. The zero value renders a
 // seamlessly integrated SurfaceContainerLowest title bar whose height adapts
 // to c.TitleBar() and Theme.Density, reserves platform safe insets (macOS
 // traffic lights / Windows & Linux system controls), and enables window
 // dragging and double-click maximize via DragWindow().
+//
+// For desktop apps on Windows and Linux, pairing mygo.WindowOptions{
+// TitleBarStyle: mygo.TitleBarHidden, HideWindowButtons: true} with
+// ShowWindowControls: true is recommended so WindowTitleBar renders 100%
+// MD3E-styled, height-aligned Minimize, Maximize/Restore (integrated with
+// Windows 11 Snap Layouts), and Close controls with rounded hover highlights.
+// Keep HideWindowButtons: false on macOS to preserve native traffic lights.
 type WindowTitleBarOptions struct {
 	// Title is the window title shown in the center region when Center is nil.
 	Title string
@@ -48,12 +64,17 @@ type WindowTitleBarOptions struct {
 
 	// Window optionally binds a *mygo.Window (or custom WindowController) so
 	// built-in Pin, Minimize, Maximize/Restore, and Close controls act directly
-	// on the window when explicit callbacks are nil. Safe to leave nil in tests.
+	// on the window when explicit callbacks are nil. When native system buttons
+	// remain visible (HideWindowButtons: false, i.e. non-zero c.TitleBar()),
+	// WindowTitleBar also inspects the optional SetWindowButtonsTheme method
+	// to sync native caption glyph polarity with th.Dark. Safe to leave nil in tests.
 	Window WindowController
-	// ShowWindowControls renders custom Minimize, Maximize/Restore, and Close
-	// buttons (for frameless windows hiding system buttons). Even when false,
-	// providing any individual OnMinimize / OnMaximize / OnClose callback shows
-	// that control.
+	// ShowWindowControls renders MD3E Minimize, Maximize/Restore (marked
+	// MaximizeButton for Windows 11 Snap Layouts), and Close buttons with
+	// height-aligned rounded hover highlights. Recommended on non-macOS desktop
+	// windows configured with TitleBarStyle: mygo.TitleBarHidden and
+	// HideWindowButtons: true. Even when false, providing any individual
+	// OnMinimize / OnMaximize / OnClose callback shows that control.
 	ShowWindowControls bool
 
 	// Pinned binds an always-on-top toggle button when non-nil (or when OnPin
@@ -74,22 +95,37 @@ type WindowTitleBarOptions struct {
 	OnClose func()
 }
 
+const titleBarNarrowThreshold float32 = 520
+
 type (
-	titleBarLeadingKey  struct{}
-	titleBarTrailingKey struct{}
-	titleBarPinLocalKey struct{}
-	titleBarPinKey      struct{}
-	titleBarMinKey      struct{}
-	titleBarMaxKey      struct{}
-	titleBarCloseKey    struct{}
+	titleBarLeadingKey      struct{}
+	titleBarTrailingKey     struct{}
+	titleBarPinLocalKey     struct{}
+	titleBarButtonsThemeKey struct{}
+	titleBarPinKey          struct{}
+	titleBarMinKey          struct{}
+	titleBarMaxKey          struct{}
+	titleBarCloseKey        struct{}
 )
+
+type titleBarButtonsThemeState struct {
+	synced bool
+	source mygo.ThemeSource
+}
 
 // WindowTitleBar builds a cross-platform MD3E desktop window title bar that
 // respects c.TitleBar() safe insets, integrates seamlessly with
 // SurfaceContainerLowest, supports window dragging and double-click maximize
-// via DragWindow(), exposes Leading/Center/Trailing slots, and optionally
-// renders accessible Pin, Minimize, Maximize/Restore (marked MaximizeButton),
-// and Close controls.
+// via DragWindow(), exposes Leading/Center/Trailing slots, automatically syncs
+// native window button polarity via SetWindowButtonsTheme when system buttons
+// are visible, gracefully collapses crowded centered Title text below 520 DIP,
+// and optionally renders accessible MD3E Pin, Minimize, Maximize/Restore
+// (marked MaximizeButton for Windows 11 Snap Layouts), and Close controls.
+//
+// Desktop recommendation: on Windows and Linux, set TitleBarStyle:
+// mygo.TitleBarHidden and HideWindowButtons: true on mygo.WindowOptions with
+// ShowWindowControls: true here; on macOS, keep HideWindowButtons: false so
+// native traffic lights stay inside c.TitleBar().
 func WindowTitleBar(c *ui.Context, opts ...WindowTitleBarOptions) ui.Element {
 	if len(opts) > 1 {
 		panic("md3e: WindowTitleBar takes at most one WindowTitleBarOptions")
@@ -139,9 +175,34 @@ func WindowTitleBar(c *ui.Context, opts ...WindowTitleBarOptions) ui.Element {
 		Background(bg).
 		TextColor(fg).
 		AlignItems(ui.Center).
+		FocusRing(false).
 		DragWindow().
 		Role(ui.RoleBanner).
 		Label(label)
+
+	hasNativeButtons := tb.Height > 0 || tb.Left > 0 || tb.Right > 0 || tb.Bottom > 0
+	themeState := ui.Local(root, titleBarButtonsThemeKey{}, func() titleBarButtonsThemeState {
+		return titleBarButtonsThemeState{}
+	})
+	if o.Window != nil && hasNativeButtons {
+		if setter, ok := o.Window.(windowButtonsThemeController); ok {
+			darkButtons := th.Dark
+			if o.Background.A > 0 {
+				darkButtons = relativeLuminance(bg) <= 0.35
+			}
+			wantSource := mygo.ThemeLight
+			if darkButtons {
+				wantSource = mygo.ThemeDark
+			}
+			if !themeState.synced || themeState.source != wantSource {
+				setter.SetWindowButtonsTheme(wantSource)
+				themeState.synced = true
+				themeState.source = wantSource
+			}
+		}
+	} else {
+		themeState.synced = false
+	}
 
 	if o.Divider {
 		divCol := cs.OutlineVariant
@@ -165,16 +226,28 @@ func WindowTitleBar(c *ui.Context, opts ...WindowTitleBarOptions) ui.Element {
 
 	endPad := float32(8)
 	if hasWinControls {
-		endPad = 0
+		endPad = 4
 	}
 	btnW := float32(42)
 	if th.Density.Normalize() == tokens.DensityCompact {
 		btnW = 36
 	}
+	pinSide := min(float32(30), max(float32(22), barH-8))
+	if barH < 30 {
+		pinSide = max(barH-4, 18)
+	}
 	titleRole := tokens.TitleSmall
 	if th.Density.Normalize() != tokens.DensityComfortable {
 		titleRole = tokens.LabelLarge
 	}
+
+	winW, _ := c.Size()
+	hasStartChrome := o.Leading != nil || leftInset > 0
+	hasEndChrome := o.Trailing != nil || showPin || hasWinControls || rightInset > 0
+	hasMultipleEndSlots := (o.Trailing != nil && (showPin || hasWinControls || rightInset > 0)) ||
+		(showPin && (hasWinControls || rightInset > 0))
+	collapseCenterTitle := winW > 0 && winW < titleBarNarrowThreshold &&
+		((hasStartChrome && hasEndChrome) || hasMultipleEndSlots)
 
 	root.Children(func() {
 		ui.Row(c).
@@ -199,16 +272,18 @@ func WindowTitleBar(c *ui.Context, opts ...WindowTitleBarOptions) ui.Element {
 
 				ui.Row(c).
 					Grow(1).
+					Shrink(1).
 					FillHeight().
 					MinWidth(0).
+					Clip().
 					AlignItems(ui.Center).
 					Justify(ui.Center).
 					DragWindow().
 					Children(func() {
 						if o.Center != nil {
 							o.Center()
-						} else if o.Title != "" {
-							txt := ui.Text(c, o.Title).SingleLine().MaxWidthPercent(100)
+						} else if o.Title != "" && !collapseCenterTitle {
+							txt := ui.Text(c, o.Title).SingleLine().MinWidth(0).MaxWidthPercent(100)
 							applyTypeStyleWithTheme(th, txt, titleRole)
 							txt.TextColor(fg)
 						}
@@ -233,7 +308,7 @@ func WindowTitleBar(c *ui.Context, opts ...WindowTitleBarOptions) ui.Element {
 					btn := ui.ButtonBase(c.Key(titleBarPinKey{})).
 						DimDisabled(false).
 						FocusRing(false).
-						Size(30, 30).
+						Size(pinSide, pinSide).
 						Shrink(0).
 						Radius(8).
 						AlignItems(ui.Center).
@@ -331,16 +406,34 @@ func titleBarMinHeight(d tokens.Density) float32 {
 }
 
 func titleBarControlButton(c *ui.Context, th *Theme, key any, w, h float32, label string, ink, stateColor ui.Color, draw IconDraw) ui.Element {
+	pillH := min(float32(30), max(float32(20), h-8))
+	if h < 28 {
+		pillH = max(h-4, 1)
+	}
+	xInset := min(float32(3), max(float32(0), (w-16)*0.25))
+	yInset := max(float32(0), (h-pillH)*0.5)
+	rad := min(float32(8), min(max(w-2*xInset, 0), pillH)*0.5)
+
 	btn := ui.ButtonBase(c.Key(key)).
 		DimDisabled(false).
 		FocusRing(false).
 		Size(w, h).
 		Shrink(0).
+		Radius(rad).
 		AlignItems(ui.Center).
 		Justify(ui.Center).
 		Label(label)
 	attachStateLayerWithTheme(th, btn, StateLayerOptions{
 		Color: stateColor,
+		Clip: func(r ui.Rect) (ui.Rect, [4]float32) {
+			box := ui.Rect{
+				X: r.X + xInset,
+				Y: r.Y + yInset,
+				W: max(0, r.W-2*xInset),
+				H: max(0, r.H-2*yInset),
+			}
+			return box, [4]float32{rad, rad, rad, rad}
+		},
 	})
 	btn.Children(func() {
 		ui.Box(c).Size(12, 12).Draw(func(p *ui.Painter, r ui.Rect) {

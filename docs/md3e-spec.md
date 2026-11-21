@@ -202,7 +202,7 @@ MD3E 将动效分为 **Spatial（空间：位移、缩放、尺寸、圆角、�
 - **内容净宽感知**：`AdaptiveScaffold` 的内容槽位以扣减侧栏实际占用后的可用宽度构建；`BentoGrid` 与 `SupportingPane` 在未显式传入 `WidthOverride` 时通过 `ContentSizeClassOf` 据此解析断点（880 DIP 窗口 + 192 DIP 展开侧栏 → 688 DIP 内容区按 `WindowMedium` 排 2 列且不自动展开辅助栏），避免整窗断点造成的列挤压；`WindowSizeClassOf` 仍恒按整窗宽度判定。
 - **`ListDetailPane` / `SupportingPane` / `BentoGrid`**：复用上游 `ui.Split`/`ui.SplitPercent` + `.SplitReset(...)` 与 `ui.Grid`，在 `WindowCompact` 下自动退化为单栏堆叠/受控单页视图，完整支持 RTL 镜像。
 - **`Card` 横向约束**：非交互与可点击 Card 均使用 `.AlignItems(ui.Stretch).MinWidth(0)` 并以圆角内裁切约束子内容，窄列中的 `Row(Grow + Fixed)` 不再把卡片撑破边框。
-- **`WindowTitleBar`**：基于 `c.TitleBar()` 自动预留 macOS 左交通灯与 Windows/Linux 系统按钮物理安全区，支持 `DragWindow()`、`.MaximizeButton()` 与零后端耦合的 `WindowController`（`*mygo.Window` 原生满足该接口）。
+- **`WindowTitleBar`**：基于 `c.TitleBar()` 自动预留 macOS 左交通灯与 Windows/Linux 系统按钮物理安全区，支持 `DragWindow()`、`.MaximizeButton()`（Win11 Snap Layout）与零后端耦合的 `WindowController`（`*mygo.Window` 原生满足该接口）；当保留原生系统按钮（未设 `HideWindowButtons: true`）且绑定 `Window` 时自动通过可选 `SetWindowButtonsTheme` 随 `th.Dark` 同步深浅外观，推荐非 macOS 桌面应用使用 `TitleBarStyle: mygo.TitleBarHidden` + `HideWindowButtons: true` 搭配 `ShowWindowControls: true` 以获得高度对齐的 MD3E 圆角悬停控件；窄屏（`< 520 DIP`）拥挤时自动收敛居中标题避免与右侧控件重叠，且全部按钮禁用 `FocusRing`。
 
 ---
 
