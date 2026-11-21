@@ -168,9 +168,9 @@ MD3E 将动效分为 **Spatial（空间：位移、缩放、尺寸、圆角、�
    - 连续在多边形序列（默认 `SoftBurst -> Cookie9Sided -> Pentagon -> Pill -> Sunny -> Cookie4Sided -> Oval` 循环）间以 Expressive Spring 驱动 `shape.Morph` 过渡并伴随柔和旋转。
    - 提供 `Standard`（无背景容器，图形用 `Primary`）与 `Contained`（圆形容器 `PrimaryContainer`，图形用 `OnPrimaryContainer`）两种样式。
    - `ReduceMotion` 时静止展示首帧特征形状，不请求动画帧。
-7. **Wavy Progress Indicators（Linear & Circular）**：
-   - `LinearWavyProgress`：活跃段绘制正弦平滑波浪轨迹，确定态（Determinate `0..1`）在接近 0% 或 100% 端点时振幅平滑衰减至 0，未完成轨道留有明确间隙（track gap）及末端停靠点（stop indicator）；不确定态（Indeterminate）持续相移流动。
-   - `CircularWavyProgress`：极坐标正弦波动圆环（$r(\theta) = R + A \sin(k\theta + \phi)$），支持确定态弧长推进与不确定态旋转伸缩。
+7. **Wavy & Linear Progress Indicators（Linear & Circular）**：
+   - `LinearProgress` / `LinearWavyProgress`：活跃段在 Wavy 模式下绘制正弦平滑波浪轨迹，确定态（Determinate `0..1`）在接近 0% 或 100% 端点时振幅平滑衰减至 0，未完成轨道留有明确间隙（track gap）及末端停靠点（stop indicator）；支持可选 `ProgressOptions.Buffer`（`0..1`）在主进度与未完成轨道间以 `TrackGap` 间距绘制半透明缓冲段；不确定态（`value < 0`）采用 MD3 双段连续伸缩接力（Primary + Trailing）实现周期无断档流动，并在滚出可视区域（`p.Visible()`）时自动暂停请求动画帧。
+   - `CircularProgress` / `CircularWavyProgress`：极坐标正弦波动圆环（$r(\theta) = R + A \sin(k\theta + \phi)$），支持确定态弧长推进（含 `Buffer` 缓冲弧）、不确定态旋转伸缩与视口外零帧暂停。
 8. **Expressive List**：支持分节/独立卡片式列表项，首项顶部大圆角、中间项小圆角、末项底部大圆角，选中或按压时独立向大圆角/高亮色平滑过渡。
 9. **Expressive Slider & RangeSlider**：轨道高约 `16` DIP（或可配轨高），与拇指（竖直胶囊条 `4 × 44` DIP）之间留有明确的 **Track Gap（`6` DIP）**；离散步进显示停靠点（stop dots）；拖拽或聚焦时弹出上方水滴形（Teardrop）值标签；支持 Centered（从中心向两侧填充）与双滑块 RangeSlider。
 10. **Expressive Switch**：轨道 `52 × 32` DIP；未选中拇指 `16` DIP（无图标）或 `24` DIP（带 `×` 图标），选中态弹性放大至 `24` DIP（带 `✓` 图标），按压态瞬间扩大至 `28` DIP，使用 Fast Spatial 弹簧驱动。

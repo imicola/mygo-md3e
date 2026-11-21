@@ -637,3 +637,258 @@ func TestProgressExitTransitionGhostStaysVisibleAndSettles(t *testing.T) {
 		t.Fatalf("exiting circular wavy ghost rendered only %d differing pixels vs settled canvas", diff)
 	}
 }
+
+// TestLinearIndeterminateTwoSegmentContinuous verifies that both LinearProgress
+// and LinearWavyProgress render continuous non-empty active segments across all
+// phases of the 1800ms cycle (0ms, 300ms, 900ms, 1500ms and wrap) without blank
+// frames, and settle to a centered bar with zero pending frames under ReduceMotion.
+func TestLinearIndeterminateTwoSegmentContinuous(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor)
+	cs := th.Colors
+	track := cs.SurfaceContainerHighest
+	if track.A == 0 {
+		track = cs.SurfaceVariant
+	}
+	tt := progressCanvas(th, func(c *ui.Context) {
+		LinearProgress(c, -1, ProgressOptions{Label: "IndLinear"})
+		LinearWavyProgress(c, -1, ProgressOptions{Label: "IndWavy"})
+	})
+	linInfo := progressInfo(t, tt, "IndLinear")
+	wavInfo := progressInfo(t, tt, "IndWavy")
+
+	// Sample at 0ms, 300ms, 900ms, 1500ms, and 1800ms (wrap).
+	targets := []time.Duration{
+		0,
+		300 * time.Millisecond,
+		900 * time.Millisecond,
+		1500 * time.Millisecond,
+		1800 * time.Millisecond,
+	}
+	var atZero, atWrap *image.RGBA
+	var elapsed time.Duration
+	for _, target := range targets {
+		if delta := target - elapsed; delta > 0 {
+			tt.Advance(delta)
+			elapsed = target
+		}
+		img := tt.Image()
+		if target == 0 {
+			atZero = img
+		}
+		if target == 1800*time.Millisecond {
+			atWrap = img
+		}
+		_, linCount := progressInk(img, linInfo.Bounds, 'a', cs.Primary, track)
+		_, wavCount := progressInk(img, wavInfo.Bounds, 'a', cs.Primary, track)
+		if linCount < 200 {
+			t.Fatalf("at %v, LinearProgress(-1) painted only %d active pixels (want continuous full bar)", target, linCount)
+		}
+		if wavCount < 200 {
+			t.Fatalf("at %v, LinearWavyProgress(-1) painted only %d active pixels (want continuous full wave)", target, wavCount)
+		}
+	}
+	// Wrap continuity: 0ms and 1800ms should match within tiny raster rounding.
+	if diff := indicatorBoxDiff(atZero, atWrap, linInfo.Bounds); diff > 20 {
+		t.Fatalf("LinearProgress(-1) jumped at 1800ms wrap (%d differing pixels)", diff)
+	}
+	if diff := indicatorBoxDiff(atZero, atWrap, wavInfo.Bounds); diff > 20 {
+		t.Fatalf("LinearWavyProgress(-1) jumped at 1800ms wrap (%d differing pixels)", diff)
+	}
+
+	// Verify mathematical segment invariant over every 1% of the cycle: never empty, never overlapping.
+	for step := range 100 {
+		u := float64(step) / 100.0
+		segs, count := indeterminateLinearSegments(u, false)
+		if count == 0 {
+			t.Fatalf("u=%.2f produced 0 segments", u)
+		}
+		total := 0.0
+		for i := range count {
+			if segs[i].hi <= segs[i].lo {
+				t.Fatalf("u=%.2f invalid segment %+v", u, segs[i])
+			}
+			if i > 0 && segs[i].lo < segs[i-1].hi {
+				t.Fatalf("u=%.2f overlapping segments %+v and %+v", u, segs[i-1], segs[i])
+			}
+			total += segs[i].hi - segs[i].lo
+		}
+		if total < 0.30 {
+			t.Fatalf("u=%.2f active coverage %.3f < 0.30", u, total)
+		}
+	}
+
+	// ReduceMotion: static centered bar, zero frames pending.
+	rmTh := ThemeFromSeed(DefaultSeedColor, ThemeOptions{ReduceMotion: true})
+	rmTT := progressCanvas(rmTh, func(c *ui.Context) {
+		LinearProgress(c, -1, ProgressOptions{Label: "RMLin"})
+		LinearWavyProgress(c, -1, ProgressOptions{Label: "RMWav"})
+	})
+	if rmTT.FramePending() {
+		t.Fatal("ReduceMotion indeterminate linear indicators requested frames")
+	}
+	for _, name := range []string{"RMLin", "RMWav"} {
+		info := progressInfo(t, rmTT, name)
+		ink, count := progressInk(rmTT.Image(), info.Bounds, 'a', rmTh.Colors.Primary, track)
+		if count < 100 {
+			t.Fatalf("%s ReduceMotion painted only %d active pixels", name, count)
+		}
+		mid := (ink.X + ink.W/2) - info.Bounds.X
+		if absF32(mid-info.Bounds.W/2) > info.Bounds.W*0.15 {
+			t.Fatalf("%s ReduceMotion bar centered at %.1f of %.1f, want centered", name, mid, info.Bounds.W)
+		}
+	}
+}
+
+// TestProgressBufferTrackAndRTL checks ProgressOptions.Buffer across linear,
+// circular, zero-value, non-finite, and RTL layouts, ensuring TrackGap
+// separation between active, buffer, and track segments.
+func TestProgressBufferTrackAndRTL(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor)
+	cs := th.Colors
+	track := cs.SurfaceContainerHighest
+	if track.A == 0 {
+		track = cs.SurfaceVariant
+	}
+	wantBuf := cs.Primary.Alpha(0.28).Over(canvasRGB)
+
+	countBuffer := func(img *image.RGBA, box ui.Rect) int {
+		n := 0
+		for y := int(box.Y); y < int(box.Y+box.H); y++ {
+			for x := int(box.X); x < int(box.X+box.W); x++ {
+				px := img.RGBAAt(x, y)
+				if colorMatches(px, wantBuf, 14) && !colorMatches(px, track, 8) && !colorMatches(px, cs.Primary, 30) {
+					n++
+				}
+			}
+		}
+		return n
+	}
+
+	bufferCenterRun := func(img *image.RGBA, box ui.Rect) (startX, endX float32, ok bool) {
+		y := int(box.Y + box.H/2)
+		row := make([]byte, int(box.W))
+		for i := range row {
+			px := img.RGBAAt(int(box.X)+i, y)
+			if colorMatches(px, wantBuf, 14) && !colorMatches(px, track, 8) && !colorMatches(px, cs.Primary, 30) {
+				row[i] = 'b'
+			}
+		}
+		runs := progressRunsAtLeast(row, 'b', 8)
+		if len(runs) == 0 {
+			return 0, 0, false
+		}
+		best := runs[0]
+		for _, r := range runs[1:] {
+			if r[1]-r[0] > best[1]-best[0] {
+				best = r
+			}
+		}
+		return box.X + float32(best[0]), box.X + float32(best[1]+1), true
+	}
+
+	tt := progressCanvas(th, func(c *ui.Context) {
+		LinearProgress(c, 0.25, ProgressOptions{Label: "BufLinear", Buffer: 0.65})
+		LinearWavyProgress(c, 0.25, ProgressOptions{Label: "BufWavy", Buffer: 0.65})
+		LinearProgress(c, 0, ProgressOptions{Label: "BufZeroVal", Buffer: 0.50})
+		LinearProgress(c, 0.40, ProgressOptions{Label: "BufNaN", Buffer: math.NaN()})
+		ui.Row(c).Gap(16).Children(func() {
+			CircularProgress(c, 0.25, ProgressOptions{Label: "BufRing", Size: 64, Buffer: 0.65})
+			CircularWavyProgress(c, 0.25, ProgressOptions{Label: "BufWavyRing", Size: 64, Buffer: 0.65})
+		})
+	})
+	img := tt.Image()
+
+	for _, name := range []string{"BufLinear", "BufWavy"} {
+		info := progressInfo(t, tt, name)
+		actInk, actN := progressInk(img, info.Bounds, 'a', cs.Primary, track)
+		bufStart, bufEnd, ok := bufferCenterRun(img, info.Bounds)
+		if actN < 50 || !ok {
+			t.Fatalf("%s active=%d bufferRun=%v, want visible active and buffer segments", name, actN, ok)
+		}
+		// Buffer must start to the right of active with a clear TrackGap (>= 2 DIP).
+		gap := bufStart - (actInk.X + actInk.W)
+		if gap < 2 {
+			t.Fatalf("%s gap between active and buffer is %.1f DIP, want >= 2", name, gap)
+		}
+		// Track must resume to the right of buffer with a clear TrackGap.
+		row := progressRow(img, int(info.Bounds.Y+info.Bounds.H/2), int(info.Bounds.X), int(info.Bounds.X+info.Bounds.W), cs.Primary, track)
+		trackRuns := progressRunsAtLeast(row, 't', 3)
+		if len(trackRuns) < 2 {
+			t.Fatalf("%s has %d track runs, want unfinished track and stop dot", name, len(trackRuns))
+		}
+		trackStartX := info.Bounds.X + float32(trackRuns[0][0])
+		bufTrackGap := trackStartX - bufEnd
+		if bufTrackGap < 2 {
+			t.Fatalf("%s gap between buffer and track is %.1f DIP, want >= 2", name, bufTrackGap)
+		}
+	}
+
+	zeroVal := progressInfo(t, tt, "BufZeroVal")
+	if _, actN := progressInk(img, zeroVal.Bounds, 'a', cs.Primary, track); actN != 0 {
+		t.Fatalf("BufZeroVal painted %d active pixels, want 0", actN)
+	}
+	if bufN := countBuffer(img, zeroVal.Bounds); bufN < 100 {
+		t.Fatalf("BufZeroVal painted %d buffer pixels, want visible buffer segment", bufN)
+	}
+
+	nanInfo := progressInfo(t, tt, "BufNaN")
+	if bufN := countBuffer(img, nanInfo.Bounds); bufN != 0 {
+		t.Fatalf("BufNaN painted %d buffer pixels, want 0", bufN)
+	}
+
+	for _, name := range []string{"BufRing", "BufWavyRing"} {
+		info := progressInfo(t, tt, name)
+		if bufN := countBuffer(img, info.Bounds); bufN < 30 {
+			t.Fatalf("%s painted only %d buffer pixels, want visible buffer arc", name, bufN)
+		}
+	}
+
+	// RTL layout mirrors active -> buffer -> track from right to left.
+	rtlTT := progressCanvas(th, func(c *ui.Context) {
+		LinearProgress(c, 0.25, ProgressOptions{Label: "RTLBuf", Buffer: 0.65})
+	})
+	rtlTT.SetDirection(ui.RightToLeft)
+	rtlImg := rtlTT.Image()
+	rtlInfo := progressInfo(t, rtlTT, "RTLBuf")
+	actInk, actN := progressInk(rtlImg, rtlInfo.Bounds, 'a', cs.Primary, track)
+	_, bufEnd, ok := bufferCenterRun(rtlImg, rtlInfo.Bounds)
+	if actN < 50 || !ok {
+		t.Fatalf("RTLBuf active=%d bufferRun=%v, want visible segments", actN, ok)
+	}
+	if gap := actInk.X - bufEnd; gap < 2 {
+		t.Fatalf("RTLBuf expected buffer left of active with gap >= 2, got gap %.1f (bufEnd=%.1f act=%+v)", gap, bufEnd, actInk)
+	}
+}
+
+// TestProgressOffScreenZeroFrames checks that all four indicator types stop
+// requesting animation frames when clipped outside p.Visible() in a scroll view.
+func TestProgressOffScreenZeroFrames(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor)
+	offscreenTT := ui.NewTester(func(c *ui.Context) {
+		ThemeScope(c, th, func() {
+			ui.Scroll(c).Size(240, 100).Background(canvasRGB).Children(func() {
+				ui.Column(c).Width(220).Gap(12).Children(func() {
+					ui.Box(c).Size(220, 260) // push indicators completely below the 100 DIP viewport
+					LinearProgress(c, -1, ProgressOptions{Label: "OffLin"})
+					LinearWavyProgress(c, -1, ProgressOptions{Label: "OffLinWav"})
+					LinearWavyProgress(c, 0.4, ProgressOptions{Label: "OffLinDetWav"})
+					CircularProgress(c, -1, ProgressOptions{Label: "OffCirc", Size: 48})
+					CircularWavyProgress(c, -1, ProgressOptions{Label: "OffCircWav", Size: 48})
+					CircularWavyProgress(c, 0.4, ProgressOptions{Label: "OffCircDetWav", Size: 48})
+				})
+			})
+		})
+	}, 240, 100)
+	offscreenTT.Frame()
+	if offscreenTT.FramePending() {
+		t.Fatal("off-screen progress indicators must not request frames when outside p.Visible()")
+	}
+	before := offscreenTT.Image()
+	offscreenTT.Advance(300 * time.Millisecond)
+	if offscreenTT.FramePending() {
+		t.Fatal("off-screen progress indicators kept requesting frames after Advance")
+	}
+	if diff := indicatorBoxDiff(before, offscreenTT.Image(), ui.Rect{W: 240, H: 100}); diff != 0 {
+		t.Fatalf("off-screen progress indicators repainted %d pixels", diff)
+	}
+}
