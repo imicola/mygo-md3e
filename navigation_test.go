@@ -1,6 +1,7 @@
 package md3e
 
 import (
+	"image"
 	"math"
 	"testing"
 	"time"
@@ -301,6 +302,169 @@ func TestNavigationRailExpandAndCollapse(t *testing.T) {
 	}
 	if tt.FramePending() {
 		t.Fatal("the collapsed rail keeps asking for frames")
+	}
+}
+
+// navInkPixels counts the pixels inside box that differ from bg.
+func navInkPixels(img *image.RGBA, box ui.Rect, bg ui.Color) int {
+	count := 0
+	for y := int(box.Y); y < int(box.Y+box.H); y++ {
+		for x := int(box.X); x < int(box.X+box.W); x++ {
+			if !colorMatches(img.RGBAAt(x, y), bg, 10) {
+				count++
+			}
+		}
+	}
+	return count
+}
+
+// TestNavigationRailCollapsedHoverStaysInPill checks that hovering a collapsed
+// destination tints only its 56×32 pill, leaving the short label's band below
+// it untouched.
+func TestNavigationRailCollapsedHoverStaysInPill(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor)
+	selected := 0
+	tt := navigationCanvas(th, 600, 400, func(c *ui.Context) {
+		ui.Row(c).FillHeight().Children(func() {
+			NavigationRail(c, []NavigationDestination{
+				{Label: "Home", Icon: mdicon.Add.Draw},
+				{Label: "Search", Icon: mdicon.Search.Draw},
+			}, NavigationRailOptions{Selected: &selected, Label: "Rail"})
+		})
+	})
+	tt.Advance(400 * time.Millisecond)
+	home := tabInfo(t, tt, "Home")
+	before := tt.Image()
+
+	// Hover over the selected pill itself, left of the centered icon.
+	tt.Move(home.Bounds.X+4, home.Bounds.Y+20)
+	tt.Advance(300 * time.Millisecond)
+	after := tt.Image()
+
+	insideBefore := before.RGBAAt(int(home.Bounds.X+4), int(home.Bounds.Y+20))
+	insideAfter := after.RGBAAt(int(home.Bounds.X+4), int(home.Bounds.Y+20))
+	if absColorDiff(insideBefore, insideAfter) < 4 {
+		t.Fatalf("hovering the destination did not tint its pill: %v -> %v", insideBefore, insideAfter)
+	}
+	// The short label sits below the 32 DIP pill; the state layer must not
+	// paint a 56 DIP square over it.
+	for _, y := range []int{int(home.Bounds.Y + 40), int(home.Bounds.Y + 50)} {
+		x := int(home.Bounds.X + 2)
+		if a, b := before.RGBAAt(x, y), after.RGBAAt(x, y); a != b {
+			t.Fatalf("hover leaked into the label band at (%d,%d): %v -> %v", x, y, a, b)
+		}
+	}
+	if tt.FramePending() {
+		t.Fatal("the hovered rail keeps asking for frames")
+	}
+}
+
+// TestNavigationBarHoverStaysInPill checks that hovering a destination tints
+// only its 64×32 pill rather than the whole 80 DIP cell, leaving the label's
+// band untouched.
+func TestNavigationBarHoverStaysInPill(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor)
+	selected := 0
+	tt := navigationCanvas(th, 480, 320, navBar(&selected, nil, NavigationLabelsAlways))
+	tt.Advance(400 * time.Millisecond)
+	home := tabInfo(t, tt, "Home")
+	before := tt.Image()
+
+	tt.Move(home.Bounds.X+home.Bounds.W/2, home.Bounds.Y+28)
+	tt.Advance(300 * time.Millisecond)
+	after := tt.Image()
+
+	probeX := int(home.Bounds.X+home.Bounds.W/2) - 28
+	insideBefore := before.RGBAAt(probeX, int(home.Bounds.Y+24))
+	insideAfter := after.RGBAAt(probeX, int(home.Bounds.Y+24))
+	if absColorDiff(insideBefore, insideAfter) < 4 {
+		t.Fatalf("hovering the destination did not tint its pill: %v -> %v", insideBefore, insideAfter)
+	}
+	x := int(home.Bounds.X + 2)
+	for _, y := range []int{int(home.Bounds.Y + 58), int(home.Bounds.Y + 70)} {
+		if a, b := before.RGBAAt(x, y), after.RGBAAt(x, y); a != b {
+			t.Fatalf("hover leaked into the label band at (%d,%d): %v -> %v", x, y, a, b)
+		}
+	}
+}
+
+// TestNavigationRailMidExpansionKeepsLabelsAligned checks that a mid-transition
+// frame crossfades the short and long labels in place: both are visible, the
+// long label stays inside its own destination, and the icon keeps its X.
+func TestNavigationRailMidExpansionKeepsLabelsAligned(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor)
+	expanded := false
+	selected := 1 // Search, so Home carries no pill in the way
+	tt := navigationCanvas(th, 600, 400, func(c *ui.Context) {
+		ui.Row(c).FillHeight().Children(func() {
+			NavigationRail(c, []NavigationDestination{
+				{Label: "Home", Icon: mdicon.Add.Draw},
+				{Label: "Search", Icon: mdicon.Search.Draw},
+			}, NavigationRailOptions{Selected: &selected, Expanded: &expanded, Label: "Rail"})
+		})
+	})
+	tt.Advance(400 * time.Millisecond)
+
+	expanded = true
+	tt.Frame()
+	tt.Advance(80 * time.Millisecond)
+	rail, _ := tt.AccessByRole(ui.RoleNavigation, "Rail")
+	if rail.Bounds.W <= navRailCollapsedWidth+2 || rail.Bounds.W >= navRailExpandedWidth-2 {
+		t.Fatalf("the rail is at %.1f, want a mid-expansion frame between %d and %d",
+			rail.Bounds.W, navRailCollapsedWidth, navRailExpandedWidth)
+	}
+	home := tabInfo(t, tt, "Home")
+	bg := SurfaceColorForElevation(th, tokens.Level1)
+	img := tt.Image()
+
+	// Both label layers show: the short one under the icon, the long one
+	// beside it, neither clipped away at the item's edge.
+	short := ui.Rect{
+		X: home.Bounds.X + 4,
+		Y: home.Bounds.Y + navRailLabelTop,
+		W: home.Bounds.W - 8,
+		H: 16,
+	}
+	if n := navInkPixels(img, short, bg); n < 2 {
+		t.Fatalf("the short label paints %d pixels mid-expansion", n)
+	}
+	longBand := ui.Rect{
+		X: home.Bounds.X + 52,
+		Y: home.Bounds.Y + 20,
+		W: home.Bounds.W - 56,
+		H: 16,
+	}
+	if n := navInkPixels(img, longBand, bg); n < 2 {
+		t.Fatalf("the long label paints %d pixels mid-expansion", n)
+	}
+	// The icon's ink stays around x = 28 of the destination.
+	iconBand := ui.Rect{X: home.Bounds.X + 4, Y: home.Bounds.Y + 6, W: 44, H: 24}
+	left, right := -1, -1
+	for x := int(iconBand.X); x < int(iconBand.X+iconBand.W); x++ {
+		for y := int(iconBand.Y); y < int(iconBand.Y+iconBand.H); y++ {
+			if !colorMatches(img.RGBAAt(x, y), bg, 20) {
+				if left < 0 {
+					left = x
+				}
+				right = x
+				break
+			}
+		}
+	}
+	if left < 0 {
+		t.Fatal("the icon paints nothing mid-expansion")
+	}
+	if got := float32(left+right)/2 - home.Bounds.X; math.Abs(float64(got-28)) > 3 {
+		t.Fatalf("the icon centers at %.1f mid-expansion, want 28", got)
+	}
+	// And the long label never spills into the destination after Home.
+	if n := navInkPixels(img, ui.Rect{
+		X: home.Bounds.X + home.Bounds.W + 2,
+		Y: home.Bounds.Y + 20,
+		W: 10,
+		H: 16,
+	}, bg); n != 0 {
+		t.Fatalf("the label spills %d pixels into the next destination", n)
 	}
 }
 

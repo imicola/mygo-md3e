@@ -59,6 +59,10 @@ const (
 	navBarIndicatorWide = 64
 	navBarIndicatorHigh = 32
 	navBarIconSize      = 24
+	// navBarIndicatorTop is the pill's top within the bar.
+	navBarIndicatorTop = 12
+	// navBarLabelTop is the label's top within the bar.
+	navBarLabelTop = 48
 )
 
 type navBarIndicatorKey struct{}
@@ -120,10 +124,6 @@ func navBarDestination(c *ui.Context, th *Theme, cs tokens.ColorScheme, dest *Na
 		FocusRing(false).
 		Grow(1).
 		Height(navBarHeight).
-		Column().
-		Justify(ui.Center).
-		AlignItems(ui.Center).
-		Gap(4).
 		Label(dest.Label).
 		Role(ui.RoleTab)
 	disabled := o.Disabled || dest.Disabled || el.IsDisabled()
@@ -149,7 +149,10 @@ func navBarDestination(c *ui.Context, th *Theme, cs tokens.ColorScheme, dest *Na
 	showLabel := o.Labels == NavigationLabelsAlways ||
 		(o.Labels == NavigationLabelsSelectedOnly && selected)
 	el.Children(func() {
-		ui.Box(c).Size(navBarIndicatorWide, navBarIndicatorHigh).Shrink(0).Center().
+		// The pill and the label are placed by their exact boxes, so their
+		// geometry does not depend on whether a label is shown.
+		ui.Box(c).Size(navBarIndicatorWide, navBarIndicatorHigh).Center().
+			Attach(ui.AnchorTop, ui.AnchorTop).Top(navBarIndicatorTop).
 			Draw(func(p *ui.Painter, r ui.Rect) {
 				if indicator <= 0.001 || r.W <= 0 || r.H <= 0 {
 					return
@@ -171,6 +174,7 @@ func navBarDestination(c *ui.Context, th *Theme, cs tokens.ColorScheme, dest *Na
 			txt := ui.Text(c, dest.Label).NoWrap()
 			applyTypeStyleWithTheme(th, txt, tokens.LabelMedium)
 			txt.TextColor(labelInk)
+			txt.Attach(ui.AnchorTop, ui.AnchorTop).Top(navBarLabelTop)
 		}
 	})
 	if el.Clicked() && !disabled {
@@ -181,9 +185,21 @@ func navBarDestination(c *ui.Context, th *Theme, cs tokens.ColorScheme, dest *Na
 			o.Changed(i)
 		}
 	}
+	// The whole cell stays the hot zone, focus target and accessible tab; the
+	// hover, focus and ripple feedback paint only in the pill.
 	attachRippleWithTheme(th, el, StateLayerOptions{
 		Color:    iconInk,
 		Disabled: disabled,
+		Clip: func(r ui.Rect) (ui.Rect, [4]float32) {
+			box := ui.Rect{
+				X: r.X + (r.W-navBarIndicatorWide)/2,
+				Y: r.Y + navBarIndicatorTop,
+				W: navBarIndicatorWide,
+				H: navBarIndicatorHigh,
+			}
+			radius := float32(navBarIndicatorHigh / 2)
+			return box, [4]float32{radius, radius, radius, radius}
+		},
 	})
 }
 
