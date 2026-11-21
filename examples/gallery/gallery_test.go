@@ -280,6 +280,7 @@ func TestGalleryInputsAndFeedback(t *testing.T) {
 		t.Fatal("the Full name field is missing")
 	}
 	tt.ClickAt(centerOf(field.Bounds))
+	tt.Key(ui.Cmd, ui.KeyA)
 	tt.Type("Ada Lovelace")
 	tt.Advance(200 * time.Millisecond)
 	if a.inputs.name != "Ada Lovelace" {

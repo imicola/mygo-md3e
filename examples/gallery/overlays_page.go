@@ -152,9 +152,7 @@ func (a *app) overlaysPageView(c *ui.Context) {
 							md3e.Text(c, "Right-click this card for a context menu", tokens.BodySmall)
 						}), overlayMenuItems(p), md3e.MenuOptions{Label: "Card actions"})
 				})
-				if p.last != "" {
-					caption(c, "Last action: "+p.last)
-				}
+				statusLine(c, "Last action: ", p.last)
 			})
 
 			section(c, "Date pickers", func() {

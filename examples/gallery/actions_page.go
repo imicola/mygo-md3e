@@ -78,9 +78,7 @@ func (a *app) actionsPageView(c *ui.Context) {
 							Variant: md3e.ButtonTonal, Size: tokens.SizeS, Shape: md3e.ButtonShapeSquare,
 						})
 					})
-					if p.lastAction != "" {
-						caption(c, "Last action: "+p.lastAction)
-					}
+					statusLine(c, "Last action: ", p.lastAction)
 				})
 			})
 
@@ -175,9 +173,7 @@ func (a *app) actionsPageView(c *ui.Context) {
 						{Label: "Add link", Icon: mdicon.ChevronRight.Draw, OnClick: func() { p.lastAction = "Add link" }},
 					}, md3e.FABMenuOptions{Label: "Create", MenuLabel: "Create actions"})
 				})
-				if p.lastAction != "" {
-					caption(c, "Last action: "+p.lastAction)
-				}
+				statusLine(c, "Last action: ", p.lastAction)
 			})
 
 			section(c, "Top app bars", func() {
@@ -236,9 +232,7 @@ func (a *app) actionsPageView(c *ui.Context) {
 						Orientation: md3e.ToolbarVertical, Tone: md3e.ToolbarVibrant, Label: "History",
 					})
 				})
-				if p.lastAction != "" {
-					caption(c, "Last action: "+p.lastAction)
-				}
+				statusLine(c, "Last action: ", p.lastAction)
 			})
 		})
 }

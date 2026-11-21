@@ -65,7 +65,7 @@ func (a *app) motionPageView(c *ui.Context) {
 					md3e.Slider(c.Key("progress-value"), &p.value, 0, 1, md3e.SliderOptions{
 						Label: "Progress value", Step: 0.01,
 						FormatLabel: func(v float64) string { return fmt.Sprintf("%.0f%%", v*100) },
-					})
+					}).Grow(1)
 					md3e.Text(c, "100%", tokens.LabelSmall).TextColor(th.Colors.OnSurfaceVariant)
 				})
 				ui.Column(c).FillWidth().Gap(14).Children(func() {

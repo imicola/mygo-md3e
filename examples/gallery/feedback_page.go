@@ -113,9 +113,7 @@ func (a *app) feedbackPageView(c *ui.Context) {
 						Label:     "Clickable card",
 					})
 				})
-				if p.clicked != "" {
-					caption(c, "Last action: "+p.clicked)
-				}
+				statusLine(c, "Last action: ", p.clicked)
 			})
 
 			section(c, "Dividers", func() {
@@ -125,9 +123,9 @@ func (a *app) feedbackPageView(c *ui.Context) {
 						md3e.Text(c, "Start", tokens.LabelMedium)
 						md3e.Divider(c, md3e.DividerOptions{Vertical: true})
 						md3e.Text(c, "End", tokens.LabelMedium)
-						md3e.Divider(c, md3e.DividerOptions{Inset: 40})
-						md3e.Text(c, "Inset", tokens.LabelMedium)
 					})
+					md3e.Divider(c, md3e.DividerOptions{Inset: 40})
+					caption(c, "The last divider insets 40 DIP from the leading edge.")
 				})
 			})
 

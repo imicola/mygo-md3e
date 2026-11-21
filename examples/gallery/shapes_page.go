@@ -93,7 +93,7 @@ func (a *app) shapesPageView(c *ui.Context) {
 				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(12).Children(func() {
 					md3e.Text(c, "0", tokens.LabelSmall).TextColor(cs.OnSurfaceVariant)
 					md3e.Slider(c.Key("shape-progress"), &p.progress, 0, 1,
-						md3e.SliderOptions{Label: "Morph progress", Step: 0.01})
+						md3e.SliderOptions{Label: "Morph progress", Step: 0.01}).Grow(1)
 					md3e.Text(c, "1", tokens.LabelSmall).TextColor(cs.OnSurfaceVariant)
 				})
 				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(12).Wrap().Children(func() {

@@ -37,6 +37,7 @@ func (p *inputsPage) ensure() {
 		p.slider = 0.35
 		p.lo, p.hi = 0.25, 0.7
 		p.tags = []string{"Kotlin", "Swift", "Go"}
+		p.name = "Ada Lovelace"
 	}
 }
 

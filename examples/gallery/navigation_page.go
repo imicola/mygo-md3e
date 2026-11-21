@@ -71,7 +71,7 @@ func (a *app) navigationPageView(c *ui.Context) {
 		"Navigation bars, rails and drawers, the primary and secondary tabs, and the hero, multi-browse and uncontained carousels.",
 		func() {
 			section(c, "Navigation bar", func() {
-				ui.Box(c).Width(560).Children(func() {
+				ui.Box(c).FillWidth().MaxWidth(560).Children(func() {
 					md3e.NavigationBar(c, navDestinations, md3e.NavigationBarOptions{
 						Selected: &p.bar, Labels: md3e.NavigationLabelsAlways, Label: "Demo navigation bar",
 					})

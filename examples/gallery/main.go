@@ -354,3 +354,12 @@ func caption(c *ui.Context, text string) {
 	cs := md3e.CurrentTheme(c).Colors
 	md3e.Text(c, text, tokens.BodySmall).TextColor(cs.OnSurfaceVariant)
 }
+
+// statusLine is a caption that keeps its place before the first action, so a
+// page does not jump when a control reports one.
+func statusLine(c *ui.Context, prefix, value string) {
+	if value == "" {
+		value = "None yet"
+	}
+	caption(c, prefix+value)
+}
