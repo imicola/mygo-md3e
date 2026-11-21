@@ -101,8 +101,8 @@ type toolbarFadeKey struct{}
 // spring, and Visible hides the whole group with a scale and fade:
 //
 //	md3e.FloatingToolbar(c, []md3e.FloatingToolbarItem{
-//		{Label: "Bold", Icon: mdicon.Edit.Draw, OnClick: app.bold},
-//		{Label: "Add", Icon: mdicon.Add.Draw, OnClick: app.add},
+//		{Label: "Bold", Icon: editIcon, OnClick: app.bold},
+//		{Label: "Add", Icon: addIcon, OnClick: app.add},
 //	}, md3e.FloatingToolbarOptions{Label: "Format", Fab: &app.fab})
 func FloatingToolbar(c *ui.Context, items []FloatingToolbarItem, opts ...FloatingToolbarOptions) ui.Element {
 	if len(opts) > 1 {

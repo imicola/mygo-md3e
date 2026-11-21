@@ -97,7 +97,7 @@ type listTrailingKey struct{}
 // layout through ui's logical edges:
 //
 //	md3e.List(c, []md3e.ListItem{
-//		{Headline: "Wi-Fi", SupportingText: "Home network", Icon: mdicon.Wifi.Draw},
+//		{Headline: "Wi-Fi", SupportingText: "Home network", Icon: wifiIcon},
 //		{Headline: "Bluetooth", SupportingText: "2 devices"},
 //	}, md3e.ListOptions{Label: "Settings", Segmented: true, Selected: &app.setting})
 func List(c *ui.Context, items []ListItem, opts ...ListOptions) ui.Element {

@@ -75,8 +75,8 @@ type fabMenuPoseKey struct{ i int }
 // more than six items.
 //
 //	md3e.FABMenu(c, []md3e.FABMenuItem{
-//		{Label: "New file", Icon: mdicon.Add.Draw, OnClick: app.newFile},
-//		{Label: "New folder", Icon: mdicon.Edit.Draw, OnClick: app.newFolder},
+//		{Label: "New file", Icon: addIcon, OnClick: app.newFile},
+//		{Label: "New folder", Icon: editIcon, OnClick: app.newFolder},
 //	}, md3e.FABMenuOptions{Label: "Create"})
 func FABMenu(c *ui.Context, items []FABMenuItem, opts ...FABMenuOptions) ui.Element {
 	if len(opts) > 1 {

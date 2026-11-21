@@ -259,7 +259,7 @@ if tt.FramePending() {
 }
 ```
 
-`golden_test.go` 使用 `github.com/egoist/mygo/ui/golden` 锁定无文字依赖的纯几何渲染基线（`testdata/*.png`），规避跨平台字体光栅化差异：
+`golden_test.go` 使用 `github.com/egoist/mygo/ui/golden` 锁定无文字依赖的纯几何渲染基线（`testdata/<name>.png` 及存在时的非 Windows 平台基线 `testdata/<name>_<GOOS>.png`），规避跨平台字体与光栅化差异：
 
 ```sh
 # 日常校验（不会残留 *.got.png）
@@ -272,10 +272,10 @@ MYGO_UPDATE_GOLDEN=1 CGO_ENABLED=0 go test -count=1 -run TestGolden .
 ### 全套构建与交叉编译命令
 
 ```sh
-# 零 cgo 编译、静态分析、MyGo 生命周期检查与全量测试
+# 零 cgo 编译、静态分析、MyGo 生命周期检查（mygo vet 不带 ./... 参数）与全量测试
 CGO_ENABLED=0 go build ./...
 CGO_ENABLED=0 go vet ./...
-go tool mygo vet ./...
+go tool mygo vet
 CGO_ENABLED=0 go test -count=1 ./...
 
 # M2 独立示例模块

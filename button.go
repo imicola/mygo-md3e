@@ -37,9 +37,8 @@ const (
 	ButtonShapeSquare
 )
 
-// IconDraw paints an icon inside r using ink. A built-in md3e/internal/mdicon
-// icon's Draw method is one, as mdicon.Check.Draw, and so is any draw function
-// of the same shape for custom artwork.
+// IconDraw paints an icon inside r using ink, such as any custom drawing
+// function matching this signature.
 type IconDraw func(p *ui.Painter, r ui.Rect, ink ui.Color)
 
 // ButtonOptions configures Button. The zero value is a filled, extra small,
@@ -80,7 +79,7 @@ type buttonCornerKey struct{}
 // focus, as ButtonBase's do; assistive technology sees a button named by the
 // label:
 //
-//	md3e.Button(c, "Save", md3e.ButtonOptions{LeadingIcon: mdicon.Check.Draw})
+//	save := md3e.Button(c, "Save", md3e.ButtonOptions{LeadingIcon: saveIcon})
 //	if save.Clicked() {
 //		app.save()
 //	}

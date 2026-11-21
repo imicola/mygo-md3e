@@ -80,8 +80,8 @@ type navBarItemKey struct{ i int }
 // settles it at once:
 //
 //	md3e.NavigationBar(c, []md3e.NavigationDestination{
-//		{Label: "Home", Icon: mdicon.Home.Draw},
-//		{Label: "Inbox", Icon: mdicon.Mail.Draw, Badge: "3"},
+//		{Label: "Home", Icon: homeIcon},
+//		{Label: "Inbox", Icon: mailIcon, Badge: "3"},
 //	}, md3e.NavigationBarOptions{Selected: &app.tab})
 func NavigationBar(c *ui.Context, destinations []NavigationDestination, opts ...NavigationBarOptions) ui.Element {
 	if len(opts) > 1 {

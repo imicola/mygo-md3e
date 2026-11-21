@@ -259,7 +259,7 @@ if tt.FramePending() {
 }
 ```
 
-`golden_test.go` locks text-free geometric renderings (`testdata/*.png`) via `github.com/egoist/mygo/ui/golden` to avoid cross-platform font rasterization drift:
+`golden_test.go` locks text-free geometric renderings (`testdata/<name>.png`, and `testdata/<name>_<GOOS>.png` on non-Windows hosts when present) via `github.com/egoist/mygo/ui/golden` to avoid cross-platform font rasterization drift:
 
 ```sh
 # Normal verification (never leaves *.got.png behind)
@@ -272,10 +272,10 @@ MYGO_UPDATE_GOLDEN=1 CGO_ENABLED=0 go test -count=1 -run TestGolden .
 ### Full Check & Cross-Compilation Suite
 
 ```sh
-# Build, static analysis, MyGo lifecycle vet, and all unit/golden/gallery tests
+# Build, static analysis, MyGo lifecycle vet (run without ./... args), and all tests
 CGO_ENABLED=0 go build ./...
 CGO_ENABLED=0 go vet ./...
-go tool mygo vet ./...
+go tool mygo vet
 CGO_ENABLED=0 go test -count=1 ./...
 
 # Standalone M2 example module

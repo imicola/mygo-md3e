@@ -116,7 +116,7 @@ type fabFadeKey struct{}
 // names nothing to assistive technology; FAB panics for an empty one. The
 // optional Visible pointer hides the button with a scale and fade when false:
 //
-//	md3e.FAB(c, "Compose", mdicon.Add.Draw, md3e.FABOptions{Color: md3e.FABTertiary})
+//	compose := md3e.FAB(c, "Compose", addIcon, md3e.FABOptions{Color: md3e.FABTertiary})
 //	if compose.Clicked() {
 //		app.startCompose()
 //	}
@@ -226,7 +226,7 @@ type extFabFadeKey struct{}
 // square, icon-only width to its full width and the text fades with it, as an
 // app makes room around a scrolling list:
 //
-//	md3e.ExtendedFAB(c, "New message", mdicon.Edit.Draw,
+//	md3e.ExtendedFAB(c, "New message", editIcon,
 //		md3e.ExtendedFABOptions{Expanded: &app.composeExpanded})
 func ExtendedFAB(c *ui.Context, label string, icon IconDraw, opts ...ExtendedFABOptions) ui.Element {
 	if len(opts) > 1 {

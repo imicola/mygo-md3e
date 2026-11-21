@@ -24,7 +24,7 @@ type PlainTooltipOptions struct {
 //
 // It returns anchor for chaining:
 //
-//	btn := md3e.PlainTooltip(c, md3e.IconButton(c, mdicon.Share.Draw), "Share with others")
+//	btn := md3e.PlainTooltip(c, md3e.IconButton(c, "Share", shareIcon), "Share with others")
 func PlainTooltip(c *ui.Context, anchor ui.Element, text string, opts ...PlainTooltipOptions) ui.Element {
 	if len(opts) > 1 {
 		panic("md3e: PlainTooltip takes at most one PlainTooltipOptions")

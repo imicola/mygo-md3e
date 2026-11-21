@@ -63,8 +63,8 @@ type navRailItemKey struct{ i int }
 // destinations, Enter or Space choosing:
 //
 //	md3e.NavigationRail(c, []md3e.NavigationDestination{
-//		{Label: "Home", Icon: mdicon.Home.Draw},
-//		{Label: "Mail", Icon: mdicon.Mail.Draw, Badge: "3"},
+//		{Label: "Home", Icon: homeIcon},
+//		{Label: "Mail", Icon: mailIcon, Badge: "3"},
 //	}, md3e.NavigationRailOptions{Selected: &app.tab, Expanded: &app.railExpanded})
 func NavigationRail(c *ui.Context, destinations []NavigationDestination, opts ...NavigationRailOptions) ui.Element {
 	if len(opts) > 1 {

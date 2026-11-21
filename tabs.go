@@ -85,7 +85,7 @@ type tabsIndicatorState struct {
 //
 //	md3e.PrimaryTabs(c, []md3e.TabItem{
 //		{Label: "Overview"},
-//		{Label: "Activity", Icon: mdicon.Star.Draw},
+//		{Label: "Activity", Icon: starIcon},
 //	}, md3e.TabsOptions{Selected: &app.tab})
 func PrimaryTabs(c *ui.Context, tabs []TabItem, opts ...TabsOptions) ui.Element {
 	return buildTabs(c, tabs, opts, true)

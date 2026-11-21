@@ -92,7 +92,7 @@ type toggleIconCornerKey struct{}
 // The MD3E Focus state layer marks keyboard focus; ui's default focus ring is
 // turned off so it cannot overdraw the morphing corner.
 //
-//	md3e.IconButton(c, "Search", mdicon.Search.Draw, md3e.IconButtonOptions{Size: tokens.SizeS})
+//	search := md3e.IconButton(c, "Search", searchIcon, md3e.IconButtonOptions{Size: tokens.SizeS})
 //	if search.Clicked() {
 //		app.openSearch()
 //	}
@@ -167,8 +167,8 @@ func IconButton(c *ui.Context, label string, icon IconDraw, opts ...IconButtonOp
 // identity changes with the data needs its persistent key before it is built,
 // so that its state and focus follow it:
 //
-//	md3e.ToggleIconButton(c.Key("favorite"), &app.favorite, "Favorite", mdicon.Star.Draw,
-//		md3e.ToggleIconButtonOptions{SelectedIcon: mdicon.Star.Draw})
+//	md3e.ToggleIconButton(c.Key("favorite"), &app.favorite, "Favorite", starOutlineIcon,
+//		md3e.ToggleIconButtonOptions{SelectedIcon: starFilledIcon})
 func ToggleIconButton(c *ui.Context, on *bool, label string, icon IconDraw, opts ...ToggleIconButtonOptions) ui.Element {
 	if len(opts) > 1 {
 		panic("md3e: ToggleIconButton takes at most one ToggleIconButtonOptions")

@@ -150,7 +150,7 @@ type BadgedBoxOptions struct {
 // places a badge on an icon. The badge keeps its own accessible name, and an
 // optional Label describes the pair:
 //
-//	md3e.BadgedBox(c, func() { md3e.IconButton(c, mdicon.Mail.Draw) }, func() ui.Element {
+//	md3e.BadgedBox(c, func() { md3e.IconButton(c, "Inbox", mailIcon) }, func() ui.Element {
 //		return md3e.Badge(c, "3", md3e.BadgeOptions{Label: "3 unread"})
 //	}, md3e.BadgedBoxOptions{Label: "Inbox"})
 func BadgedBox(c *ui.Context, content func(), badge func() ui.Element, opts ...BadgedBoxOptions) ui.Element {

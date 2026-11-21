@@ -75,7 +75,7 @@ const (
 //
 //	md3e.TopAppBar(c, "Inbox", md3e.TopAppBarOptions{
 //		Variant:        md3e.TopAppBarLarge,
-//		NavigationIcon: mdicon.Menu.Draw,
+//		NavigationIcon: menuIcon,
 //		Subtitle:       "3 unread",
 //		ScrollProgress: app.scroll,
 //	})

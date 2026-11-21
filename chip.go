@@ -52,7 +52,7 @@ type ChipOptions struct {
 // SurfaceContainerLow fill. The whole box is the hit target.
 //
 //	md3e.AssistChip(c, "Add", md3e.ChipOptions{
-//		LeadingIcon: mdicon.Add.Draw,
+//		LeadingIcon: addIcon,
 //		OnClick:     app.add,
 //	})
 func AssistChip(c *ui.Context, label string, opts ...ChipOptions) ui.Element {
@@ -183,7 +183,7 @@ type (
 // checked state follows *selected.
 //
 //	md3e.FilterChip(c, &app.onlyUnread, "Unread", md3e.FilterChipOptions{
-//		LeadingIcon: mdicon.Star.Draw,
+//		LeadingIcon: starIcon,
 //	})
 func FilterChip(c *ui.Context, selected *bool, label string, opts ...FilterChipOptions) ui.Element {
 	if len(opts) > 1 {

@@ -97,8 +97,8 @@ type navDrawerDragState struct {
 // focus order while closed, and names itself a region:
 //
 //	md3e.NavigationDrawer(c, []md3e.NavigationDrawerItem{
-//		{Label: "Inbox", Icon: mdicon.Mail.Draw, Badge: "3"},
-//		{Label: "Settings", Icon: mdicon.Settings.Draw, Section: "Account"},
+//		{Label: "Inbox", Icon: mailIcon, Badge: "3"},
+//		{Label: "Settings", Icon: settingsIcon, Section: "Account"},
 //	}, md3e.NavigationDrawerOptions{Modal: true, Open: &app.drawer, Selected: &app.page})
 func NavigationDrawer(c *ui.Context, items []NavigationDrawerItem, opts ...NavigationDrawerOptions) ui.Element {
 	if len(opts) > 1 {

@@ -161,7 +161,7 @@ MD3E 将动效分为 **Spatial（空间：位移、缩放、尺寸、圆角、�
 2. **Connected / Standard ButtonGroup**：
    - `Standard` 模式下，被按压或选中的按钮沿主轴微微变宽并压缩相邻按钮宽度（弹性权重挤压），同时动态收缩自身圆角。
    - `Connected` 模式下，首项外侧大圆角、末项外侧大圆角、相邻接缝处使用小内圆角（如 `8` 或 `4`），选中项切为全圆角（Full）。
-3. **SplitButton**：由主动作段与菜单触发段组成（`ui.SplitButtonParts` 语义对齐）；展开菜单时，触发段图标（Chevron）旋转 180° 且该段四圆角从非对称连接圆角形变为对称圆角/全圆角，关闭时弹簧回位。
+3. **SplitButton**：由主动作段与菜单触发段组成（`SplitButton` 返回 `(group, action, arrow, panel ui.Element)`，与 `ui.SplitButtonParts` 语义对齐）；展开菜单时，触发段图标（Chevron）旋转 180° 且该段四圆角从非对称连接圆角形变为对称圆角/全圆角，关闭时弹簧回位。
 4. **FABMenu（取代旧版 Speed Dial）**：必须从标准 FAB（不能从 ExtendedFAB）原地展开 **2–6 个** 大圆角胶囊菜单项（带 `Scrim` 遮罩），原 FAB 变形并切换为高对比关闭按钮（`×` 旋转入场）。
 5. **FloatingToolbar**：独立悬浮容器（`56`/`64` 高或垂直列），支持 `Standard` 与 `Vibrant`（`PrimaryContainer` 高亮底色）两种色系，支持紧邻耦合一颗标准 FAB，支持随内容滚动收起/展开选项。
 6. **LoadingIndicator（Shape-Morphing）**：

@@ -1,18 +1,18 @@
 # 架构设计规范（Architecture Guide）
 
-本文档定义了 `mygo-md3e` 的包分层、模块依赖边界、统一组件 API 范式与内部复用基础设施，所有任务点（`plan.md`）的实现必须遵循本架构。
+本文档定义了 `mygo-md3e` 的包分层、模块依赖边界、统一组件 API 范式与内部复用基础设施。
 
 ---
 
 ## 1. 模块与目录布局
 
-Go 模块路径建议：`mygo-md3e`（通过本地 `replace github.com/egoist/mygo => ./mygo` 与 `tool github.com/egoist/mygo/cmd/mygo` 绑定上游 MyGo 工具包）。
+Go 模块路径：`github.com/imicola/mygo-md3e`（直接依赖上游 `github.com/egoist/mygo` 与 `tool github.com/egoist/mygo/cmd/mygo`；生命周期静态检查命令为不带路径参数的 `go tool mygo vet`）。
 
 ```text
 .
 ├── RULE.md                 # Agent 提交与四重门禁铁律
 ├── AGENTS.md               # MyGo 技术约束与避坑指南
-├── plan.md                 # 里程碑与原子任务点路线图（进度账本）
+├── doc.go                  # 根包概览与版本声明
 ├── docs/
 │   ├── architecture.md     # 本文件：架构与 API 设计范式
 │   └── md3e-spec.md        # MD3E 精确设计令牌与组件行为规格
@@ -21,6 +21,7 @@ Go 模块路径建议：`mygo-md3e`（通过本地 `replace github.com/egoist/my
 │   ├── hct.go              # sRGB/XYZ/Lab/CAM16/HCT 转换、对比度计算
 │   ├── palette.go          # TonalPalette & CorePalette
 │   ├── scheme.go           # DynamicScheme (TonalSpot/Expressive/Vibrant/...) & 45+ ColorRoles
+│   ├── size.go             # XS..XL 尺寸档位（SizeTier / SizeSpec）
 │   ├── shape.go            # CornerRadius / ShapeScale tokens
 │   ├── type.go             # TypographyScale（含 Emphasized 强调样式）
 │   └── elevation.go        # Elevation Level 0..5 阴影与表面色调混合参数
@@ -33,7 +34,7 @@ Go 模块路径建议：`mygo-md3e`（通过本地 `replace github.com/egoist/my
 │   └── draw.go             # ui.Painter 辅助绘制/裁切函数
 ├── internal/
 │   └── mdicon/             # M3: 内置无外部依赖矢量路径/图标（Check, Close, Chevron, Search...）
-├── theme.go                # M3: md3e.Theme、ThemeScope/Themed、系统偏好桥接、ui.Theme 转换
+├── theme.go                # M3: md3e.Theme、ThemeScope、系统偏好桥接、ui.Theme 转换
 ├── surface.go              # M3: Surface 容器、Elevation 阴影/Tonal 叠色、Typography 文本辅助
 ├── ripple.go               # M3: StateLayer 状态层（Hover/Focus/Pressed/Dragged）与 Expressive Ripple
 ├── button.go               # M4: Expressive Button (Filled/Tonal/Elevated/Outlined/Text × XS-XL)
@@ -66,9 +67,11 @@ Go 模块路径建议：`mygo-md3e`（通过本地 `replace github.com/egoist/my
 ├── dialog.go               # M7: AlertDialog & FullScreenDialog
 ├── sheet.go                # M7: ModalBottomSheet & StandardBottomSheet
 ├── menu.go                 # M7: Expressive Menu / DropdownMenu / ContextMenu 样式
-├── datepicker.go           # M8: DatePicker (Docked / Modal)
+├── datepicker.go           # M8: DatePicker (Docked / Modal) & DateRangePicker
 ├── timepicker.go           # M8: TimePicker (Dial / Input)
+├── golden_test.go          # 纯几何 Golden 视觉基线测试（testdata/）
 └── examples/
+    ├── m2-demo/            # M2: 独立可运行的令牌/动效/形状预览模块
     └── gallery/            # M8: 交互式 MD3E 全量演示与主题/动效/形状游乐场
 ```
 
@@ -92,7 +95,7 @@ MyGo 的 `ui.Context` 本身携带有 `*ui.Theme`（通过 `c.Theme()` 读取、
 
 1. **默认回退**：若外层未显式设置 `md3e.Theme`，组件内部调用 `md3e.CurrentTheme(c)` 时，应基于 `c.Theme()` 与 `c.Preferences()`（暗色模式 `Dark`、系统强调色 `Accent`、高对比度 `HighContrast`、减少动效 `ReduceMotion`）自动派生默认 MD3E 主题（带轻量化缓存，避免每帧重复计算整套 HCT 色板）。
 2. **局部与全局主题作用域**：
-   - `md3e.Themed(c *ui.Context, theme *md3e.Theme) ui.Element`（或 `md3e.WithTheme(c, theme, func())`）：内部同时调用 `ui.Themed(c, theme.UITheme())` 并通过元素/上下文作用域传递 `*md3e.Theme`，使得根窗口、`ui.Overlay` 弹出层及嵌套预览区都能正确获取局部主题。
+   - `md3e.ThemeScope(c *ui.Context, theme *md3e.Theme, fn func()) ui.Element`：内部同时调用 `ui.Themed(c, theme.UITheme())` 并通过元素/上下文作用域传递 `*md3e.Theme`，使得根窗口、`ui.Overlay` 弹出层及嵌套预览区都能正确获取局部主题。
    - 当存在嵌套 `ui.Themed` 且与外层 `md3e.Theme` 不一致时，主题解析应能正确感知暗色/强调色变化，不出现“外层切暗色、内层控件颜色错乱”的问题。
 
 ---
@@ -103,8 +106,8 @@ MyGo 的 `ui.Context` 本身携带有 `*ui.Theme`（通过 `c.Theme()` 读取、
 
 1. **函数签名规范**：
    - 首参数恒为 `c *ui.Context`。
-   - 数据绑定采用指针传递（如 `checked *bool`、`selected *int`、`value *float64`、`text *string`、`open *bool`），遵循 MyGo“构造即写入输入、立即读出变更或通过 `.Changed()` / `.OnChange(...)` 观测”的契约。
-   - 组件返回 `ui.Element`（复合组件如 `SplitButton`、`Tabs`、`NavigationBar` 等返回对应的 checked `*Parts` 结构体，如 `SplitButtonParts`、`TextFieldParts`），以便调用方继续链式调用 `.Width(...)`、`.Disabled(...)`、`.Label(...)`、`.Bind(&handle)` 等。
+   - 数据绑定采用指针传递（如 `checked *bool`、`selected *int`、`value *float64`、`text *string`、`open *bool`、`value *time.Time`），遵循 MyGo“构造即写入输入、立即读出变更或通过 `.Changed()` / `OnChanged` 回调观测”的契约。
+   - 绝大多数组件返回 root `ui.Element`（`SplitButton` 返回 `(group, action, menuBtn, panel ui.Element)`），以便调用方继续链式调用 `.Width(...)`、`.Disabled(...)`、`.Label(...)`、`.Bind(&handle)` 等。
 2. **可变配置（Options Pattern）**：
    - 高频简洁组件提供清晰参数或可选尾参 `opts ...ButtonOptions`（多于 1 个 Options 时显式 `panic`，如 `mygo/plugins/loading` 规范），零值结构体即规范默认。
    - **禁止使用布尔参数堆砌**：用枚举类型（如 `ButtonVariant`、`SizeTier`、`ButtonShape`、`TextFieldVariant`）替代多个 `bool` 标志。
