@@ -361,7 +361,7 @@
     - `picker_test.go` 覆盖点击选日、跨月翻页、日期范围跨天高亮、表盘选时→自动切分及键盘/输入框模式同步、完整无障碍网格/按钮角色检验。
   - **Commit**：`feat(pickers): [T8.1] implement DatePicker and TimePicker`
 
-- [ ] **T8.2：构建交互式 MD3E 全量演示画廊（`examples/gallery`）**
+- [x] **T8.2：构建交互式 MD3E 全量演示画廊（`examples/gallery`）**
   - **交付物**：`examples/gallery/`（多页面 `ui.Router` 应用，按分类展示所有 M1–M8 组件）
   - **核心能力**：
     - 顶部/侧边切换实时 Seed Color、DynamicScheme Variant（TonalSpot/Expressive/Vibrant...）、Light/Dark、Contrast（Standard/Medium/High）、MotionScheme（Expressive/Standard）、RTL 切换；
