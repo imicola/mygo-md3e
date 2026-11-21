@@ -151,27 +151,27 @@ func navBarDestination(c *ui.Context, th *Theme, cs tokens.ColorScheme, dest *Na
 	el.Children(func() {
 		// The pill and the label are placed by their exact boxes, so their
 		// geometry does not depend on whether a label is shown.
-		ui.Box(c).Size(navBarIndicatorWide, navBarIndicatorHigh).Center().
-			Attach(ui.AnchorTop, ui.AnchorTop).Top(navBarIndicatorTop).
-			Draw(func(p *ui.Painter, r ui.Rect) {
-				if indicator <= 0.001 || r.W <= 0 || r.H <= 0 {
-					return
-				}
-				alpha := clampF32(indicator, 0, 1)
-				scale := min(indicator, 1.1)
-				w := r.W * scale
-				box := ui.Rect{X: r.X + (r.W-w)/2, Y: r.Y, W: w, H: r.H}
-				pill := cs.SecondaryContainer.Alpha(alpha)
-				if disabled {
-					pill = cs.OnSurface.Alpha(float32(tokens.DisabledContainerOpacity) * alpha)
-				}
-				p.FillRadii(box, [4]float32{r.H / 2, r.H / 2, r.H / 2, r.H / 2}, pill)
-			}).
+		pillBox := ui.Box(c).Width(navBarIndicatorWide).MaxWidthPercent(100).Height(navBarIndicatorHigh).Center().
+			Attach(ui.AnchorTop, ui.AnchorTop).Top(navBarIndicatorTop)
+		pillBox.Draw(func(p *ui.Painter, r ui.Rect) {
+			if !pillBox.Valid() || indicator <= 0.001 || r.W <= 0 || r.H <= 0 {
+				return
+			}
+			alpha := clampF32(indicator, 0, 1)
+			scale := min(indicator, 1.1)
+			w := r.W * scale
+			box := ui.Rect{X: r.X + (r.W-w)/2, Y: r.Y, W: w, H: r.H}
+			pill := cs.SecondaryContainer.Alpha(alpha)
+			if disabled {
+				pill = cs.OnSurface.Alpha(float32(tokens.DisabledContainerOpacity) * alpha)
+			}
+			p.FillRadii(box, [4]float32{r.H / 2, r.H / 2, r.H / 2, r.H / 2}, pill)
+		}).
 			Children(func() {
 				badgedIcon(c, dest, navBarIconSize, iconInk)
 			})
 		if showLabel {
-			txt := ui.Text(c, dest.Label).NoWrap()
+			txt := ui.Text(c, dest.Label).SingleLine().MaxWidthPercent(96)
 			applyTypeStyleWithTheme(th, txt, tokens.LabelMedium)
 			txt.TextColor(labelInk)
 			txt.Attach(ui.AnchorTop, ui.AnchorTop).Top(navBarLabelTop)
@@ -187,14 +187,15 @@ func navBarDestination(c *ui.Context, th *Theme, cs tokens.ColorScheme, dest *Na
 	}
 	// The whole cell stays the hot zone, focus target and accessible tab; the
 	// hover, focus and ripple feedback paint only in the pill.
-	attachRippleWithTheme(th, el, StateLayerOptions{
+	attachRippleWithContext(c, th, el, StateLayerOptions{
 		Color:    iconInk,
 		Disabled: disabled,
 		Clip: func(r ui.Rect) (ui.Rect, [4]float32) {
+			pillW := min(float32(navBarIndicatorWide), r.W)
 			box := ui.Rect{
-				X: r.X + (r.W-navBarIndicatorWide)/2,
+				X: r.X + (r.W-pillW)/2,
 				Y: r.Y + navBarIndicatorTop,
-				W: navBarIndicatorWide,
+				W: pillW,
 				H: navBarIndicatorHigh,
 			}
 			radius := float32(navBarIndicatorHigh / 2)

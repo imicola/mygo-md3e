@@ -102,7 +102,9 @@ func NavigationRail(c *ui.Context, destinations []NavigationDestination, opts ..
 	// icon and label, so the mid-transition frames stay aligned rather than
 	// switching layouts on the boolean.
 	expand := animateWithTheme(root, th, navRailExpandKey{}, expandTarget, motion.DefaultSpatial)
-	root.Width(navRailCollapsedWidth + (navRailExpandedWidth-navRailCollapsedWidth)*expand)
+	railW := navRailCollapsedWidth + (navRailExpandedWidth-navRailCollapsedWidth)*expand
+	root.Width(railW)
+	itemW := max(0, railW-2*navRailPaddingX)
 
 	root.Children(func() {
 		if o.Header != nil {
@@ -117,7 +119,7 @@ func NavigationRail(c *ui.Context, destinations []NavigationDestination, opts ..
 			ui.Scroll(c.Key(navRailScrollKey{})).FillWidth().Children(func() {
 				ui.Column(c).FillWidth().PaddingX(navRailPaddingX).Gap(8).Children(func() {
 					for i := range destinations {
-						navRailDestination(c, th, cs, &destinations[i], i, o, expand)
+						navRailDestination(c, th, cs, &destinations[i], i, o, expand, itemW)
 					}
 				})
 			})
@@ -133,7 +135,7 @@ type navRailScrollKey struct{}
 // navRailDestination builds one destination of a NavigationRail. expand is the
 // spring's 0 (collapsed) to 1 (expanded) progress, shared by every destination
 // and the rail's width.
-func navRailDestination(c *ui.Context, th *Theme, cs tokens.ColorScheme, dest *NavigationDestination, i int, o NavigationRailOptions, expand float32) {
+func navRailDestination(c *ui.Context, th *Theme, cs tokens.ColorScheme, dest *NavigationDestination, i int, o NavigationRailOptions, expand, itemW float32) {
 	c.Key(navRailItemKey{i: i})
 	el := ui.ButtonBase(c).
 		DimDisabled(false).
@@ -171,12 +173,13 @@ func navRailDestination(c *ui.Context, th *Theme, cs tokens.ColorScheme, dest *N
 	}
 
 	t := clampF32(expand, 0, 1)
+	rtl := c.Direction() == ui.RightToLeft
 	el.Row().AlignItems(ui.Center).Radius(navRailItemHeight / 2)
 	el.Draw(func(p *ui.Painter, r ui.Rect) {
-		if indicator <= 0.001 || r.W <= 0 || r.H <= 0 {
+		if !el.Valid() || indicator <= 0.001 || r.W <= 0 || r.H <= 0 {
 			return
 		}
-		box, radius := navRailPillRect(r, t, indicator)
+		box, radius := navRailPillRect(r, t, indicator, rtl)
 		p.FillRadii(box, [4]float32{radius, radius, radius, radius}, pillColor)
 	})
 
@@ -190,19 +193,27 @@ func navRailDestination(c *ui.Context, th *Theme, cs tokens.ColorScheme, dest *N
 			Children(func() {
 				badgedIcon(c, dest, navRailIconSize, iconInk)
 			})
-		// The short label fades out under the icon while the long one fades in
-		// beside it; both are laid out as the pill grows, so neither is clipped
-		// or jumps to the next destination mid-transition.
-		short := ui.Text(c, dest.Label).NoWrap()
-		applyTypeStyleWithTheme(th, short, tokens.LabelSmall)
-		short.TextColor(labelInk)
-		short.Attach(ui.AnchorTop, ui.AnchorTop).Top(navRailLabelTop)
-		short.Opacity(1 - t)
-		long := ui.Text(c, dest.Label).NoWrap()
-		applyTypeStyleWithTheme(th, long, tokens.LabelLarge)
-		long.TextColor(labelInk)
-		long.Attach(ui.AnchorStart, ui.AnchorStart).Start(52)
-		long.Opacity(t)
+		// Keep the short label centered directly inside the 56 DIP leading
+		// slot so it stays beneath the icon as the item grows.
+		shortWrap := ui.Row(c).Width(navRailCollapsedItemW).Justify(ui.Center).
+			Attach(ui.AnchorTopStart, ui.AnchorTopStart).Start(0).Top(navRailLabelTop).
+			Clip().Opacity(1 - t)
+		shortWrap.Children(func() {
+			short := ui.Text(c, dest.Label).SingleLine().MaxWidthPercent(100)
+			applyTypeStyleWithTheme(th, short, tokens.LabelSmall)
+			short.TextColor(labelInk)
+		})
+		// Constrain the expanded label within [Start(52), itemW-12] so long
+		// titles ellipsize cleanly inside their cell.
+		longW := max(0, itemW-52-12)
+		longWrap := ui.Row(c).Width(longW).Clip().
+			Attach(ui.AnchorStart, ui.AnchorStart).Start(52).
+			Opacity(t)
+		longWrap.Children(func() {
+			long := ui.Text(c, dest.Label).SingleLine().MaxWidthPercent(100)
+			applyTypeStyleWithTheme(th, long, tokens.LabelLarge)
+			long.TextColor(labelInk)
+		})
 	})
 	if el.Clicked() && !disabled {
 		if o.Selected != nil {
@@ -214,11 +225,11 @@ func navRailDestination(c *ui.Context, th *Theme, cs tokens.ColorScheme, dest *N
 	}
 	// The button keeps the whole cell's hit area, focus and accessibility;
 	// hover, focus and ripple feedback paint only inside the pill.
-	attachRippleWithTheme(th, el, StateLayerOptions{
+	attachRippleWithContext(c, th, el, StateLayerOptions{
 		Color:    iconInk,
 		Disabled: disabled,
 		Clip: func(r ui.Rect) (ui.Rect, [4]float32) {
-			box, radius := navRailPillRect(r, t, 0)
+			box, radius := navRailPillRect(r, t, 0, rtl)
 			return box, [4]float32{radius, radius, radius, radius}
 		},
 	})
@@ -226,13 +237,19 @@ func navRailDestination(c *ui.Context, th *Theme, cs tokens.ColorScheme, dest *N
 
 // navRailPillRect returns the destination's pill within its full-cell box at
 // expand progress t, growing elastically with a selected indicator above zero.
-func navRailPillRect(r ui.Rect, t, indicator float32) (ui.Rect, float32) {
-	w := navRailCollapsedItemW + (r.W-navRailCollapsedItemW)*t
+func navRailPillRect(r ui.Rect, t, indicator float32, rtl bool) (ui.Rect, float32) {
+	baseW := min(r.W, float32(navRailCollapsedItemW))
+	slotW := min(r.W, baseW+(r.W-baseW)*t)
+	w := slotW
 	h := float32(navRailIndicatorHigh) + float32(navRailItemHeight-navRailIndicatorHigh)*t
 	if indicator > 0 {
 		grow := 0.9 + 0.1*min(indicator, 1.1)
 		w, h = w*grow, h*grow
 	}
+	x := r.X + (slotW-w)/2
+	if rtl {
+		x = r.X + r.W - slotW + (slotW-w)/2
+	}
 	y := navRailIconTop*(1-t) + (r.H-h)/2*t
-	return ui.Rect{X: r.X + (r.W-w)/2, Y: r.Y + y, W: w, H: h}, h / 2
+	return ui.Rect{X: x, Y: r.Y + y, W: w, H: h}, h / 2
 }

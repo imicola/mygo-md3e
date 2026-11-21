@@ -949,3 +949,138 @@ func TestModalDrawerItemSwipeAndScroll(t *testing.T) {
 		t.Fatalf("drawer list did not scroll vertically (y stayed at %.1f, before=%.1f)", firstAfter.Y, firstBefore.Y)
 	}
 }
+
+// TestModalDrawerOverlayIsolationAndInlineClosingInert checks clicking an
+// overlay above ModalNavigationDrawer does not dismiss it via PressedOutside
+// and closing an inline NavigationDrawer immediately makes destinations inert.
+func TestModalDrawerOverlayIsolationAndInlineClosingInert(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor)
+	open := true
+	snack := &SnackbarState{}
+	snack.Show(SnackbarOptions{
+		Message:     "Saved",
+		ActionLabel: "Undo",
+		Duration:    5 * time.Second,
+	})
+	tt := navigationCanvas(th, 600, 320, func(c *ui.Context) {
+		NavigationDrawer(c, []NavigationDrawerItem{
+			{Label: "Inbox", Icon: mdicon.Star.Draw},
+		}, NavigationDrawerOptions{Modal: true, Open: &open, Label: "Drawer"})
+		SnackbarHost(c, snack)
+	})
+	tt.Advance(500 * time.Millisecond)
+	if !open {
+		t.Fatal("modal drawer should start open")
+	}
+	tt.Click("Undo")
+	tt.Frame()
+	if !open {
+		t.Fatal("clicking Snackbar action above modal drawer dismissed drawer")
+	}
+	// Clicking the empty drawer scrim still dismisses cleanly.
+	tt.ClickAt(500, 160)
+	tt.Advance(500 * time.Millisecond)
+	if open {
+		t.Fatal("clicking modal drawer scrim did not close drawer")
+	}
+	if tt.FramePending() {
+		t.Fatal("closed modal drawer keeps asking for frames")
+	}
+
+	// Inline closing drawer: destinations leave access tree immediately while closing.
+	inlineOpen := true
+	inlineSel := 0
+	inlineChanged := 0
+	inTT := navigationCanvas(th, 600, 320, func(c *ui.Context) {
+		ui.Row(c).FillHeight().Children(func() {
+			NavigationDrawer(c, []NavigationDrawerItem{
+				{Label: "Inbox", Icon: mdicon.Add.Draw},
+				{Label: "Sent", Icon: mdicon.Star.Draw},
+			}, NavigationDrawerOptions{
+				Open:     &inlineOpen,
+				Selected: &inlineSel,
+				Changed:  func(int) { inlineChanged++ },
+				Label:    "InlineDrawer",
+			})
+			if Button(c, "Close").Clicked() {
+				inlineOpen = false
+			}
+		})
+	})
+	inTT.Advance(500 * time.Millisecond)
+	sent := tabInfo(t, inTT, "Sent")
+	sx, sy := center(sent.Bounds)
+	inTT.Click("Close")
+	inTT.Advance(50 * time.Millisecond) // mid-collapse while openWidth > 0.5
+	if _, ok := inTT.AccessByRole(ui.RoleTab, "Sent"); ok {
+		t.Fatal("closing inline drawer kept Sent destination in access tree")
+	}
+	inTT.ClickAt(sx, sy)
+	inTT.Advance(500 * time.Millisecond)
+	if inlineSel != 0 || inlineChanged != 0 {
+		t.Fatalf("closing inline drawer still accepted selection (%d, changed=%d)", inlineSel, inlineChanged)
+	}
+}
+
+// TestNavigationRailRTLPillAndNarrowNavBarClamp checks RTL mid-expansion pill
+// alignment and label bounds in NavigationRail and pill/label clamping in a
+// narrow 5-destination NavigationBar.
+func TestNavigationRailRTLPillAndNarrowNavBarClamp(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor)
+	cs := th.Colors
+	expanded := false
+	selected := 0
+	rtlTT := navigationCanvas(th, 400, 320, func(c *ui.Context) {
+		ui.Row(c).FillHeight().Children(func() {
+			NavigationRail(c, []NavigationDestination{
+				{Label: "Very Long Destination Title", Icon: mdicon.Add.Draw},
+				{Label: "Search", Icon: mdicon.Search.Draw},
+			}, NavigationRailOptions{Selected: &selected, Expanded: &expanded, Label: "RTLRail"})
+		})
+	})
+	rtlTT.SetDirection(ui.RightToLeft)
+	rtlTT.Advance(400 * time.Millisecond)
+	expanded = true
+	rtlTT.Frame()
+	rtlTT.Advance(80 * time.Millisecond)
+	home := tabInfo(t, rtlTT, "Very Long Destination Title")
+	bg := SurfaceColorForElevation(th, tokens.Level1)
+	img := rtlTT.Image()
+	// Pill under selected RTL icon on the right-hand Start(0) slot must paint
+	// SecondaryContainer near the right edge of home.Bounds.
+	rightSlotPx := img.RGBAAt(int(home.Bounds.X+home.Bounds.W-10), int(home.Bounds.Y+16))
+	if !colorMatches(rightSlotPx, cs.SecondaryContainer, 18) {
+		t.Fatalf("RTL rail pill missed right Start(0) slot mid-expansion: %+v", rightSlotPx)
+	}
+	// Long label in expanded state must not spill outside home.Bounds.
+	rtlTT.Advance(600 * time.Millisecond)
+	home = tabInfo(t, rtlTT, "Very Long Destination Title")
+	if home.Bounds.X < 0 || home.Bounds.W > navRailExpandedWidth {
+		t.Fatalf("RTL rail destination spilled bounds: %+v", home.Bounds)
+	}
+	if rtlTT.FramePending() {
+		t.Fatal("RTL rail kept requesting frames after expansion")
+	}
+
+	// Narrow 240-wide bar with 5 items -> each cell is 48 DIP (< 64 DIP).
+	barSel := 2
+	narrowTT := navigationCanvas(th, 240, 160, func(c *ui.Context) {
+		ui.Column(c).FillHeight().Justify(ui.End).Children(func() {
+			NavigationBar(c, []NavigationDestination{
+				{Label: "Dashboard", Icon: mdicon.Add.Draw},
+				{Label: "Messages", Icon: mdicon.Check.Draw},
+				{Label: "Favorites", Icon: mdicon.Star.Draw},
+				{Label: "Search", Icon: mdicon.Search.Draw},
+				{Label: "Settings", Icon: mdicon.Add.Draw},
+			}, NavigationBarOptions{Selected: &barSel, Label: "NarrowBar"})
+		})
+	})
+	narrowTT.Advance(400 * time.Millisecond)
+	fav := tabInfo(t, narrowTT, "Favorites")
+	msg := tabInfo(t, narrowTT, "Messages")
+	// Check pill color does not spill past Favorites left/right cell boundaries into Messages.
+	if px := narrowTT.Image().RGBAAt(int(msg.Bounds.X+msg.Bounds.W/2), int(fav.Bounds.Y+navBarIndicatorTop+12)); colorMatches(px, cs.SecondaryContainer, 14) {
+		t.Fatalf("narrow bar indicator pill spilled from Favorites (%+v) into Messages (%+v): %+v", fav.Bounds, msg.Bounds, px)
+	}
+	_ = bg
+}

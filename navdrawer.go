@@ -269,7 +269,13 @@ func modalNavigationDrawer(c *ui.Context, th *Theme, items []NavigationDrawerIte
 			}
 			panel.Translate(tx, 0)
 
-			if !exiting && !dismissTriggered && (panel.PressedOutside() || back.OverlayShortcut(0, ui.KeyEscape)) {
+			// Absorb panel clicks so presses on the drawer surface or disabled
+			// destinations do not reach the scrim backdrop, and use back.Clicked()
+			// rather than PressedOutside() so independent overlays above the
+			// drawer (such as a Snackbar) do not dismiss it.
+			panel.Clicked()
+
+			if !exiting && !dismissTriggered && (back.Clicked() || back.OverlayShortcut(0, ui.KeyEscape)) {
 				*open = false
 			}
 		})
@@ -306,13 +312,15 @@ func inlineNavigationDrawer(c *ui.Context, th *Theme, items []NavigationDrawerIt
 	}
 	root.Width(openWidth)
 	root.Disabled(o.Disabled)
+	exiting := !*open
+	root.IgnoreInput(exiting).AccessHidden(exiting)
 
 	// Keep the content clipped inside the shrinking panel while it animates
-	// closed, so no empty strip shows; once it has settled at zero width the
-	// contents leave the focus order and the access tree entirely.
+	// closed, so no empty strip shows; make closing content inert and hidden
+	// immediately so it leaves focus order and the access tree as it shuts.
 	if *open || openWidth > 0.5 {
 		root.Children(func() {
-			navDrawerContent(c, th, items, o, nil, false)
+			navDrawerContent(c, th, items, o, nil, exiting)
 		})
 	}
 	return root
@@ -424,7 +432,7 @@ func navDrawerDestination(c *ui.Context, th *Theme, item *NavigationDrawerItem, 
 			o.Changed(i)
 		}
 	}
-	attachRippleWithTheme(th, el, StateLayerOptions{
+	attachRippleWithContext(c, th, el, StateLayerOptions{
 		Color:    iconInk,
 		Radius:   navDrawerItemHeight / 2,
 		Disabled: disabled,
