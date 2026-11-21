@@ -81,6 +81,7 @@ type (
 
 		hourText, minuteText string
 		hourSync, minuteSync int
+		hour12Sync           bool
 		hourErr, minuteErr   bool
 
 		pendingChange bool
@@ -127,7 +128,8 @@ func TimePicker(c *ui.Context, value *time.Time, opts ...TimePickerOptions) ui.E
 	spatial := th.Animation(motion.FastSpatial)
 	now := c.Now()
 
-	outer := ui.Column(c).Width(timePickerWidth).Padding(timePickerPad).Gap(12).
+	_, pickerW := timeFieldMetrics(th)
+	outer := ui.Column(c).Width(pickerW).Padding(timePickerPad).Gap(12).
 		DimDisabled(false).Disabled(o.Disabled)
 	st := ui.Local(outer, timePickerStateKey{}, func() timePickerState {
 		return timePickerState{mode: o.Mode, segment: timeSegmentHour}
@@ -149,9 +151,9 @@ func TimePicker(c *ui.Context, value *time.Time, opts ...TimePickerOptions) ui.E
 		st.segment = timeSegmentHour
 		st.syncTexts(h, m, hour12)
 	}
-	// A change from outside, the dial or the fields resets buffers that did
-	// not produce it; a buffer the user is editing keeps its text.
-	if h != st.hourSync || m != st.minuteSync {
+	// A change from outside, the dial, the hour cycle, or the fields resets
+	// buffers that did not produce it; a buffer the user is editing keeps its text.
+	if h != st.hourSync || m != st.minuteSync || hour12 != st.hour12Sync {
 		st.syncTexts(h, m, hour12)
 	}
 	if st.releaseAdvance {
@@ -263,8 +265,17 @@ func TimePicker(c *ui.Context, value *time.Time, opts ...TimePickerOptions) ui.E
 func (st *timePickerState) syncTexts(h, m int, hour12 bool) {
 	st.hourText = formatHour(h, hour12)
 	st.minuteText = fmt.Sprintf("%02d", m)
-	st.hourSync, st.minuteSync = h, m
+	st.hourSync, st.minuteSync, st.hour12Sync = h, m, hour12
 	st.hourErr, st.minuteErr = false, false
+}
+
+func timeFieldMetrics(th *Theme) (fieldW, pickerW float32) {
+	scale := max(float32(1), th.EffectiveTextScale())
+	fieldW = float32(timeFieldW) * scale
+	colonStyle := typeStyleOfWithTheme(th, tokens.TitleLarge)
+	minRowW := 2*fieldW + 2*timeStepW + 8*4 + colonStyle.Size + 12
+	pickerW = max(float32(timePickerWidth), 2*timePickerPad+minRowW)
+	return fieldW, pickerW
 }
 
 // sanitizeTimeMode maps an unknown mode to the dial.
@@ -507,6 +518,7 @@ func buildTimeInputs(c *ui.Context, th *Theme, st *timePickerState, value *time.
 	// offsets onto the fields' 56 DIP boxes instead of centering on that
 	// composite height.
 	scale := max(float32(1), th.EffectiveTextScale())
+	fieldW, _ := timeFieldMetrics(th)
 	fieldH := float32(textFieldHeight) * scale
 	colonStyle := typeStyleOfWithTheme(th, tokens.TitleLarge)
 	colonTop := textFieldOuterTop*scale + (fieldH-colonStyle.LineHeight)/2 - colonStyle.Size*0.18
@@ -526,7 +538,7 @@ func buildTimeInputs(c *ui.Context, th *Theme, st *timePickerState, value *time.
 			ErrorMessage: "Enter " + hourRange,
 			Disabled:     disabled,
 			MaxLength:    2,
-		}).Width(timeFieldW)
+		}).Width(fieldW)
 		timeStepColumn(c, th, stepTop, disabled, "hour", func(delta int) {
 			if hour12 {
 				half := h / 12 * 12
@@ -548,7 +560,7 @@ func buildTimeInputs(c *ui.Context, th *Theme, st *timePickerState, value *time.
 			ErrorMessage: "Enter 0–59",
 			Disabled:     disabled,
 			MaxLength:    2,
-		}).Width(timeFieldW)
+		}).Width(fieldW)
 		timeStepColumn(c, th, stepTop, disabled, "minute", func(delta int) {
 			setClock(h, (m+delta+60)%60)
 		})
@@ -565,9 +577,9 @@ func buildTimeInputs(c *ui.Context, th *Theme, st *timePickerState, value *time.
 	beforeHour, beforeMinute := value.Hour(), value.Minute()
 	applyInput := func(hh, mm int) {
 		if hour12 {
-			// The field's 1–12 belong to the half of the day chosen, so 12 AM
-			// is midnight and 12 PM noon.
-			setClock(value.Hour()/12*12+hh%12, mm)
+			// The field's 1–12 belong to the displayed half of the day (h, not
+			// a zero value's Hour()==0), so 12 AM is midnight and 12 PM noon.
+			setClock(h/12*12+hh%12, mm)
 			return
 		}
 		setClock(hh, mm)
@@ -756,48 +768,73 @@ type dialLabel struct {
 	radius float32
 }
 
+var (
+	dialLabelsMinute = []dialLabel{
+		{text: "00", value: 0, angle: 0, radius: timeDialOuterR},
+		{text: "05", value: 5, angle: 30, radius: timeDialOuterR},
+		{text: "10", value: 10, angle: 60, radius: timeDialOuterR},
+		{text: "15", value: 15, angle: 90, radius: timeDialOuterR},
+		{text: "20", value: 20, angle: 120, radius: timeDialOuterR},
+		{text: "25", value: 25, angle: 150, radius: timeDialOuterR},
+		{text: "30", value: 30, angle: 180, radius: timeDialOuterR},
+		{text: "35", value: 35, angle: 210, radius: timeDialOuterR},
+		{text: "40", value: 40, angle: 240, radius: timeDialOuterR},
+		{text: "45", value: 45, angle: 270, radius: timeDialOuterR},
+		{text: "50", value: 50, angle: 300, radius: timeDialOuterR},
+		{text: "55", value: 55, angle: 330, radius: timeDialOuterR},
+	}
+	dialLabels12Hour = []dialLabel{
+		{text: "12", value: 12, angle: 0, radius: timeDialOuterR},
+		{text: "1", value: 1, angle: 30, radius: timeDialOuterR},
+		{text: "2", value: 2, angle: 60, radius: timeDialOuterR},
+		{text: "3", value: 3, angle: 90, radius: timeDialOuterR},
+		{text: "4", value: 4, angle: 120, radius: timeDialOuterR},
+		{text: "5", value: 5, angle: 150, radius: timeDialOuterR},
+		{text: "6", value: 6, angle: 180, radius: timeDialOuterR},
+		{text: "7", value: 7, angle: 210, radius: timeDialOuterR},
+		{text: "8", value: 8, angle: 240, radius: timeDialOuterR},
+		{text: "9", value: 9, angle: 270, radius: timeDialOuterR},
+		{text: "10", value: 10, angle: 300, radius: timeDialOuterR},
+		{text: "11", value: 11, angle: 330, radius: timeDialOuterR},
+	}
+	dialLabels24Hour = []dialLabel{
+		{text: "00", value: 0, angle: 0, radius: timeDialOuterR},
+		{text: "13", value: 13, angle: 30, radius: timeDialOuterR},
+		{text: "14", value: 14, angle: 60, radius: timeDialOuterR},
+		{text: "15", value: 15, angle: 90, radius: timeDialOuterR},
+		{text: "16", value: 16, angle: 120, radius: timeDialOuterR},
+		{text: "17", value: 17, angle: 150, radius: timeDialOuterR},
+		{text: "18", value: 18, angle: 180, radius: timeDialOuterR},
+		{text: "19", value: 19, angle: 210, radius: timeDialOuterR},
+		{text: "20", value: 20, angle: 240, radius: timeDialOuterR},
+		{text: "21", value: 21, angle: 270, radius: timeDialOuterR},
+		{text: "22", value: 22, angle: 300, radius: timeDialOuterR},
+		{text: "23", value: 23, angle: 330, radius: timeDialOuterR},
+		{text: "12", value: 12, angle: 0, radius: timeDialInnerR},
+		{text: "1", value: 1, angle: 30, radius: timeDialInnerR},
+		{text: "2", value: 2, angle: 60, radius: timeDialInnerR},
+		{text: "3", value: 3, angle: 90, radius: timeDialInnerR},
+		{text: "4", value: 4, angle: 120, radius: timeDialInnerR},
+		{text: "5", value: 5, angle: 150, radius: timeDialInnerR},
+		{text: "6", value: 6, angle: 180, radius: timeDialInnerR},
+		{text: "7", value: 7, angle: 210, radius: timeDialInnerR},
+		{text: "8", value: 8, angle: 240, radius: timeDialInnerR},
+		{text: "9", value: 9, angle: 270, radius: timeDialInnerR},
+		{text: "10", value: 10, angle: 300, radius: timeDialInnerR},
+		{text: "11", value: 11, angle: 330, radius: timeDialInnerR},
+	}
+)
+
 // dialLabels returns the numbers of the segment: hours 1–12, hours 00 and 13–23
 // outside 1–12, or minutes every five.
 func dialLabels(segment timeSegment, hour12 bool) []dialLabel {
-	labels := make([]dialLabel, 0, 24)
-	switch segment {
-	case timeSegmentMinute:
-		for i := range 12 {
-			labels = append(labels, dialLabel{
-				text:   fmt.Sprintf("%02d", i*5),
-				value:  i * 5,
-				angle:  float32(i * 30),
-				radius: timeDialOuterR,
-			})
-		}
-		return labels
+	if segment == timeSegmentMinute {
+		return dialLabelsMinute
 	}
 	if hour12 {
-		for i := range 12 {
-			value := i
-			if value == 0 {
-				value = 12
-			}
-			labels = append(labels, dialLabel{text: strconv.Itoa(value), value: value, angle: float32(i * 30), radius: timeDialOuterR})
-		}
-		return labels
+		return dialLabels12Hour
 	}
-	for i := range 12 {
-		value := i + 13
-		text := strconv.Itoa(value)
-		if i == 0 {
-			value, text = 0, "00"
-		}
-		labels = append(labels, dialLabel{text: text, value: value, angle: float32(i * 30), radius: timeDialOuterR})
-	}
-	for i := range 12 {
-		value := i
-		if value == 0 {
-			value = 12
-		}
-		labels = append(labels, dialLabel{text: strconv.Itoa(value), value: value, angle: float32(i * 30), radius: timeDialInnerR})
-	}
-	return labels
+	return dialLabels24Hour
 }
 
 // dialTarget returns the hand angle and radius of the chosen value.

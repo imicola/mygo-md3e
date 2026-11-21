@@ -1368,3 +1368,140 @@ func TestDatePickerDisabled(t *testing.T) {
 		t.Fatal("the disabled picker keeps asking for frames")
 	}
 }
+
+// TestTimePickerZeroValueInputKeepsPeriod checks that typing an hour in 12h
+// input mode with a zero initial time.Time preserves the displayed AM/PM half
+// (even in PM when value.Hour() is 0 while c.Now() is afternoon).
+func TestTimePickerZeroValueInputKeepsPeriod(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor, ThemeOptions{ReduceMotion: true})
+	var zeroAM, zeroPM time.Time
+	usePM := false
+	tt := pickerCanvas(th, func(c *ui.Context) {
+		ui.Column(c).Children(func() {
+			if Button(c, "Use PM").Clicked() {
+				usePM = true
+			}
+			if !usePM {
+				TimePicker(c.Key("first"), &zeroAM, TimePickerOptions{
+					Mode:      TimePickerInput,
+					HourCycle: 12,
+				})
+			} else {
+				TimePicker(c.Key("second"), &zeroPM, TimePickerOptions{
+					Mode:      TimePickerInput,
+					HourCycle: 12,
+				})
+			}
+		})
+	})
+
+	pm0 := tt.Now().Hour() >= 12
+	hour := buttonInfo(t, tt, ui.RoleTextField, "Hour")
+	tt.ClickAt(center(hour.Bounds))
+	tt.Key(ui.Cmd, ui.KeyA)
+	tt.Type("3")
+	tt.Frame()
+	want0 := 3
+	if pm0 {
+		want0 = 15
+	}
+	if zeroAM.Hour() != want0 {
+		t.Fatalf("zero-value 12h input set %02d:00, want %02d:00 (pm=%v)", zeroAM.Hour(), want0, pm0)
+	}
+
+	// Force the simulated clock into the opposite 12h half so both AM and PM
+	// zero-value input behavior are covered regardless of wall-clock time.
+	tt.Advance(12 * time.Hour)
+	tt.Click("Use PM")
+	tt.Frame()
+	pm1 := tt.Now().Hour() >= 12
+	hour2 := buttonInfo(t, tt, ui.RoleTextField, "Hour")
+	tt.ClickAt(center(hour2.Bounds))
+	tt.Key(ui.Cmd, ui.KeyA)
+	tt.Type("4")
+	tt.Frame()
+	want1 := 4
+	if pm1 {
+		want1 = 16
+	}
+	if zeroPM.Hour() != want1 {
+		t.Fatalf("shifted zero-value 12h input set %02d:00, want %02d:00 (pm=%v)", zeroPM.Hour(), want1, pm1)
+	}
+}
+
+// TestTimePickerHourCycleToggleSync checks switching between 24h and 12h updates
+// the Hour input buffer instead of validating stale "14" under 12h mode.
+func TestTimePickerHourCycleToggleSync(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor, ThemeOptions{ReduceMotion: true})
+	value := time.Date(2026, time.May, 1, 14, 30, 0, 0, time.Local)
+	cycle := 24
+	tt := pickerCanvas(th, func(c *ui.Context) {
+		ui.Column(c).Gap(8).Children(func() {
+			if Button(c, "Toggle Cycle").Clicked() {
+				if cycle == 24 {
+					cycle = 12
+				} else {
+					cycle = 24
+				}
+			}
+			TimePicker(c, &value, TimePickerOptions{
+				Mode:      TimePickerInput,
+				HourCycle: cycle,
+			})
+		})
+	})
+
+	hour := buttonInfo(t, tt, ui.RoleTextField, "Hour")
+	if hour.Value != "14" || hour.Invalid {
+		t.Fatalf("24h hour = %q invalid=%v, want \"14\" valid", hour.Value, hour.Invalid)
+	}
+	tt.Click("Toggle Cycle")
+	tt.Frame()
+	hour = buttonInfo(t, tt, ui.RoleTextField, "Hour")
+	if hour.Value != "2" || hour.Invalid {
+		t.Fatalf("after switching 24->12, hour = %q invalid=%v, want \"2\" valid", hour.Value, hour.Invalid)
+	}
+	tt.Click("Toggle Cycle")
+	tt.Frame()
+	hour = buttonInfo(t, tt, ui.RoleTextField, "Hour")
+	if hour.Value != "14" || hour.Invalid {
+		t.Fatalf("after switching 12->24, hour = %q invalid=%v, want \"14\" valid", hour.Value, hour.Invalid)
+	}
+}
+
+// TestTimePickerTextScaleInputWidth checks large TextScale widens the hour and
+// minute fields and container instead of clipping inside 88 DIP.
+func TestTimePickerTextScaleInputWidth(t *testing.T) {
+	thBase := ThemeFromSeed(DefaultSeedColor, ThemeOptions{ReduceMotion: true})
+	thBig := ThemeFromSeed(DefaultSeedColor, ThemeOptions{ReduceMotion: true, TextScale: 1.5})
+	v1 := time.Date(2026, time.May, 1, 10, 30, 0, 0, time.Local)
+	v2 := v1
+
+	tt1 := pickerCanvas(thBase, func(c *ui.Context) {
+		TimePicker(c, &v1, TimePickerOptions{Mode: TimePickerInput, HourCycle: 12})
+	})
+	tt2 := ui.NewTester(func(c *ui.Context) {
+		ThemeScope(c, thBig, func() {
+			ui.Box(c).Size(640, 560).Background(canvasRGB).Padding(20).Children(func() {
+				TimePicker(c, &v2, TimePickerOptions{Mode: TimePickerInput, HourCycle: 12})
+			})
+		})
+	}, 640, 560)
+
+	h1 := buttonInfo(t, tt1, ui.RoleTextField, "Hour")
+	h2 := buttonInfo(t, tt2, ui.RoleTextField, "Hour")
+	if h2.Bounds.W <= h1.Bounds.W {
+		t.Fatalf("scaled hour field width %.1f did not grow past default %.1f", h2.Bounds.W, h1.Bounds.W)
+	}
+	down := buttonInfo(t, tt2, ui.RoleButton, "Decrease minute")
+	if down.Bounds.X+down.Bounds.W > 640 {
+		t.Fatalf("scaled minute stepper overflowed wide canvas: %+v", down.Bounds)
+	}
+	if allocs := testing.AllocsPerRun(20, func() {
+		_ = dialLabels(timeSegmentHour, false)
+		_ = dialLabels(timeSegmentHour, true)
+		_ = dialLabels(timeSegmentMinute, false)
+	}); allocs != 0 {
+		t.Fatalf("dialLabels allocated %.0f times per run, want 0", allocs)
+	}
+}
