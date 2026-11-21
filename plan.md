@@ -373,7 +373,7 @@
     - `go tool mygo vet ./...` 全部通过。
   - **Commit**：`feat(gallery): [T8.2] add interactive MD3E showcase gallery application and smoke tests`
 
-- [ ] **T8.3：全仓最终质量验收、Golden 基线与使用文档**
+- [x] **T8.3：全仓最终质量验收、Golden 基线与使用文档**
   - **交付物**：`README.md`、核心组件代表性 `ui/golden` 测试（或跨平台校验脚本/测试补全）
   - **核心能力**：
     - 完善根目录 `README.md`：包含安装/本地 `replace` 用法、快速上手代码示例、组件总表、主题与动效配置说明、测试指引；
