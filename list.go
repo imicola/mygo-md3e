@@ -68,7 +68,9 @@ const (
 
 type listRowKey struct{ i int }
 
-type listCornerKey struct{ i int }
+type listTopRadiusKey struct{}
+
+type listBottomRadiusKey struct{}
 
 type listSelectKey struct{}
 
@@ -173,21 +175,25 @@ func listRow(c *ui.Context, th *Theme, item *ListItem, i, n int, o ListOptions) 
 		row.AccessSelected(selected)
 	}
 
-	large := th.Shapes.Radius(tokens.ShapeLarge)
-	small := th.Shapes.Radius(tokens.ShapeSmall)
-	target := [4]float32{}
-	if o.Segmented {
-		target = segmentedRowRadii(i, n, large, small)
-	}
-	pressed := interactive && !disabled && row.Pressed()
-	if selected || pressed {
-		target = [4]float32{large, large, large, large}
-	}
 	var radii [4]float32
-	for k := 0; k < 4; k++ {
-		radii[k] = animateWithTheme(row, th, listCornerKey{i: k}, target[k], motion.DefaultSpatial)
+	if o.Segmented || interactive {
+		large := th.Shapes.Radius(tokens.ShapeLarge)
+		small := th.Shapes.Radius(tokens.ShapeSmall)
+		topTarget := float32(0)
+		bottomTarget := float32(0)
+		if o.Segmented {
+			target := segmentedRowRadii(i, n, large, small)
+			topTarget, bottomTarget = target[0], target[2]
+		}
+		pressed := interactive && !disabled && row.Pressed()
+		if selected || pressed {
+			topTarget, bottomTarget = large, large
+		}
+		topR := animateWithTheme(row, th, listTopRadiusKey{}, topTarget, motion.DefaultSpatial)
+		bottomR := animateWithTheme(row, th, listBottomRadiusKey{}, bottomTarget, motion.DefaultSpatial)
+		radii = [4]float32{topR, topR, bottomR, bottomR}
+		row.Radius(topR, topR, bottomR, bottomR)
 	}
-	row.Radius(radii[0], radii[1], radii[2], radii[3])
 
 	cs := th.Colors
 	base := cs.Surface
@@ -195,10 +201,12 @@ func listRow(c *ui.Context, th *Theme, item *ListItem, i, n int, o ListOptions) 
 		base = SurfaceColorForElevation(th, tokens.Level1)
 	}
 	selectedT := float32(0)
-	if selected {
-		selectedT = 1
+	if selectable {
+		if selected {
+			selectedT = 1
+		}
+		selectedT = clampF32(animateWithTheme(row, th, listSelectKey{}, selectedT, motion.DefaultEffects), 0, 1)
 	}
-	selectedT = animateWithTheme(row, th, listSelectKey{}, selectedT, motion.DefaultSpatial)
 	selectedBg := cs.SecondaryContainer
 	if selectedBg.A == 0 {
 		selectedBg = cs.PrimaryContainer
@@ -237,19 +245,19 @@ func listRow(c *ui.Context, th *Theme, item *ListItem, i, n int, o ListOptions) 
 		} else if item.Icon != nil {
 			drawIconBox(c, item.Icon, listIconSize, content)
 		}
-		ui.Column(c).Grow(1).AlignItems(ui.Start).Gap(2).Children(func() {
+		ui.Column(c).Grow(1).Shrink(1).MinWidth(0).Clip().AlignItems(ui.Start).Gap(2).Children(func() {
 			if item.Overline != "" {
-				over := ui.Text(c, item.Overline).NoWrap()
+				over := ui.Text(c, item.Overline).SingleLine()
 				applyTypeStyleWithTheme(th, over, tokens.LabelSmall)
 				over.TextColor(supporting)
 			}
 			if item.Headline != "" {
-				h := ui.Text(c, item.Headline).NoWrap()
+				h := ui.Text(c, item.Headline).SingleLine()
 				applyTypeStyleWithTheme(th, h, tokens.BodyLarge)
 				h.TextColor(content)
 			}
 			if item.SupportingText != "" {
-				s := ui.Text(c, item.SupportingText).NoWrap()
+				s := ui.Text(c, item.SupportingText).SingleLine()
 				applyTypeStyleWithTheme(th, s, tokens.BodyMedium)
 				s.TextColor(supporting)
 			}

@@ -556,3 +556,56 @@ func TestSnackbarSwipePromotionAndExitActionGuard(t *testing.T) {
 		t.Fatalf("promoted snackbar center %.1f drifted from centered %.1f", center2, center1)
 	}
 }
+
+// TestEmptyBadgePlainTooltipAndReduceMotionSnackbar checks blank Badges/
+// PlainTooltips render no empty chrome and ReduceMotion snackbars leave zero
+// lingering frames after showing and closing.
+func TestEmptyBadgePlainTooltipAndReduceMotionSnackbar(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor, ThemeOptions{ReduceMotion: true})
+	cs := th.Colors
+	state := &SnackbarState{}
+	tt := feedbackCanvas(th, func(c *ui.Context) {
+		Badge(c, "", BadgeOptions{Label: "Blank"})
+		Badge(c, "   ", BadgeOptions{Label: "Spaces"})
+		PlainTooltip(c, Button(c, "Quiet"), "   ")
+		if Button(c, "Pop").Clicked() {
+			state.Show(SnackbarOptions{Message: "RM Saved", Duration: 2 * time.Second})
+		}
+		SnackbarHost(c, state)
+	})
+	tt.Frame()
+	if _, ok := tt.Access("Blank"); ok {
+		t.Fatal("empty Badge rendered an access node")
+	}
+	if _, ok := tt.Access("Spaces"); ok {
+		t.Fatal("whitespace Badge rendered an access node")
+	}
+	img := tt.Image()
+	for y := 0; y < 320; y += 8 {
+		for x := 0; x < 480; x += 8 {
+			if colorMatches(img.RGBAAt(x, y), cs.Error, 10) {
+				t.Fatalf("empty Badge painted Error pixel at (%d,%d)", x, y)
+			}
+		}
+	}
+
+	quiet, _ := tt.AccessByRole(ui.RoleButton, "Quiet")
+	tt.Move(center(quiet.Bounds))
+	tt.Advance(800 * time.Millisecond)
+
+	tt.Click("Pop")
+	tt.Frame()
+	if !tt.HasText("RM Saved") {
+		t.Fatal("ReduceMotion snackbar did not appear")
+	}
+	if tt.FramePending() {
+		t.Fatal("ReduceMotion snackbar keeps asking for build frames")
+	}
+	tt.Advance(2500 * time.Millisecond)
+	if tt.HasText("RM Saved") {
+		t.Fatal("ReduceMotion snackbar did not time out")
+	}
+	if tt.FramePending() {
+		t.Fatal("ReduceMotion snackbar kept requesting frames after exit")
+	}
+}

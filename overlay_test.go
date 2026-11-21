@@ -1,6 +1,7 @@
 package md3e
 
 import (
+	"math"
 	"testing"
 	"time"
 
@@ -751,5 +752,65 @@ func TestMenuDisabledConsistencyAndTokens(t *testing.T) {
 	menuTT.Advance(500 * time.Millisecond)
 	if firstClicked != 0 || secondClicked != 1 {
 		t.Fatalf("menu keyboard skipped disabled = (%d, %d), want (0, 1)", firstClicked, secondClicked)
+	}
+}
+
+// TestFullScreenSaveAndInfSanitization checks FullScreenDialog Save does not
+// fire OnClose alongside OnSave and +Inf/NaN widths lay out at defaults.
+func TestFullScreenSaveAndInfSanitization(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor)
+	openFull := true
+	saved, closed := 0, 0
+	tt := containerCanvas(th, func(c *ui.Context) {
+		FullScreenDialog(c, &openFull, FullScreenDialogOptions{
+			Title:     "Edit",
+			SaveLabel: "Save",
+			OnSave:    func() { saved++ },
+			OnClose:   func() { closed++ },
+		})
+	})
+	tt.Frame()
+	tt.Click("Save")
+	tt.Frame()
+	if saved != 1 || closed != 0 {
+		t.Fatalf("FullScreenDialog Save callbacks = (saved=%d, closed=%d), want (1, 0)", saved, closed)
+	}
+
+	// +Inf / NaN dimensions across inline controls and modal overlays.
+	openSheet := true
+	openDrawer := true
+	inf := float32(math.Inf(1))
+	nan := float32(math.NaN())
+	sheetTT := containerCanvas(th, func(c *ui.Context) {
+		ui.Column(c).Size(320, 352).Children(func() {
+			BottomSheet(c, &openSheet, BottomSheetOptions{Height: nan, Label: "SanSheet"})
+		})
+	})
+	sheetTT.Frame()
+	sheet, ok := sheetTT.AccessByRole(ui.RoleRegion, "SanSheet")
+	if !ok || absF32(sheet.Bounds.H-bottomSheetDefaultHeight) > 2 {
+		t.Fatalf("sanitized BottomSheet bounds = %+v, want height %d", sheet.Bounds, bottomSheetDefaultHeight)
+	}
+
+	inlineTT := containerCanvas(th, func(c *ui.Context) {
+		Carousel(c, carouselItems(2), CarouselOptions{Height: inf, Gap: nan}).Width(320)
+		RichTooltip(c, Button(c, "TipHost"), RichTooltipOptions{Width: inf, Body: "Hi"})
+		DropdownMenu(c, "Drop", []MenuItem{{Label: "One"}}, MenuOptions{Width: inf})
+		NavigationDrawer(c, drawerItems(false), NavigationDrawerOptions{Open: &openDrawer, Width: inf, Label: "SanDrawer"})
+	})
+	inlineTT.Advance(time.Second)
+	drawer, ok := inlineTT.AccessByRole(ui.RoleRegion, "SanDrawer")
+	if !ok || absF32(drawer.Bounds.W-navDrawerWidth) > 2 {
+		t.Fatalf("sanitized NavigationDrawer bounds = %+v, want width %d", drawer.Bounds, navDrawerWidth)
+	}
+
+	openAlert := true
+	alertTT := containerCanvas(th, func(c *ui.Context) {
+		AlertDialog(c, &openAlert, AlertDialogOptions{Headline: "Alert", Width: inf, Label: "SanAlert"})
+	})
+	alertTT.Advance(500 * time.Millisecond)
+	dlg, ok := alertTT.AccessByRole(ui.RoleAlertDialog, "SanAlert")
+	if !ok || dlg.Bounds.W <= 0 || math.IsNaN(float64(dlg.Bounds.W)) {
+		t.Fatalf("sanitized AlertDialog bounds invalid: %+v (ok=%v)", dlg.Bounds, ok)
 	}
 }

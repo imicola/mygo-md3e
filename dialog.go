@@ -312,6 +312,7 @@ func FullScreenDialog(c *ui.Context, open *bool, opts ...FullScreenDialogOptions
 				if o.SaveLabel != "" {
 					save := Button(c, o.SaveLabel, ButtonOptions{Variant: ButtonText})
 					if save.Clicked() {
+						dismissed = true
 						if o.OnSave != nil {
 							o.OnSave()
 						}

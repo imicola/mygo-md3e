@@ -69,7 +69,7 @@ type (
 	carouselScrollKey struct{}
 	carouselSizeKey   struct{}
 	carouselDragKey   struct{}
-	carouselWidthKey  struct{ i int }
+	carouselWidthKey  struct{}
 	carouselItemKey   struct{ i int }
 )
 
@@ -185,7 +185,13 @@ func Carousel(c *ui.Context, items []CarouselItem, opts ...CarouselOptions) ui.E
 		ink = cs.OnSurface.Alpha(float32(tokens.DisabledContentOpacity))
 	}
 
-	itemEls := make([]ui.Element, len(items))
+	var stackEls [12]ui.Element
+	var itemEls []ui.Element
+	if len(items) <= len(stackEls) {
+		itemEls = stackEls[:len(items)]
+	} else {
+		itemEls = make([]ui.Element, len(items))
+	}
 	pressed := -1
 	var viewport ui.Element
 
@@ -277,7 +283,7 @@ func Carousel(c *ui.Context, items []CarouselItem, opts ...CarouselOptions) ui.E
 					}
 
 					widthTarget := target
-					width := animateValue(el, carouselWidthKey{i: i}, widthTarget, th.Animation(motion.DefaultSpatial), reduce || jump)
+					width := animateValue(el, carouselWidthKey{}, widthTarget, th.Animation(motion.DefaultSpatial), reduce || jump)
 					el.Width(width)
 
 					el.Children(func() {

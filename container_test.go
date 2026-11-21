@@ -572,3 +572,50 @@ func TestCardListDividerDisabledConsistencyAndInsets(t *testing.T) {
 		t.Fatalf("disabled list row background = %+v, want %+v", rowPx, rgbOf(wantRowBg))
 	}
 }
+
+// TestListLongTextAndInfSanitization checks long list copy truncates cleanly
+// without pushing Trailing off-screen and +Inf/NaN metrics fall back safely.
+func TestListLongTextAndInfSanitization(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor)
+	sw := false
+	longHeadline := "This is an extraordinarily long headline that should clip cleanly inside the flexible text column"
+	tt := containerCanvas(th, func(c *ui.Context) {
+		ui.Column(c).Width(280).Gap(12).Children(func() {
+			List(c, []ListItem{
+				{
+					Overline:       "LONG OVERLINE CATEGORY HEADER",
+					Headline:       longHeadline,
+					SupportingText: "Supporting explanation that is also quite long for a 280 DIP row",
+					Meta:           "9:41",
+					Trailing: func() ui.Element {
+						return Switch(c.Key("sw"), &sw, SwitchOptions{Label: "Toggle"})
+					},
+				},
+			}, ListOptions{Segmented: true, Label: "Truncated list"})
+			Card(c, func() {
+				ui.Text(c, "Safe card")
+			}, CardOptions{
+				Radius:  float32(math.Inf(1)),
+				Padding: float32(math.NaN()),
+				Label:   "SafeCard",
+			})
+			Divider(c, DividerOptions{
+				Thickness: float32(math.Inf(1)),
+				Inset:     float32(math.Inf(1)),
+				Label:     "SafeDiv",
+			})
+		})
+	})
+	tt.Frame()
+	swInfo, ok := tt.AccessByRole(ui.RoleSwitch, "Toggle")
+	if !ok {
+		t.Fatal("trailing switch missing on long-text list row")
+	}
+	if swInfo.Bounds.X+swInfo.Bounds.W > 24+280+1 || swInfo.Bounds.W < 40 {
+		t.Fatalf("trailing switch displaced or shrunk by long text: %+v", swInfo.Bounds)
+	}
+	safeDiv, ok := tt.AccessByRole(ui.RoleSeparator, "SafeDiv")
+	if !ok || safeDiv.Bounds.H < 0.9 || safeDiv.Bounds.W <= 0 {
+		t.Fatalf("sanitized divider bounds = %+v (ok=%v)", safeDiv.Bounds, ok)
+	}
+}

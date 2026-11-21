@@ -364,27 +364,47 @@ func progressEdgeScale(v float32) float32 {
 	return t * t * (3 - 2*t)
 }
 
-// progressWavePath builds a sine wave between logical from and to, centered on
-// centerY, with its amplitude anchored at zero at both ends.
+// progressWavePath builds a cubic Hermite-fitted sine wave between logical
+// from and to, centered on centerY, with its amplitude anchored at zero at both ends.
 func progressWavePath(path *ui.Path, from, to, centerY, amplitude, phase float32, rtl bool, r ui.Rect) *ui.Path {
 	path.Reset()
 	length := to - from
 	if length <= 0 {
 		return path
 	}
-	n := max(8, int(length/1.5))
-	waves := length / progressWaveLength
-	for i := 0; i <= n; i++ {
-		f := float32(i) / float32(n)
-		x := progressMirrorX(rtl, r, from+length*f)
-		env := min(1, min(f, 1-f)/0.08)
-		env = env * env * (3 - 2*env)
-		y := centerY + amplitude*env*float32(math.Sin(float64(phase+waves*2*math.Pi*f)))
-		if i == 0 {
-			path.MoveTo(x, y)
-		} else {
-			path.LineTo(x, y)
+	n := max(6, int(length/6))
+	waves := float64(length / progressWaveLength)
+	w := waves * 2 * math.Pi
+	df := 1.0 / float64(n)
+	eval := func(f float64) (x, y, dydf float32) {
+		x = progressMirrorX(rtl, r, from+length*float32(f))
+		var env, dEnv float64
+		switch {
+		case f < 0.08:
+			t := f / 0.08
+			env = t * t * (3 - 2*t)
+			dEnv = 6 * t * (1 - t) / 0.08
+		case f > 0.92:
+			t := (1 - f) / 0.08
+			env = t * t * (3 - 2*t)
+			dEnv = -6 * t * (1 - t) / 0.08
+		default:
+			env = 1
 		}
+		ang := float64(phase) + w*f
+		s, c := math.Sin(ang), math.Cos(ang)
+		y = centerY + amplitude*float32(env*s)
+		dydf = amplitude * float32(dEnv*s+env*w*c)
+		return x, y, dydf
+	}
+	x0, y0, m0 := eval(0)
+	path.MoveTo(x0, y0)
+	df3 := float32(df / 3)
+	for i := 1; i <= n; i++ {
+		x1, y1, m1 := eval(float64(i) * df)
+		dx3 := (x1 - x0) / 3
+		path.CubeTo(x0+dx3, y0+m0*df3, x1-dx3, y1-m1*df3, x1, y1)
+		x0, y0, m0 = x1, y1, m1
 	}
 	return path
 }
@@ -501,7 +521,7 @@ func progressArcPath(path *ui.Path, cx, cy, radius, startDeg, sweepDeg, amplitud
 	if sweepDeg <= 0 {
 		return path
 	}
-	steps := max(8, int(sweepDeg/2))
+	steps := max(8, int(sweepDeg/4))
 	for i := 0; i <= steps; i++ {
 		f := float32(i) / float32(steps)
 		deg := startDeg + sweepDeg*f

@@ -99,7 +99,11 @@ func (s *SnackbarState) finish() {
 	s.current = nil
 	if len(s.queue) > 0 {
 		next := s.queue[0]
+		s.queue[0] = SnackbarOptions{}
 		s.queue = s.queue[1:]
+		if len(s.queue) == 0 {
+			s.queue = nil
+		}
 		s.seq++
 		s.current = &snackbarItem{opts: next, seq: s.seq}
 	}

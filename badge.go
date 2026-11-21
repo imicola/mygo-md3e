@@ -50,7 +50,7 @@ func Badge(c *ui.Context, text string, opts ...BadgeOptions) ui.Element {
 		o = opts[0]
 	}
 	label, zero, visible := formatBadgeText(text, o)
-	if !visible || (zero && !o.ShowZero) {
+	if !visible || label == "" || (zero && !o.ShowZero) {
 		return ui.Box(c).Size(0, 0)
 	}
 

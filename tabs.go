@@ -123,7 +123,13 @@ func buildTabs(c *ui.Context, items []TabItem, opts []TabsOptions, primary bool)
 	reduce := th.ReduceMotion || c.Preferences().ReduceMotion
 
 	var tabs ui.TabsParts
-	tabEls := make([]ui.Element, len(items))
+	var stackTabEls [12]ui.Element
+	var tabEls []ui.Element
+	if len(items) <= len(stackTabEls) {
+		tabEls = stackTabEls[:len(items)]
+	} else {
+		tabEls = make([]ui.Element, len(items))
+	}
 
 	buildList := func() {
 		tabs = ui.TabsBase(c, selected, len(items))

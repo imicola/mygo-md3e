@@ -8,7 +8,9 @@ import (
 
 	"github.com/egoist/mygo/ui"
 
+	"mygo-md3e/motion"
 	"mygo-md3e/shape"
+	"mygo-md3e/tokens"
 )
 
 // LoadingStyle selects the look of a LoadingIndicator.
@@ -41,14 +43,15 @@ type LoadingOptions struct {
 	Label string
 }
 
-// LoadingIndicator rhythm: each step holds its shape for the rest of the
-// cycle, and a discrete 45° turn accumulates per step.
+// LoadingIndicator rhythm matching MD3E specifications: a 650ms morph interval
+// driven by the theme's Slow Spatial spring plus continuous global rotation
+// (360° per 4666ms) and a 90° quarter-turn per step.
 const (
-	loadingDefaultSize   = 48
-	loadingGraphicRatio  = 38.0 / 48.0
-	loadingStepDuration  = 750 * time.Millisecond
-	loadingMorphDuration = 500 * time.Millisecond
-	loadingStepDegrees   = 45
+	loadingDefaultSize    = 48
+	loadingGraphicRatio   = 38.0 / 48.0
+	loadingStepDuration   = 650 * time.Millisecond
+	loadingGlobalDuration = 4666 * time.Millisecond
+	loadingStepDegrees    = 90
 )
 
 // loadingDefaultShapes builds the MD3E sequence once, on first use, so an app
@@ -98,14 +101,20 @@ func (s *loadingState) rebuild(polys []*shape.RoundedPolygon) {
 	}
 }
 
-// sameLoadingPolys reports whether two sequences name the same polygons in the
-// same order.
+// sameLoadingPolys reports whether two sequences hold geometrically identical
+// polygons in the same order.
 func sameLoadingPolys(a, b []*shape.RoundedPolygon) bool {
 	if len(a) != len(b) {
 		return false
 	}
 	for i := range a {
-		if a[i] != b[i] {
+		if a[i] == b[i] {
+			continue
+		}
+		if a[i] == nil || b[i] == nil {
+			return false
+		}
+		if a[i].Center() != b[i].Center() || !slices.Equal(a[i].Cubics(), b[i].Cubics()) {
 			return false
 		}
 	}
@@ -153,10 +162,7 @@ func LoadingIndicator(c *ui.Context, opts ...LoadingOptions) ui.Element {
 		o = opts[0]
 	}
 
-	size := o.Size
-	if !(size > 0) || math.IsNaN(float64(size)) || math.IsInf(float64(size), 0) {
-		size = loadingDefaultSize
-	}
+	size := sanitizePositiveF32(o.Size, loadingDefaultSize)
 	polys := o.Polygons
 	if len(polys) == 0 {
 		polys = loadingDefaultShapes()
@@ -172,9 +178,10 @@ func LoadingIndicator(c *ui.Context, opts ...LoadingOptions) ui.Element {
 		label = "Loading"
 	}
 
-	el := ui.Box(c).Size(size, size).Shrink(0).Role(ui.RoleProgress).Label(label)
+	el := ui.Box(c).Size(size, size).Shrink(0).DimDisabled(false).Role(ui.RoleProgress).Label(label)
 	// The indicator is of unknown length: assistive technology reads no value.
 	el.Range(0, 1, -1)
+	disabled := el.IsDisabled()
 
 	st := ui.Local(el, loadingStateKey{}, func() loadingState {
 		var s loadingState
@@ -188,14 +195,15 @@ func LoadingIndicator(c *ui.Context, opts ...LoadingOptions) ui.Element {
 	clock := ui.Local(el, loadingClockKey{}, func() loadingClock {
 		return loadingClock{start: c.Now()}
 	})
-	if o.Paused != clock.paused {
-		if o.Paused {
+	paused := o.Paused || disabled
+	if paused != clock.paused {
+		if paused {
 			clock.pausedAt = c.Now()
 		} else {
 			clock.offset += c.Now().Sub(clock.pausedAt)
 			clock.pausedAt = time.Time{}
 		}
-		clock.paused = o.Paused
+		clock.paused = paused
 	}
 
 	cs := th.Colors
@@ -207,6 +215,12 @@ func LoadingIndicator(c *ui.Context, opts ...LoadingOptions) ui.Element {
 	if container.A == 0 {
 		container = cs.SurfaceContainerHighest
 	}
+	if disabled {
+		ink = cs.OnSurface.Alpha(float32(tokens.DisabledContentOpacity))
+		container = cs.OnSurface.Alpha(float32(tokens.DisabledContainerOpacity))
+	}
+
+	morphSpring := motion.Spring(th.Motion, motion.SlowSpatial)
 
 	el.Draw(func(p *ui.Painter, r ui.Rect) {
 		if !el.Valid() || r.W <= 0 || r.H <= 0 || len(st.morphs) == 0 {
@@ -222,19 +236,16 @@ func LoadingIndicator(c *ui.Context, opts ...LoadingOptions) ui.Element {
 		cx, cy := r.X+r.W/2, r.Y+r.H/2
 		circle := ui.Rect{X: cx - side/2, Y: cy - side/2, W: side, H: side}
 
-		// The phase advances a shape per step; the last part of each step holds
-		// the shape it reached.
-		step := int(elapsed / loadingStepDuration)
-		phase := elapsed - time.Duration(step)*loadingStepDuration
-		progress := float32(1)
-		if phase < loadingMorphDuration {
-			progress = ui.EaseInOut(float32(phase) / float32(loadingMorphDuration))
+		var step int
+		var progress, rotation float32
+		if len(st.morphs) > 1 && !reduceMotion {
+			step = int(elapsed / loadingStepDuration)
+			phase := elapsed - time.Duration(step)*loadingStepDuration
+			springT := float32(morphSpring.Progress(phase))
+			progress = clampF32(springT, 0, 1)
+			globalAngle := float32(elapsed) / float32(loadingGlobalDuration) * 360
+			rotation = float32(math.Mod(float64(globalAngle+(float32(step)+springT)*loadingStepDegrees), 360))
 		}
-		if len(st.morphs) == 1 {
-			progress = 0
-			step = 0
-		}
-		rotation := (float32(step) + progress) * loadingStepDegrees
 
 		gside := side * loadingGraphicRatio
 		graphic := ui.Rect{X: cx - gside/2, Y: cy - gside/2, W: gside, H: gside}
@@ -257,7 +268,7 @@ func LoadingIndicator(c *ui.Context, opts ...LoadingOptions) ui.Element {
 			p.Clip(r, 0, draw)
 		}
 
-		if !reduceMotion && !clock.paused {
+		if !reduceMotion && !clock.paused && !disabled && len(st.morphs) > 1 {
 			p.AnimationFrame()
 		}
 	})

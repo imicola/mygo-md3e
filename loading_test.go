@@ -8,7 +8,9 @@ import (
 
 	"github.com/egoist/mygo/ui"
 
+	"mygo-md3e/motion"
 	"mygo-md3e/shape"
+	"mygo-md3e/tokens"
 )
 
 // loadingCanvas builds a 320x200 white canvas holding build's indicators.
@@ -269,5 +271,89 @@ func TestLoadingDisabledAncestorAndCustomSequence(t *testing.T) {
 	}
 	if tt.FramePending() {
 		t.Fatal("a paused custom sequence asks for frames")
+	}
+}
+
+// TestLoadingSingleShapeAndDisabledAskNoFramesAndUseTokens checks a single
+// polygon without Paused asks for no animation frames and a disabled indicator
+// pauses cleanly while painting MD3E disabled tokens.
+func TestLoadingSingleShapeAndDisabledAskNoFramesAndUseTokens(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor)
+	cs := th.Colors
+	single := loadingCanvas(th, func(c *ui.Context) {
+		LoadingIndicator(c, LoadingOptions{
+			Label:    "Single",
+			Polygons: []*shape.RoundedPolygon{shape.Pill()},
+		})
+	})
+	if single.FramePending() {
+		t.Fatal("unpaused single-shape LoadingIndicator asked for frames")
+	}
+	before := single.Image()
+	single.Advance(500 * time.Millisecond)
+	if single.FramePending() {
+		t.Fatal("unpaused single-shape LoadingIndicator kept asking for frames")
+	}
+	if n := indicatorBoxDiff(before, single.Image(), ui.Rect{W: 320, H: 200}); n != 0 {
+		t.Fatalf("single-shape LoadingIndicator moved %d pixels", n)
+	}
+
+	dis := loadingCanvas(th, func(c *ui.Context) {
+		ui.Box(c).Disabled(true).DimDisabled(false).Children(func() {
+			ui.Row(c).Gap(16).Children(func() {
+				LoadingIndicator(c, LoadingOptions{Label: "DisStd", Size: 48})
+				LoadingIndicator(c, LoadingOptions{Style: LoadingContained, Label: "DisCon", Size: 48})
+			})
+		})
+	})
+	if dis.FramePending() {
+		t.Fatal("disabled LoadingIndicator asked for frames")
+	}
+	stdInfo := loadingInfo(t, dis, "DisStd")
+	conInfo := loadingInfo(t, dis, "DisCon")
+	img := dis.Image()
+	wantInk := cs.OnSurface.Alpha(float32(tokens.DisabledContentOpacity)).Over(canvasRGB)
+	if px := img.RGBAAt(int(stdInfo.Bounds.X+stdInfo.Bounds.W/2), int(stdInfo.Bounds.Y+stdInfo.Bounds.H/2)); !colorMatches(px, wantInk, 20) {
+		t.Fatalf("disabled standard center = %+v, want disabled ink %+v", px, rgbOf(wantInk))
+	}
+	wantCon := cs.OnSurface.Alpha(float32(tokens.DisabledContainerOpacity)).Over(canvasRGB)
+	if px := img.RGBAAt(int(conInfo.Bounds.X)+2, int(conInfo.Bounds.Y+conInfo.Bounds.H/2)); !colorMatches(px, wantCon, 16) {
+		t.Fatalf("disabled contained edge = %+v, want disabled container %+v", px, rgbOf(wantCon))
+	}
+}
+
+// TestLoadingExpressiveVsStandardSpringAndPolyCache checks switching Theme.Motion
+// alters the morph/rotation spring trajectory and inline polygon slices preserve
+// cached morph progress across builds.
+func TestLoadingExpressiveVsStandardSpringAndPolyCache(t *testing.T) {
+	exprTh := ThemeFromSeed(DefaultSeedColor, ThemeOptions{Motion: motion.Expressive})
+	stdTh := ThemeFromSeed(DefaultSeedColor, ThemeOptions{Motion: motion.Standard})
+
+	exprTT := loadingCanvas(exprTh, func(c *ui.Context) {
+		LoadingIndicator(c, LoadingOptions{
+			Label:    "Expr",
+			Size:     64,
+			Polygons: []*shape.RoundedPolygon{shape.Circle(), shape.Square()},
+		})
+	})
+	stdTT := loadingCanvas(stdTh, func(c *ui.Context) {
+		LoadingIndicator(c, LoadingOptions{
+			Label:    "Std",
+			Size:     64,
+			Polygons: []*shape.RoundedPolygon{shape.Circle(), shape.Square()},
+		})
+	})
+	exprInfo := loadingInfo(t, exprTT, "Expr")
+	expr0 := exprTT.Image()
+	exprTT.Advance(140 * time.Millisecond)
+	stdTT.Advance(140 * time.Millisecond)
+	exprMid := exprTT.Image()
+	stdMid := stdTT.Image()
+
+	if diff := indicatorBoxDiff(expr0, exprMid, exprInfo.Bounds); diff < 40 {
+		t.Fatalf("inline polygon LoadingIndicator did not morph/advance smoothly (diff=%d)", diff)
+	}
+	if diff := indicatorBoxDiff(exprMid, stdMid, exprInfo.Bounds); diff < 30 {
+		t.Fatalf("Expressive vs Standard LoadingIndicator rendered nearly identically at 140ms (diff=%d)", diff)
 	}
 }

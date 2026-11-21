@@ -467,3 +467,26 @@ func TestProgressGeometrySmoothTrackSmallValueAndWrapContinuity(t *testing.T) {
 		t.Fatalf("ReduceMotion indeterminate linear band centered at %.1f of %.1f, want centered", mid, rmInfo.Bounds.W)
 	}
 }
+
+// TestProgressDisabledIndeterminateStopsFrames checks disabled indeterminate
+// progress indicators emit no continuous animation frames and paint disabled tokens.
+func TestProgressDisabledIndeterminateStopsFrames(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor)
+	tt := progressCanvas(th, func(c *ui.Context) {
+		ui.Column(c).Disabled(true).DimDisabled(false).Gap(16).FillWidth().Children(func() {
+			LinearWavyProgress(c, -1, ProgressOptions{Label: "DisIndBar"})
+			CircularWavyProgress(c, -1, ProgressOptions{Label: "DisIndRing"})
+		})
+	})
+	if tt.FramePending() {
+		t.Fatal("disabled indeterminate indicators requested animation frames")
+	}
+	before := tt.Image()
+	tt.Advance(500 * time.Millisecond)
+	if tt.FramePending() {
+		t.Fatal("disabled indeterminate indicators kept requesting frames")
+	}
+	if diff := indicatorBoxDiff(before, tt.Image(), ui.Rect{W: 420, H: 300}); diff != 0 {
+		t.Fatalf("disabled indeterminate indicators changed %d pixels", diff)
+	}
+}

@@ -123,16 +123,19 @@ func Card(c *ui.Context, content func(), opts ...CardOptions) ui.Element {
 		elevation = tokens.Level0
 	}
 
-	target := rest
-	if interactive && !disabled && el.Pressed() {
-		// MD3E lifts a pressed card and rounds its corners slightly.
-		target = rest + cardPressedRadiusDelta
-		if elevation > tokens.Level0 && elevation < tokens.Level5 {
-			elevation++
-			bg = SurfaceColorForElevation(th, elevation)
+	radius := rest
+	if interactive {
+		target := rest
+		if !disabled && el.Pressed() {
+			// MD3E lifts a pressed card and rounds its corners slightly.
+			target = rest + cardPressedRadiusDelta
+			if elevation > tokens.Level0 && elevation < tokens.Level5 {
+				elevation++
+				bg = SurfaceColorForElevation(th, elevation)
+			}
 		}
+		radius = animateWithTheme(el, th, cardCornerKey{}, target, motion.FastSpatial)
 	}
-	radius := animateWithTheme(el, th, cardCornerKey{}, target, motion.FastSpatial)
 
 	el.Padding(padding).Radius(radius)
 	if bg.A > 0 {
