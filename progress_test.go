@@ -311,6 +311,115 @@ func TestCircularWavyProgress(t *testing.T) {
 	}
 }
 
+// TestProgressDeterminateWavyFlows checks that a determinate wavy indicator
+// keeps moving between its ends instead of freezing at phase 0.
+func TestProgressDeterminateWavyFlows(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor)
+	tt := progressCanvas(th, func(c *ui.Context) {
+		LinearWavyProgress(c, 0.4, ProgressOptions{Label: "FlowBar"})
+		CircularWavyProgress(c, 0.4, ProgressOptions{Label: "FlowRing", Size: 64})
+	})
+	if !tt.FramePending() {
+		t.Fatal("a determinate wavy indicator asks for no frames")
+	}
+	bar := progressInfo(t, tt, "FlowBar")
+	ring := progressInfo(t, tt, "FlowRing")
+	before := tt.Image()
+	tt.Advance(120 * time.Millisecond)
+	after := tt.Image()
+	if n := indicatorBoxDiff(before, after, bar.Bounds); n < 5 {
+		t.Fatalf("the determinate bar's wave moved only %d pixels", n)
+	}
+	if n := indicatorBoxDiff(before, after, ring.Bounds); n < 5 {
+		t.Fatalf("the determinate ring's wave moved only %d pixels", n)
+	}
+	if !tt.FramePending() {
+		t.Fatal("the flowing determinate indicator stopped asking for frames")
+	}
+}
+
+// TestProgressWavyTerminalStatesRest checks that 0, 1, disabled and reduced
+// motion wavy indicators flatten and ask for no frames.
+func TestProgressWavyTerminalStatesRest(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor)
+	rest := progressCanvas(th, func(c *ui.Context) {
+		LinearWavyProgress(c, 0, ProgressOptions{Label: "ZeroBar"})
+		CircularWavyProgress(c, 1, ProgressOptions{Label: "FullRing", Size: 64})
+		LinearWavyProgress(c, 0.5, ProgressOptions{Label: "OffBar", Disabled: true})
+		CircularWavyProgress(c, 0.5, ProgressOptions{Label: "OffRing", Size: 64, Disabled: true})
+	})
+	if rest.FramePending() {
+		t.Fatal("terminal determinate wavy indicators ask for frames")
+	}
+	before := rest.Image()
+	rest.Advance(500 * time.Millisecond)
+	if rest.FramePending() {
+		t.Fatal("terminal determinate wavy indicators keep asking for frames")
+	}
+	if n := indicatorBoxDiff(before, rest.Image(), ui.Rect{W: 420, H: 300}); n != 0 {
+		t.Fatalf("terminal determinate wavy indicators repainted %d pixels", n)
+	}
+
+	stillTh := ThemeFromSeed(DefaultSeedColor, ThemeOptions{ReduceMotion: true})
+	still := progressCanvas(stillTh, func(c *ui.Context) {
+		LinearWavyProgress(c, 0.5, ProgressOptions{Label: "StillBar"})
+		CircularWavyProgress(c, 0.5, ProgressOptions{Label: "StillRing", Size: 64})
+	})
+	if still.FramePending() {
+		t.Fatal("reduced-motion determinate wavy indicators ask for frames")
+	}
+	stillBefore := still.Image()
+	still.Advance(300 * time.Millisecond)
+	if still.FramePending() {
+		t.Fatal("reduced-motion determinate wavy indicators keep asking for frames")
+	}
+	if n := indicatorBoxDiff(stillBefore, still.Image(), ui.Rect{W: 420, H: 300}); n != 0 {
+		t.Fatalf("reduced-motion determinate wavy indicators changed %d pixels", n)
+	}
+}
+
+// TestCircularIndeterminateTrackLeavesGapAroundArc checks that the unfinished
+// ring stops clear of the moving active arc instead of running underneath it.
+func TestCircularIndeterminateTrackLeavesGapAroundArc(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor)
+	cs := th.Colors
+	track := cs.SurfaceContainerHighest
+	if track.A == 0 {
+		track = cs.SurfaceVariant
+	}
+	tt := progressCanvas(th, func(c *ui.Context) {
+		CircularWavyProgress(c, -1, ProgressOptions{Label: "GapRing", Size: 64})
+	})
+	tt.Advance(500 * time.Millisecond)
+	info := progressInfo(t, tt, "GapRing")
+	cx, cy := center(info.Bounds)
+	img := tt.Image()
+	for deg := 0; deg < 360; deg += 2 {
+		rad := float64(deg) * math.Pi / 180
+		anyActive, trackRun, trackDepth := false, 0, 0
+		for r := 20.0; r <= 32.0; r += 0.5 {
+			x := int(cx + float32(r*math.Sin(rad)))
+			y := int(cy - float32(r*math.Cos(rad)))
+			px := img.RGBAAt(x, y)
+			if colorMatches(px, cs.Primary, 40) {
+				anyActive = true
+			}
+			// A solid track stroke spans its whole 4 DIP thickness; the
+			// antialiased rim of the active stroke can flash the track color
+			// for a pixel or two and must not count.
+			if colorMatches(px, track, 6) {
+				trackRun++
+				trackDepth = max(trackDepth, trackRun)
+			} else {
+				trackRun = 0
+			}
+		}
+		if anyActive && trackDepth >= 4 {
+			t.Fatalf("the track runs under the active arc at %d°", deg)
+		}
+	}
+}
+
 // TestProgressAccessAndBounds checks the range exposed to assistive technology,
 // NaN normalization, disabled state, and a determinate value settling.
 func TestProgressAccessAndBounds(t *testing.T) {

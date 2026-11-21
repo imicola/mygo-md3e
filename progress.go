@@ -39,6 +39,8 @@ const (
 
 	// progressCycle is the indeterminate sweep's period.
 	progressCycle = 1800 * time.Millisecond
+	// progressWavePeriod is one full phase of a determinate wavy indicator.
+	progressWavePeriod = 1500 * time.Millisecond
 	// progressWaveLength is one sine wave of a wavy indicator, in DIP.
 	progressWaveLength = 24
 )
@@ -222,7 +224,7 @@ func progressIndicator(c *ui.Context, kind progressIndicatorKind, value float64,
 					gap:           gap,
 					value:         clampF32(shown, 0, 1),
 					indeterminate: indeterminate,
-					wavy:          wavy,
+					wavy:          wavy && !disabled,
 					reduce:        reduce,
 					elapsed:       elapsed,
 					rtl:           rtl,
@@ -235,7 +237,7 @@ func progressIndicator(c *ui.Context, kind progressIndicatorKind, value float64,
 					gap:           gap,
 					value:         clampF32(shown, 0, 1),
 					indeterminate: indeterminate,
-					wavy:          wavy,
+					wavy:          wavy && !disabled,
 					reduce:        reduce,
 					elapsed:       elapsed,
 					active:        active,
@@ -243,7 +245,11 @@ func progressIndicator(c *ui.Context, kind progressIndicatorKind, value float64,
 				})
 			}
 		})
-		if indeterminate && !reduce && !disabled {
+		// A determinate wavy indicator keeps flowing between its ends; at 0, 1,
+		// disabled or under reduced motion it rests flat and asks for no
+		// frames, as a plain determinate indicator does.
+		flowing := indeterminate || (wavy && shown > 0 && shown < 1)
+		if flowing && !reduce && !disabled {
 			p.AnimationFrame()
 		}
 	})
@@ -303,7 +309,7 @@ func paintLinearProgress(p *ui.Painter, r ui.Rect, paths *progressPaths, s linea
 	p.Fill(ui.Rect{X: da, Y: cy - dotD/2, W: db - da, H: dotD}, s.track, dotD/2)
 
 	amplitude := min(s.thickness*0.75, max((r.H-s.thickness)/2, 0))
-	if !s.wavy {
+	if !s.wavy || s.reduce {
 		amplitude = 0
 	}
 	if s.indeterminate {
@@ -321,21 +327,32 @@ func paintLinearProgress(p *ui.Painter, r ui.Rect, paths *progressPaths, s linea
 		return
 	}
 	capPad := min(s.thickness/2, activeUsed/2)
-	path := progressWavePath(&paths.active, capPad, activeUsed-capPad, cy, amplitude, 0, s.rtl, r)
+	path := progressWavePath(&paths.active, capPad, activeUsed-capPad, cy, amplitude, progressWavePhase(s.elapsed), s.rtl, r)
 	path.Cap(ui.RoundCap)
 	p.StrokePath(path, s.thickness, s.active)
+}
+
+// progressWavePhase returns the phase of a determinate wave at elapsed, a full
+// turn every progressWavePeriod so that it never jumps as the clock loops.
+func progressWavePhase(elapsed time.Duration) float32 {
+	turns := float64(max(elapsed, 0)) / float64(progressWavePeriod)
+	return float32(2 * math.Pi * math.Mod(turns, 1))
 }
 
 // paintIndeterminateLinearWave paints the drifting band of an indeterminate
 // linear indicator.
 func paintIndeterminateLinearWave(p *ui.Painter, r ui.Rect, paths *progressPaths, s linearProgressPaint, cy float32, width, amplitude float32) {
-	const band = 0.35
+	band := 0.35
 	var lo, hi, u float64
 	if s.reduce {
 		lo, hi = (1-band)/2, (1+band)/2
 	} else {
 		cycle := float64(progressCycle)
 		u = math.Mod(math.Max(float64(s.elapsed), 0), cycle) / cycle
+		// The band breathes a little as it runs and its wave phase moves three
+		// turns per cycle, so the sweep reads as flowing rather than slid at a
+		// constant rate; both close their loop without a jump.
+		band += 0.03 * math.Sin(2*math.Pi*u)
 		from := u*(1+band) - band
 		to := from + band
 		lo, hi = max(from, 0), min(to, 1)
@@ -351,7 +368,7 @@ func paintIndeterminateLinearWave(p *ui.Painter, r ui.Rect, paths *progressPaths
 		return
 	}
 	capPad := min(s.thickness/2, length/2)
-	phase := float32(u * 4 * math.Pi)
+	phase := float32(u * 6 * math.Pi)
 	path := progressWavePath(&paths.active, start+capPad, end-capPad, cy, amplitude, phase, s.rtl, r)
 	path.Cap(ui.RoundCap)
 	p.StrokePath(path, s.thickness, s.active)
@@ -430,23 +447,18 @@ func paintCircularProgress(p *ui.Painter, r ui.Rect, paths *progressPaths, s cir
 	cx, cy := r.X+r.W/2, r.Y+r.H/2
 	radius := min(r.W, r.H)/2 - s.thickness/2
 	amplitude := float32(0)
-	if s.wavy {
+	if s.wavy && !s.reduce {
 		amplitude = min(min(r.W, r.H)*0.055, max(radius*0.4, 0))
 		radius -= amplitude
 	}
 	if radius <= s.thickness*0.5 || radius <= 0 {
 		return
 	}
-	// The gap is the angle a track gap plus the round cap's radius spans.
-	gapDeg := (s.gap + s.thickness/2) / radius * (180 / math.Pi)
+	// The gap is the angle a track gap plus the round cap's radius spans; the
+	// wave's outward bulge widens it so the track never touches the crest.
+	gapDeg := (s.gap + s.thickness/2 + amplitude) / radius * (180 / math.Pi)
 
 	if s.indeterminate {
-		trackSweep := float32(360) - 2*gapDeg
-		if trackSweep > 0 {
-			progressArcPath(&paths.track, cx, cy, radius, gapDeg, trackSweep, 0, 0)
-			paths.track.Cap(ui.RoundCap)
-			p.StrokePath(&paths.track, s.thickness, s.track)
-		}
 		var rotation, sweep, phase float32
 		if s.reduce {
 			sweep = 90
@@ -460,6 +472,14 @@ func paintCircularProgress(p *ui.Painter, r ui.Rect, paths *progressPaths, s cir
 				phase = float32(u * 4 * math.Pi)
 			}
 		}
+		// The unfinished track leaves a clear gap around the moving arc rather
+		// than running underneath it.
+		trackSweep := 360 - sweep - 2*gapDeg
+		if trackSweep > 0.5 {
+			progressArcPath(&paths.track, cx, cy, radius, rotation+sweep+gapDeg, trackSweep, 0, 0)
+			paths.track.Cap(ui.RoundCap)
+			p.StrokePath(&paths.track, s.thickness, s.track)
+		}
 		progressArcPath(&paths.active, cx, cy, radius, rotation, sweep, amplitude, phase)
 		paths.active.Cap(ui.RoundCap)
 		p.StrokePath(&paths.active, s.thickness, s.active)
@@ -469,6 +489,7 @@ func paintCircularProgress(p *ui.Painter, r ui.Rect, paths *progressPaths, s cir
 	// Determinate: the active arc first, then the rest of the ring, both with
 	// a clear gap at the join.
 	activeSweep := s.value * 360
+	phase := progressWavePhase(s.elapsed)
 	if activeSweep <= 0.01 {
 		progressArcPath(&paths.track, cx, cy, radius, 0, 360, 0, 0)
 		paths.track.Cap(ui.RoundCap)
@@ -477,7 +498,7 @@ func paintCircularProgress(p *ui.Painter, r ui.Rect, paths *progressPaths, s cir
 	}
 	if activeSweep >= 359.5 {
 		activeAmp := amplitude * progressEdgeScale(s.value)
-		progressArcPath(&paths.active, cx, cy, radius, 0, 360, activeAmp, 0)
+		progressArcPath(&paths.active, cx, cy, radius, 0, 360, activeAmp, phase)
 		paths.active.Cap(ui.RoundCap)
 		p.StrokePath(&paths.active, s.thickness, s.active)
 		return
@@ -486,7 +507,7 @@ func paintCircularProgress(p *ui.Painter, r ui.Rect, paths *progressPaths, s cir
 	a1 := activeSweep - gapDeg/2
 	if a1 > a0 {
 		activeAmp := amplitude * progressEdgeScale(s.value)
-		progressArcPath(&paths.active, cx, cy, radius, a0, a1-a0, activeAmp, 0)
+		progressArcPath(&paths.active, cx, cy, radius, a0, a1-a0, activeAmp, phase)
 		paths.active.Cap(ui.RoundCap)
 		p.StrokePath(&paths.active, s.thickness, s.active)
 		rest := 360 - activeSweep - gapDeg
@@ -513,35 +534,51 @@ func paintCircularProgress(p *ui.Painter, r ui.Rect, paths *progressPaths, s cir
 	}
 }
 
-// progressArcPath samples an arc from startDeg, clockwise from 12 o'clock, into
-// path. A positive amplitude waves the radius as R + A·sin(6θ + phase), with
-// the wave anchored at the arc's ends.
+// progressArcPath builds a smooth arc from startDeg, clockwise from 12 o'clock,
+// into path. A positive amplitude waves the radius as R + A·sin(6θ + phase),
+// with the wave anchored at the arc's ends; cubic segments follow the wave's
+// tangents so a small ring has no visible facets.
 func progressArcPath(path *ui.Path, cx, cy, radius, startDeg, sweepDeg, amplitude, phase float32) *ui.Path {
 	path.Reset()
 	if sweepDeg <= 0 {
 		return path
 	}
-	steps := max(8, int(sweepDeg/4))
-	for i := 0; i <= steps; i++ {
-		f := float32(i) / float32(steps)
-		deg := startDeg + sweepDeg*f
-		rad := radius
+	steps := max(12, int(sweepDeg/6))
+	sweepRad := float64(sweepDeg) * math.Pi / 180
+	eval := func(f float64) (x, y, dx, dy float32) {
+		theta := float64(startDeg)*math.Pi/180 + sweepRad*f
+		rad := float64(radius)
+		drdf := 0.0
 		if amplitude > 0 {
-			env := min(1, min(f, 1-f)/0.08)
-			env = env * env * (3 - 2*env)
-			// Six waves around the full ring; θ spans the whole circle in the
-			// formula so the wave keeps its shape as the arc grows.
-			theta := float64(deg) * math.Pi / 180
-			rad += amplitude * env * float32(math.Sin(6*theta+float64(phase)))
+			env, dEnv := 1.0, 0.0
+			switch {
+			case f < 0.08:
+				u := f / 0.08
+				env, dEnv = u*u*(3-2*u), 6*u*(1-u)/0.08
+			case f > 0.92:
+				u := (1 - f) / 0.08
+				env, dEnv = u*u*(3-2*u), -6*u*(1-u)/0.08
+			}
+			ang := 6*theta + float64(phase)
+			sn, cs := math.Sincos(ang)
+			rad += float64(amplitude) * env * sn
+			drdf = float64(amplitude) * (dEnv*sn + env*cs*6*sweepRad)
 		}
-		angle := float64(deg) * math.Pi / 180
-		x := cx + rad*float32(math.Sin(angle))
-		y := cy - rad*float32(math.Cos(angle))
-		if i == 0 {
-			path.MoveTo(x, y)
-		} else {
-			path.LineTo(x, y)
-		}
+		sn, cs := math.Sincos(theta)
+		x = cx + float32(rad*sn)
+		y = cy - float32(rad*cs)
+		dx = float32(drdf*sn + rad*cs*sweepRad)
+		dy = float32(-drdf*cs + rad*sn*sweepRad)
+		return x, y, dx, dy
+	}
+	x0, y0, dx0, dy0 := eval(0)
+	path.MoveTo(x0, y0)
+	df := 1 / float64(steps)
+	step3 := float32(df / 3)
+	for i := 1; i <= steps; i++ {
+		x1, y1, dx1, dy1 := eval(float64(i) * df)
+		path.CubeTo(x0+dx0*step3, y0+dy0*step3, x1-dx1*step3, y1-dy1*step3, x1, y1)
+		x0, y0, dx0, dy0 = x1, y1, dx1, dy1
 	}
 	return path
 }
