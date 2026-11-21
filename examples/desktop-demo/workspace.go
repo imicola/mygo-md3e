@@ -169,7 +169,7 @@ func (a *appState) nodeList(c *ui.Context) {
 	cs := th.Colors
 	items := a.filteredNodes()
 
-	ui.Column(c).Fill().Padding(12).Gap(10).Background(cs.SurfaceContainerLow).Children(func() {
+	ui.Column(c).Fill().MinWidth(0).Padding(12).Gap(10).Background(cs.SurfaceContainerLow).Children(func() {
 		md3e.Text(c, "Nodes", tokens.TitleSmall, true)
 
 		md3e.TextField(c.Key("node-search"), &a.query, md3e.TextFieldOptions{
@@ -192,7 +192,7 @@ func (a *appState) nodeList(c *ui.Context) {
 		md3e.Divider(c)
 
 		ui.Scroll(c.Key("node-scroll")).Grow(1).MinHeight(0).Children(func() {
-			ui.Column(c).FillWidth().Gap(6).Children(func() {
+			ui.Column(c).FillWidth().PaddingEnd(14).MinWidth(0).Gap(6).Children(func() {
 				switch {
 				case a.skeleton:
 					a.skeletonRows(c)

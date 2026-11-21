@@ -16,7 +16,10 @@
 package main
 
 import (
+	"fmt"
 	"log"
+	"runtime"
+	"time"
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
@@ -58,7 +61,10 @@ type themeSignature struct {
 // below rebuild every pass and never keep ui.Element or *ui.Context handles.
 type appState struct {
 	// win is nil under ui.NewTester; the title bar only binds it when set.
-	win *mygo.Window
+	win           *mygo.Window
+	hasSyncedWin  bool
+	syncedWinDark bool
+	syncedWinBg   ui.Color
 
 	// Shell controls.
 	page       int
@@ -76,10 +82,14 @@ type appState struct {
 	dirty bool
 
 	// Overview page.
-	bannerOpen bool
-	running    bool
-	focusMode  bool
-	liveSync   bool
+	bannerOpen    bool
+	running       bool
+	progressMode  int // 0: Stream (two-segment relay), 1: 0->100% + Buffer
+	progressStyle int // 0: LinearWavyProgress, 1: LinearProgress
+	syncPhase     float64
+	lastTick      time.Time
+	focusMode     bool
+	liveSync      bool
 
 	// Workspace page.
 	tab            int
@@ -106,6 +116,7 @@ func newApp() *appState {
 		densityIdx:     1,
 		bannerOpen:     true,
 		running:        true,
+		syncPhase:      0.68,
 		liveSync:       true,
 		selectedID:     nodes[0].id,
 		split:          280,
@@ -151,16 +162,22 @@ func (a *appState) currentTheme() *md3e.Theme {
 }
 
 // view builds the whole window: the title bar, the adaptive navigation shell
-// and the snackbar overlay, all inside one ThemeScope so popups inherit it.
+// and the snackbar overlay, all inside one AnimatedThemeScope so theme/seed
+// switches transition smoothly and popups inherit the active theme.
 func (a *appState) view(c *ui.Context) {
 	if a.dirty {
 		a.dirty = false
 		c.Invalidate()
 	}
 	th := a.currentTheme()
-	md3e.ThemeScope(c, th, func() {
+	a.syncWindowTheme(th)
+	md3e.AnimatedThemeScope(c, th, func() {
 		md3e.AdaptiveScaffold(c, a.dests, func() {
-			a.pageView(c)
+			md3e.PageTransition(c.Key("page-transition"), a.page, func() {
+				a.pageView(c)
+			}, md3e.TransitionOptions{
+				Mode: md3e.TransitionSharedAxisY,
+			}).Fill()
 		}, md3e.AdaptiveScaffoldOptions{
 			Selected:        &a.page,
 			Header:          func() ui.Element { return a.titleBar(c) },
@@ -172,6 +189,32 @@ func (a *appState) view(c *ui.Context) {
 	}).Fill()
 }
 
+// syncWindowTheme keeps the native OS window background color and light/dark
+// frame appearance synchronized with the active MD3E theme.
+func (a *appState) syncWindowTheme(th *md3e.Theme) {
+	if a.win == nil || a.win.IsDestroyed() || th == nil {
+		return
+	}
+	bg := th.Colors.Surface
+	if !a.hasSyncedWin || a.syncedWinBg != bg {
+		_ = a.win.SetBackgroundColor(formatHexRGB(bg))
+		a.syncedWinBg = bg
+	}
+	if !a.hasSyncedWin || a.syncedWinDark != th.Dark {
+		src := mygo.ThemeLight
+		if th.Dark {
+			src = mygo.ThemeDark
+		}
+		mygo.Theme.SetSource(src)
+		a.syncedWinDark = th.Dark
+	}
+	a.hasSyncedWin = true
+}
+
+func formatHexRGB(c ui.Color) string {
+	return fmt.Sprintf("#%02x%02x%02x", c.R, c.G, c.B)
+}
+
 // titleBar is the M9 window chrome: an expressive app mark, the window title,
 // and the live theme controls on the trailing side.
 func (a *appState) titleBar(c *ui.Context) ui.Element {
@@ -180,10 +223,11 @@ func (a *appState) titleBar(c *ui.Context) ui.Element {
 	if a.win != nil {
 		win = a.win
 	}
-	// A hidden title bar keeps the platform's own buttons (macOS traffic
-	// lights, Windows/Linux caption buttons) in c.TitleBar(). Draw our own
-	// only where the platform reserves no room, as in full screen.
-	showControls := c.TitleBar().Height <= 0 && win != nil
+	// Non-macOS windows hide native caption buttons (HideWindowButtons: true)
+	// so WindowTitleBar renders MD3E rounded controls with Snap Layout support.
+	// macOS keeps native traffic lights and obeys c.TitleBar() (showing custom
+	// controls only when fullscreen hides the traffic lights).
+	showControls := win != nil && (runtime.GOOS != "darwin" || c.TitleBar().Height <= 0)
 
 	return md3e.WindowTitleBar(c, md3e.WindowTitleBarOptions{
 		Title:              "PulseDesk — MD3E Demo",
@@ -271,7 +315,7 @@ func (a *appState) pageView(c *ui.Context) {
 func pageScroll(c *ui.Context, key string, body func()) {
 	ui.Scroll(c.Key(key)).Fill().Children(func() {
 		ui.Row(c).FillWidth().Justify(ui.Center).Children(func() {
-			ui.Column(c).FillWidth().MaxWidth(1080).Padding(20, 20, 32, 20).Gap(16).Children(body)
+			ui.Column(c).FillWidth().MaxWidth(1080).Padding(20, 20, 48, 20).Gap(16).Children(body)
 		})
 	})
 }
@@ -312,17 +356,23 @@ func caption(c *ui.Context, text string) {
 
 func main() {
 	a := newApp()
+	initTheme := a.currentTheme()
+	mygo.Theme.SetSource(mygo.ThemeDark)
 	mygo.App.WhenReady(func() {
 		a.win = mygo.NewWindow(mygo.WindowOptions{
-			Title:           "PulseDesk — MD3E Demo",
-			Width:           1120,
-			Height:          740,
-			MinWidth:        420,
-			MinHeight:       520,
-			TitleBarStyle:   mygo.TitleBarHidden,
-			BackgroundColor: "#141218",
-			Content:         ui.View(a.view),
+			Title:             "PulseDesk — MD3E Demo",
+			Width:             1120,
+			Height:            740,
+			MinWidth:          420,
+			MinHeight:         520,
+			TitleBarStyle:     mygo.TitleBarHidden,
+			HideWindowButtons: runtime.GOOS != "darwin",
+			BackgroundColor:   formatHexRGB(initTheme.Colors.Surface),
+			Content:           ui.View(a.view),
 		})
+		a.hasSyncedWin = true
+		a.syncedWinDark = initTheme.Dark
+		a.syncedWinBg = initTheme.Colors.Surface
 	})
 	if err := mygo.App.Run(); err != nil {
 		log.Fatal(err)

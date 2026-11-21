@@ -18,14 +18,14 @@ type shapeSample struct {
 	size    tokens.SizeTier
 }
 
-// shapeSamples cover filled, tonal, outlined and standard shape treatments.
+// shapeSamples cover filled, tonal and outlined shape treatments.
 var shapeSamples = []shapeSample{
 	{"Shape circle", shape.Circle(), md3e.ShapeButtonFilled, symbols.PlayArrow.Draw, tokens.SizeS},
 	{"Shape cookie", shape.Cookie9Sided(), md3e.ShapeButtonTonal, symbols.Star.Draw, tokens.SizeS},
 	{"Shape sunny", shape.Sunny(), md3e.ShapeButtonOutlined, symbols.Bolt.Draw, tokens.SizeS},
 	{"Shape burst", shape.SoftBurst(), md3e.ShapeButtonFilled, symbols.Add.Draw, tokens.SizeM},
 	{"Shape heart", shape.Heart(), md3e.ShapeButtonTonal, symbols.Favorite.Draw, tokens.SizeS},
-	{"Shape gem", shape.Gem(), md3e.ShapeButtonStandard, symbols.Check.Draw, tokens.SizeS},
+	{"Shape gem", shape.Gem(), md3e.ShapeButtonOutlined, symbols.Check.Draw, tokens.SizeS},
 }
 
 // toneSamples walk every SemanticTone.
@@ -189,6 +189,7 @@ func (a *appState) componentsView(c *ui.Context) {
 			})
 			caption(c, "Theme density is "+densityNames[a.densityIdx]+" · change it from the title bar.")
 		})
+		ui.Box(c).Height(16)
 	})
 }
 

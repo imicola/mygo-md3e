@@ -1,6 +1,7 @@
 package main
 
 import (
+	"image"
 	"testing"
 	"time"
 
@@ -334,6 +335,321 @@ func TestReduceMotionAndAccessibility(t *testing.T) {
 	if _, ok := tt.AccessByRole(ui.RoleTab, "Compact"); !ok {
 		t.Fatal("the density tabs are not named tabs")
 	}
+}
+
+// TestAnimatedThemeAndSeedTransitions exercises AnimatedThemeScope across light/dark
+// and seed switches, verifying smooth mid-transition interpolation and zero
+// lingering frames once settled.
+func TestAnimatedThemeAndSeedTransitions(t *testing.T) {
+	a, tt := newTester(t)
+	darkLum := meanLuma(tt.Image())
+
+	// Toggle Dark -> Light on Overview and verify mid-transition luminance interpolation.
+	if err := tt.Click("Dark mode"); err != nil {
+		t.Fatalf("toggle Dark mode to light: %v", err)
+	}
+	if a.dark {
+		t.Fatal("a.dark stayed true after clicking Dark mode")
+	}
+	if !tt.FramePending() {
+		t.Fatal("AnimatedThemeScope did not schedule frames on dark -> light switch")
+	}
+	tt.Advance(48 * time.Millisecond)
+	midLum := meanLuma(tt.Image())
+
+	tt.Advance(700 * time.Millisecond)
+	if a.currentTheme().Dark {
+		t.Fatal("currentTheme().Dark remained true in light mode")
+	}
+	lightLum := meanLuma(tt.Image())
+	if !(darkLum < midLum && midLum < lightLum) {
+		t.Fatalf("expected monotonic luminance across transition: dark=%.1f mid=%.1f light=%.1f", darkLum, midLum, lightLum)
+	}
+
+	// Switch to Workspace (still indicators) to verify AnimatedThemeScope itself
+	// converges to zero pending frames on Seed and Light/Dark switches.
+	if err := tt.Click("Workspace"); err != nil {
+		t.Fatalf("open Workspace: %v", err)
+	}
+	tt.Advance(700 * time.Millisecond)
+	if tt.FramePending() {
+		t.Fatal("Workspace still has pending frames after settle")
+	}
+
+	// Cycle Seed color while in light mode.
+	if err := tt.Click("Seed color: Nebula"); err != nil {
+		t.Fatalf("cycle seed color: %v", err)
+	}
+	if a.seedIdx != 1 {
+		t.Fatalf("seedIdx = %d, want 1", a.seedIdx)
+	}
+	if !tt.FramePending() {
+		t.Fatal("AnimatedThemeScope did not schedule frames on seed color change")
+	}
+	tt.Advance(700 * time.Millisecond)
+	if tt.FramePending() {
+		t.Fatal("AnimatedThemeScope still has pending frames after seed transition")
+	}
+
+	// Toggle Light -> Dark on Workspace and verify clean convergence.
+	if err := tt.Click("Dark mode"); err != nil {
+		t.Fatalf("toggle Dark mode back to dark: %v", err)
+	}
+	if !tt.FramePending() {
+		t.Fatal("AnimatedThemeScope did not schedule frames on light -> dark switch")
+	}
+	tt.Advance(700 * time.Millisecond)
+	if !a.dark || tt.FramePending() {
+		t.Fatalf("expected dark mode settled: dark=%v pending=%v", a.dark, tt.FramePending())
+	}
+}
+
+// TestPageTransitionAndHeroProgressModes exercises PageTransition across all
+// three pages and verifies the Hero progress bar modes (two-segment continuous
+// stream, continuous 0%->100% + Buffer progression, and Wavy <-> Linear toggle).
+func TestPageTransitionAndHeroProgressModes(t *testing.T) {
+	a, tt := newTester(t)
+
+	// Paused Stream mode freezes on determinate 68% + 86% buffer.
+	if !tt.HasText("68% · buf 86%") {
+		t.Fatalf("paused hero card missing determinate buffer readout: %q", tt.Texts())
+	}
+
+	// Resume playback: indeterminate Stream mode keeps requesting frames.
+	if err := tt.Click("Engine playback"); err != nil {
+		t.Fatalf("resume Engine playback: %v", err)
+	}
+	tt.Advance(160 * time.Millisecond)
+	if !a.running || !tt.FramePending() {
+		t.Fatalf("resumed stream mode should run continuously: running=%v pending=%v", a.running, tt.FramePending())
+	}
+	progInfo, ok := accessProgress(tt, "Workspace sync")
+	if !ok || progInfo.Now >= 0 {
+		t.Fatalf("stream mode Workspace sync progress = (%v, %+v), want indeterminate (<0)", ok, progInfo)
+	}
+
+	// Switch to 0->100% + Buffer continuous progression.
+	if err := tt.Click("0→100%"); err != nil {
+		t.Fatalf("select 0->100%% tab: %v", err)
+	}
+	tt.Advance(80 * time.Millisecond)
+	p1, ok := accessProgress(tt, "Workspace sync")
+	if !ok || p1.Now < 0 || p1.Now > 1 {
+		t.Fatalf("0->100%% initial progress = (%v, %+v), want 0..1", ok, p1)
+	}
+	for range 8 {
+		tt.Advance(80 * time.Millisecond)
+	}
+	p2, ok := accessProgress(tt, "Workspace sync")
+	if !ok || p2.Now <= p1.Now {
+		t.Fatalf("0->100%% progress did not advance: p1=%.3f p2=%.3f", p1.Now, p2.Now)
+	}
+
+	// Switch Wavy -> Linear progress bar comparison.
+	if err := tt.Click("Linear"); err != nil {
+		t.Fatalf("select Linear progress tab: %v", err)
+	}
+	tt.Advance(120 * time.Millisecond)
+	if a.progressStyle != 1 {
+		t.Fatalf("progressStyle = %d, want 1 (Linear)", a.progressStyle)
+	}
+	if _, ok := accessProgress(tt, "Workspace sync"); !ok {
+		t.Fatal("Workspace sync missing after switching to Linear")
+	}
+
+	// Pause engine: syncPhase must freeze without advancing over time.
+	if err := tt.Click("Engine playback"); err != nil {
+		t.Fatalf("pause Engine playback: %v", err)
+	}
+	tt.Advance(500 * time.Millisecond)
+	frozenA, ok := accessProgress(tt, "Workspace sync")
+	if !ok {
+		t.Fatal("Workspace sync missing after pause")
+	}
+	tt.Advance(500 * time.Millisecond)
+	frozenB, ok := accessProgress(tt, "Workspace sync")
+	if !ok || frozenB.Now != frozenA.Now {
+		t.Fatalf("paused progress kept changing: before=%.4f after=%.4f", frozenA.Now, frozenB.Now)
+	}
+
+	// Verify PageTransition animates and settles cleanly across Overview -> Workspace -> Components -> Overview.
+	for _, step := range []struct {
+		nav          string
+		want         string
+		page         int
+		expectSettle bool
+	}{
+		{"Workspace", "Node workspace", 1, true},
+		{"Components", "Component lab", 2, false}, // Components hosts a live pulsing StatusPill until ReduceMotion
+		{"Overview", "PulseDesk Engine", 0, false},
+	} {
+		if err := tt.Click(step.nav); err != nil {
+			t.Fatalf("navigate to %s: %v", step.nav, err)
+		}
+		if a.page != step.page {
+			t.Fatalf("a.page = %d after clicking %s, want %d", a.page, step.nav, step.page)
+		}
+		if !tt.FramePending() {
+			t.Fatalf("switching to %s did not trigger PageTransition/NavigationRail frames", step.nav)
+		}
+		tt.Advance(700 * time.Millisecond)
+		if !tt.HasText(step.want) {
+			t.Fatalf("page %s missing expected text %q", step.nav, step.want)
+		}
+		if step.expectSettle && tt.FramePending() {
+			t.Fatalf("page %s left pending frames after transition settled", step.nav)
+		}
+	}
+
+	// Enable ReduceMotion and verify PageTransition settles immediately with zero pending frames.
+	a.reduce = true
+	if err := tt.Click("Workspace"); err != nil {
+		t.Fatalf("navigate to Workspace with ReduceMotion: %v", err)
+	}
+	if tt.FramePending() {
+		t.Fatal("PageTransition with ReduceMotion should swap immediately with zero pending frames")
+	}
+	if !tt.HasText("Node workspace") {
+		t.Fatal("Workspace page missing under ReduceMotion")
+	}
+}
+
+// TestNarrowScreenAndVisualRefinements verifies narrow title collapse (< 520 DIP),
+// workspace scrollbar gutter clearance, Gem ShapeButton visibility, and
+// comfortable bottom scroll padding.
+func TestNarrowScreenAndVisualRefinements(t *testing.T) {
+	_, tt := newTester(t)
+
+	if !tt.HasText("PulseDesk — MD3E Demo") {
+		t.Fatal("wide window should show full centered title")
+	}
+
+	// Narrow window (420 DIP MinWidth): centered title collapses gracefully while
+	// leading mark and compact theme controls fit within [0, 420].
+	tt.SetSize(420, 740)
+	tt.Frame()
+	tt.Advance(500 * time.Millisecond)
+	if tt.HasText("PulseDesk — MD3E Demo") {
+		t.Fatal("narrow 420 DIP window should collapse crowded centered title")
+	}
+	if !tt.HasText("PulseDesk") {
+		t.Fatal("narrow 420 DIP window should keep leading PulseDesk brand mark")
+	}
+	for _, btnName := range []string{"Seed color: Nebula", "Dark mode", "Density: Desktop"} {
+		info, ok := tt.AccessByRole(ui.RoleButton, btnName)
+		if !ok && btnName == "Dark mode" {
+			info, ok = tt.AccessByRole(ui.RoleToggleButton, btnName)
+		}
+		if !ok {
+			t.Fatalf("narrow 420 DIP title bar missing control %q", btnName)
+		}
+		if info.Bounds.X < 0 || info.Bounds.X+info.Bounds.W > 420.5 {
+			t.Fatalf("narrow 420 DIP control %q out of bounds: %+v", btnName, info.Bounds)
+		}
+	}
+
+	// Expanding >= 520 DIP restores the centered window title.
+	tt.SetSize(1120, 740)
+	tt.Frame()
+	tt.Advance(500 * time.Millisecond)
+	if !tt.HasText("PulseDesk — MD3E Demo") {
+		t.Fatal("expanding window back to 1120 DIP did not restore centered title")
+	}
+
+	// Workspace node-scroll has >= 14 DIP end padding so scrollbars never overlap ActionTile chevrons/meta.
+	if err := tt.Click("Workspace"); err != nil {
+		t.Fatalf("open Workspace: %v", err)
+	}
+	tt.Advance(700 * time.Millisecond)
+	loadingSw, ok := tt.AccessByRole(ui.RoleSwitch, "Loading preview")
+	if !ok {
+		t.Fatal("Loading preview switch missing")
+	}
+	tile, ok := tt.AccessByRole(ui.RoleButton, "Aurora Cluster")
+	if !ok {
+		t.Fatal("Aurora Cluster ActionTile missing")
+	}
+	// SwitchCard has 1 DIP hairline border + Desktop PaddingEnd(14), so SwitchCard outer right edge is loadingSw right + 15.
+	switchCardRight := loadingSw.Bounds.X + loadingSw.Bounds.W + 15
+	rightClearance := switchCardRight - (tile.Bounds.X + tile.Bounds.W)
+	if rightClearance < 13.5 {
+		t.Fatalf("node-scroll trailing clearance = %.1f DIP, want >= 14 DIP for scrollbar safety", rightClearance)
+	}
+
+	// Components page: Gem ShapeButton has visible outline/surface pixels and bottom has scroll whitespace.
+	if err := tt.Click("Components"); err != nil {
+		t.Fatalf("open Components: %v", err)
+	}
+	tt.Advance(700 * time.Millisecond)
+	gemBtn, ok := tt.AccessByRole(ui.RoleButton, "Shape gem")
+	if !ok {
+		t.Fatal("Shape gem button missing")
+	}
+	img := tt.Image()
+	bgCol := img.RGBAAt(max(0, int(gemBtn.Bounds.X-6)), int(gemBtn.Bounds.Y+gemBtn.Bounds.H/2))
+	cx, cy := centerOf(gemBtn.Bounds)
+	outlineDiffs := 0
+	for y := int(gemBtn.Bounds.Y); y <= int(gemBtn.Bounds.Y+gemBtn.Bounds.H); y++ {
+		for x := int(gemBtn.Bounds.X); x <= int(gemBtn.Bounds.X+gemBtn.Bounds.W); x++ {
+			dx := float32(x) - cx
+			dy := float32(y) - cy
+			if dx*dx+dy*dy < 11*11 {
+				continue // skip centered checkmark icon; check outer polygon perimeter
+			}
+			px := img.RGBAAt(x, y)
+			if absInt(int(px.R)-int(bgCol.R))+absInt(int(px.G)-int(bgCol.G))+absInt(int(px.B)-int(bgCol.B)) > 18 {
+				outlineDiffs++
+			}
+		}
+	}
+	if outlineDiffs < 12 {
+		t.Fatalf("Shape gem outer ring pixel diffs = %d, want >= 12 (visible outline/contour)", outlineDiffs)
+	}
+
+	// Scrolling to the bottom leaves comfortable bottom margin below the last switch card.
+	tt.Wheel(600, 400, 0, 20000)
+	tt.Advance(300 * time.Millisecond)
+	sw, ok := tt.AccessByRole(ui.RoleSwitch, "Reduce motion")
+	if !ok {
+		t.Fatal("Reduce motion switch missing after bottom scroll")
+	}
+	bottomGap := 740 - (sw.Bounds.Y + sw.Bounds.H)
+	if bottomGap < 40 {
+		t.Fatalf("bottom scroll gap below Reduce motion = %.1f DIP, want >= 40 DIP", bottomGap)
+	}
+}
+
+func accessProgress(tt *ui.Tester, name string) (ui.AccessInfo, bool) {
+	for _, info := range tt.AccessAll() {
+		if info.Role == ui.RoleProgress && info.Name == name {
+			return info, true
+		}
+	}
+	return ui.AccessInfo{}, false
+}
+
+func meanLuma(img *image.RGBA) float64 {
+	b := img.Bounds()
+	var sum float64
+	var count int
+	for y := b.Min.Y; y < b.Max.Y; y += 4 {
+		for x := b.Min.X; x < b.Max.X; x += 4 {
+			c := img.RGBAAt(x, y)
+			sum += 0.2126*float64(c.R) + 0.7152*float64(c.G) + 0.0722*float64(c.B)
+			count++
+		}
+	}
+	if count == 0 {
+		return 0
+	}
+	return sum / float64(count)
+}
+
+func absInt(v int) int {
+	if v < 0 {
+		return -v
+	}
+	return v
 }
 
 // centerOf is the middle of a rect.

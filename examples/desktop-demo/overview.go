@@ -1,6 +1,9 @@
 package main
 
 import (
+	"fmt"
+	"time"
+
 	"github.com/egoist/mygo/ui"
 
 	md3e "github.com/imicola/mygo-md3e"
@@ -42,17 +45,53 @@ func (a *appState) overviewView(c *ui.Context) {
 }
 
 // heroCard is the wide status card: a morphing playback control, a pulsing
-// status pill, wavy progress and an organic backdrop.
+// status pill, two-segment continuous stream / buffered 0->100% progress
+// showcase with Wavy/Linear toggle, and an organic backdrop.
 func (a *appState) heroCard(c *ui.Context) {
 	th := md3e.CurrentTheme(c)
 	cs := th.Colors
+	reduce := th.ReduceMotion || c.Preferences().ReduceMotion
 
 	status, tone := "Paused", md3e.ToneNeutral
-	progress := 0.68
 	if a.running {
 		status, tone = "Running", md3e.ToneSuccess
-		progress = -1 // indeterminate while the engine streams
 	}
+
+	var progress, buffer float64
+	if a.progressMode == 1 {
+		if a.running && !reduce {
+			now := c.Now()
+			if !a.lastTick.IsZero() {
+				dt := now.Sub(a.lastTick)
+				if dt > 0 {
+					if dt > 100*time.Millisecond {
+						dt = 100 * time.Millisecond
+					}
+					a.syncPhase += dt.Seconds() * 0.20
+					if a.syncPhase >= 1.15 {
+						a.syncPhase = 0
+					}
+				}
+			}
+			a.lastTick = now
+			c.AnimationFrame()
+		} else {
+			a.lastTick = time.Time{}
+		}
+		progress = min(max(a.syncPhase, 0), 1)
+		buffer = min(1.0, progress+0.18)
+	} else {
+		a.lastTick = time.Time{}
+		if a.running {
+			// Continuous two-segment indeterminate relay (no blank gap).
+			progress = -1
+			buffer = 0
+		} else {
+			progress = min(max(a.syncPhase, 0), 1)
+			buffer = min(1.0, progress+0.18)
+		}
+	}
+
 	gradient := ui.LinearGradient{
 		From:  cs.PrimaryContainer,
 		To:    cs.SurfaceContainerHigh,
@@ -76,8 +115,8 @@ func (a *appState) heroCard(c *ui.Context) {
 	}
 
 	card := md3e.Card(c, func() {
-		ui.Column(c).Gap(14).Children(func() {
-			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(12).Children(func() {
+		ui.Column(c).FillWidth().MinWidth(0).Gap(12).Children(func() {
+			ui.Row(c).FillWidth().MinWidth(0).AlignItems(ui.Center).Gap(12).Children(func() {
 				md3e.IconBadge(c, symbols.Bolt.Draw, md3e.IconBadgeOptions{
 					Variant:       md3e.IconBadgeFilled,
 					ContainerSize: 44,
@@ -85,7 +124,7 @@ func (a *appState) heroCard(c *ui.Context) {
 					Shape:         shape.Cookie9Sided(),
 					Label:         "PulseDesk engine",
 				})
-				ui.Column(c).Grow(1).Gap(2).Children(func() {
+				ui.Column(c).Grow(1).MinWidth(0).Gap(2).Children(func() {
 					md3e.Text(c, "PulseDesk Engine", tokens.TitleMedium, true)
 					md3e.Text(c, "Adaptive workspace supervisor", tokens.BodySmall).
 						TextColor(cs.OnSurfaceVariant)
@@ -97,22 +136,71 @@ func (a *appState) heroCard(c *ui.Context) {
 						Shape:         shape.Cookie9Sided(),
 						SelectedShape: shape.Circle(),
 						SelectedIcon:  symbols.Pause.Draw,
+						OnChanged: func(bool) {
+							a.lastTick = time.Time{}
+							a.dirty = true
+						},
 					})
 			})
-			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(6).Wrap().Children(func() {
+			ui.Row(c).FillWidth().MinWidth(0).AlignItems(ui.Center).Gap(6).Wrap().Children(func() {
 				md3e.StatusPill(c, status, md3e.StatusPillOptions{Tone: tone, Pulsing: a.running})
 				md3e.Tag(c, "M9 shell", md3e.TagOptions{Tone: md3e.TonePrimary, Variant: md3e.TagOutlined})
 				md3e.Tag(c, "M10 morph", md3e.TagOptions{Tone: md3e.ToneTertiary, Variant: md3e.TagOutlined})
 			})
-			md3e.LinearWavyProgress(c, progress, md3e.ProgressOptions{
+			ui.Row(c).FillWidth().MinWidth(0).AlignItems(ui.Center).Gap(8).Wrap().Children(func() {
+				md3e.SegmentedTabs(c.Key("progress-mode"), []md3e.TabItem{
+					{Label: "Stream"},
+					{Label: "0→100%"},
+				}, md3e.PillTabsOptions{
+					Selected: &a.progressMode,
+					Label:    "Progress mode",
+					Changed: func(i int) {
+						a.lastTick = time.Time{}
+						if i == 1 && a.running {
+							a.syncPhase = 0.08
+						}
+						a.dirty = true
+					},
+				})
+				md3e.SegmentedTabs(c.Key("progress-style"), []md3e.TabItem{
+					{Label: "Wavy"},
+					{Label: "Linear"},
+				}, md3e.PillTabsOptions{
+					Selected: &a.progressStyle,
+					Label:    "Progress style",
+					Changed:  func(int) { a.dirty = true },
+				})
+			})
+			progOpts := md3e.ProgressOptions{
 				Label:     "Workspace sync",
 				Thickness: 6,
-			})
-			if a.running {
-				caption(c, "Streaming deltas across the fleet · press pause to freeze the wave")
-			} else {
-				caption(c, "Paused at 68% · the determinate wave keeps its track gap and stop indicator")
+				Buffer:    buffer,
 			}
+			if a.progressStyle == 1 {
+				md3e.LinearProgress(c.Key("hero-progress-linear"), progress, progOpts)
+			} else {
+				md3e.LinearWavyProgress(c.Key("hero-progress-wavy"), progress, progOpts)
+			}
+			ui.Row(c).FillWidth().MinWidth(0).AlignItems(ui.Center).Gap(8).Wrap().Children(func() {
+				ui.Box(c).Grow(1).MinWidth(0).Children(func() {
+					switch {
+					case progress < 0:
+						caption(c, "Two-segment continuous relay · zero blank gap between cycles")
+					case a.running:
+						caption(c, "Continuous 0%→100% sweep with live Buffer ahead of active track")
+					default:
+						caption(c, "Paused determinate state · keeps buffer segment, track gap & stop dot")
+					}
+				})
+				if progress >= 0 {
+					md3e.TextWith(c, fmt.Sprintf("%.0f%% · buf %.0f%%", progress*100, buffer*100), md3e.TextOptions{
+						Role:        tokens.LabelSmall,
+						Mono:        true,
+						TabularNums: true,
+						Color:       cs.OnSurfaceVariant,
+					})
+				}
+			})
 		})
 	}, md3e.CardOptions{
 		Variant:        md3e.CardFilled,
@@ -134,7 +222,7 @@ func (a *appState) metricCard(c *ui.Context, title, value, tag string, tone md3e
 	th := md3e.CurrentTheme(c)
 	cs := th.Colors
 	md3e.Card(c, func() {
-		ui.Column(c).Grow(1).Gap(8).Children(func() {
+		ui.Column(c).FillWidth().Grow(1).MinWidth(0).Gap(8).Children(func() {
 			md3e.Text(c, title, tokens.LabelMedium).TextColor(cs.OnSurfaceVariant)
 			md3e.TextWith(c, value, md3e.TextOptions{
 				Role:        tokens.TitleLarge,
@@ -143,11 +231,11 @@ func (a *appState) metricCard(c *ui.Context, title, value, tag string, tone md3e
 				TabularNums: true,
 			})
 			ui.Box(c).Grow(1)
-			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(8).Children(func() {
+			ui.Row(c).FillWidth().MinWidth(0).AlignItems(ui.Center).Gap(8).Children(func() {
 				md3e.Tag(c, tag, md3e.TagOptions{Tone: tone, LeadingIcon: icon})
-				ui.Box(c).Grow(1)
+				ui.Box(c).Grow(1).MinWidth(0)
 				md3e.CircularWavyProgress(c, progress, md3e.ProgressOptions{
-					Size:      48,
+					Size:      44,
 					Thickness: 4,
 					Label:     title + " gauge",
 				})
@@ -166,7 +254,7 @@ func (a *appState) quickCard(c *ui.Context) {
 	th := md3e.CurrentTheme(c)
 	cs := th.Colors
 	card := md3e.Card(c, func() {
-		ui.Column(c).Gap(10).Children(func() {
+		ui.Column(c).FillWidth().MinWidth(0).Gap(10).Children(func() {
 			ui.Row(c).FillWidth().AlignItems(ui.Center).Children(func() {
 				md3e.Text(c, "Quick controls", tokens.TitleSmall, true)
 				ui.Box(c).Grow(1)
@@ -210,7 +298,7 @@ func (a *appState) quickCard(c *ui.Context) {
 // actionCard is the jump-back-in tile stack.
 func (a *appState) actionCard(c *ui.Context) {
 	card := md3e.Card(c, func() {
-		ui.Column(c).Gap(6).Children(func() {
+		ui.Column(c).FillWidth().MinWidth(0).Gap(6).Children(func() {
 			md3e.Text(c, "Jump back in", tokens.TitleSmall, true)
 			md3e.ActionTile(c.Key("jump-log"), "Activity log", md3e.ActionTileOptions{
 				Subtitle:    "12 events since launch",
