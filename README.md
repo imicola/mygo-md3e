@@ -40,6 +40,12 @@ go get github.com/imicola/mygo-md3e@latest
 CGO_ENABLED=0 go run ./examples/gallery
 ```
 
+`examples/desktop-demo` is PulseDesk, a compact desktop workbench that pairs the M9 shell (`WindowTitleBar`, density profiles, adaptive list/detail and supporting panes, Bento grid) with the M10 expressive layer (`ShapeButton`/`MorphIconButton`, `PillTabs`/`SegmentedTabs`, tags, status pills, avatars, skeletons, empty states, banners) and the zero-bloat `symbols` pack:
+
+```sh
+CGO_ENABLED=0 go run ./examples/desktop-demo
+```
+
 The earlier M1–M2 interactive preview (`tokens`, `motion`, `shape`) is also available as a standalone module under `examples/m2-demo`:
 
 ```sh

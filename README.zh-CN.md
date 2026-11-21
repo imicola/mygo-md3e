@@ -40,6 +40,12 @@ go get github.com/imicola/mygo-md3e@latest
 CGO_ENABLED=0 go run ./examples/gallery
 ```
 
+`examples/desktop-demo` 是 PulseDesk：一个紧凑的桌面控制中心示例，把 M9 外壳（`WindowTitleBar`、三档密度、自适应列表详情与辅助面板、Bento 网格）与 M10 表现层（`ShapeButton`/`MorphIconButton`、`PillTabs`/`SegmentedTabs`、Tag、StatusPill、Avatar、Skeleton、EmptyState、Banner）以及零膨胀 `symbols` 图标包组合在一起：
+
+```sh
+CGO_ENABLED=0 go run ./examples/desktop-demo
+```
+
 此外，`examples/m2-demo` 保留了针对 `tokens` / `motion` / `shape` 的独立预览模块：
 
 ```sh
