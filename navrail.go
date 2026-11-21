@@ -18,6 +18,11 @@ type NavigationRailOptions struct {
 	// Expanded lets the caller own the collapse state; nil keeps it in the
 	// rail's own local state.
 	Expanded *bool
+	// ExpandedWidth overrides the expanded rail width in DIP. Values <= 0 or
+	// non-finite fall back to the active theme Density default (256 Comfortable,
+	// 192 Desktop, 180 Compact); positive values below the collapsed width (80)
+	// are clamped to 80 so collapse/expand transitions stay aligned.
+	ExpandedWidth float32
 	// Header builds the optional block above the destinations, as a FAB.
 	Header func() ui.Element
 	// Align places the destinations at the Start, Center or End of the rail.
@@ -101,10 +106,12 @@ func NavigationRail(c *ui.Context, destinations []NavigationDestination, opts ..
 	// One spring drives both the rail's width and every destination's pill,
 	// icon and label, so the mid-transition frames stay aligned rather than
 	// switching layouts on the boolean.
+	expandedW := resolveNavRailExpandedWidth(o.ExpandedWidth, th.Density)
 	expand := animateWithTheme(root, th, navRailExpandKey{}, expandTarget, motion.DefaultSpatial)
-	railW := navRailCollapsedWidth + (navRailExpandedWidth-navRailCollapsedWidth)*expand
+	railW := navRailCollapsedWidth + (expandedW-navRailCollapsedWidth)*expand
 	root.Width(railW)
 	itemW := max(0, railW-2*navRailPaddingX)
+	itemGap := navRailItemGap(th.Density)
 
 	root.Children(func() {
 		if o.Header != nil {
@@ -117,7 +124,7 @@ func NavigationRail(c *ui.Context, destinations []NavigationDestination, opts ..
 		// scroll takes the list's own height and Align still places it.
 		ui.Column(c).Grow(1).FillWidth().Justify(o.Align).Children(func() {
 			ui.Scroll(c.Key(navRailScrollKey{})).FillWidth().Children(func() {
-				ui.Column(c).FillWidth().PaddingX(navRailPaddingX).Gap(8).Children(func() {
+				ui.Column(c).FillWidth().PaddingX(navRailPaddingX).Gap(itemGap).Children(func() {
 					for i := range destinations {
 						navRailDestination(c, th, cs, &destinations[i], i, o, expand, itemW)
 					}
@@ -252,4 +259,25 @@ func navRailPillRect(r ui.Rect, t, indicator float32, rtl bool) (ui.Rect, float3
 	}
 	y := navRailIconTop*(1-t) + (r.H-h)/2*t
 	return ui.Rect{X: x, Y: r.Y + y, W: w, H: h}, h / 2
+}
+
+func resolveNavRailExpandedWidth(w float32, d tokens.Density) float32 {
+	if !isPositiveFiniteF32(w) {
+		return float32(d.NavRailExpandedWidth())
+	}
+	if w < navRailCollapsedWidth {
+		return navRailCollapsedWidth
+	}
+	return w
+}
+
+func navRailItemGap(d tokens.Density) float32 {
+	switch d.Normalize() {
+	case tokens.DensityDesktop:
+		return 4
+	case tokens.DensityCompact:
+		return 2
+	default:
+		return 8
+	}
 }

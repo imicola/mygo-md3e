@@ -165,6 +165,7 @@ func buildTextField(c *ui.Context, value *string, multiline bool, o TextFieldOpt
 	rtl := c.Direction() == ui.RightToLeft
 	outlined := o.Variant == TextFieldOutlined
 	scaleUp := max(float32(1), th.EffectiveTextScale())
+	dm := textFieldMetricsForDensity(th.Density)
 
 	outer := ui.Column(c).Shrink(0).DimDisabled(false)
 	if outlined {
@@ -179,13 +180,13 @@ func buildTextField(c *ui.Context, value *string, multiline bool, o TextFieldOpt
 		variationInk = contentInk
 	}
 
-	fieldH := float32(textFieldHeight) * scaleUp
+	fieldH := dm.height * scaleUp
 	if multiline {
 		fieldH = o.Height
 		if fieldH <= 0 {
 			fieldH = textAreaHeight * scaleUp
 		}
-		fieldH = max(fieldH, float32(textFieldHeight)*scaleUp)
+		fieldH = max(fieldH, dm.height*scaleUp)
 	}
 
 	var (
@@ -196,7 +197,7 @@ func buildTextField(c *ui.Context, value *string, multiline bool, o TextFieldOpt
 	)
 	var labelStyle TypeStyleMetrics
 	if o.Label != "" {
-		labelStyle = typeStyleOfWithTheme(th, tokens.BodyLarge)
+		labelStyle = typeStyleOfWithTheme(th, dm.textRole)
 	}
 	spatial := th.Animation(motion.FastSpatial)
 	effects := th.Animation(motion.FastEffects)
@@ -213,18 +214,18 @@ func buildTextField(c *ui.Context, value *string, multiline bool, o TextFieldOpt
 			field.Radius(textFieldRadius, textFieldRadius, 0, 0)
 		}
 		if multiline {
-			field.Padding(textFieldIconSize*scaleUp, 0, 8*scaleUp, 0)
+			field.Padding(dm.iconSize*scaleUp, 0, 8*scaleUp, 0)
 		}
-		field.PaddingStart(textFieldPad).PaddingEnd(textFieldPad)
+		field.PaddingStart(dm.pad).PaddingEnd(dm.pad)
 		// Affixes show while the field is focused or holds text. Skip FocusWithin
 		// completely when neither affix is configured.
 		showAffix := (o.Prefix != "" || o.Suffix != "") && (*value != "" || field.FocusWithin())
 		field.Children(func() {
 			if o.LeadingIcon != nil {
-				drawIconBox(c, o.LeadingIcon, textFieldIconSize, variationInk)
+				drawIconBox(c, o.LeadingIcon, dm.iconSize, variationInk)
 			}
 			if showAffix && o.Prefix != "" {
-				applyTypeStyleWithTheme(th, ui.Text(c, o.Prefix).NoWrap().Shrink(0).TextColor(variationInk), tokens.BodyLarge)
+				applyTypeStyleWithTheme(th, ui.Text(c, o.Prefix).NoWrap().Shrink(0).TextColor(variationInk), dm.textRole)
 			}
 			c.Key(textFieldInputKey{})
 			if multiline {
@@ -239,7 +240,7 @@ func buildTextField(c *ui.Context, value *string, multiline bool, o TextFieldOpt
 				CaretColor(cs.Primary).
 				PlaceholderColor(variationInk).
 				Grow(1)
-			applyTypeStyleWithTheme(th, input, tokens.BodyLarge)
+			applyTypeStyleWithTheme(th, input, dm.textRole)
 			if multiline {
 				input.AlignSelf(ui.Stretch)
 			}
@@ -273,7 +274,7 @@ func buildTextField(c *ui.Context, value *string, multiline bool, o TextFieldOpt
 			}
 
 			if showAffix && o.Suffix != "" {
-				applyTypeStyleWithTheme(th, ui.Text(c, o.Suffix).NoWrap().Shrink(0).TextColor(variationInk), tokens.BodyLarge)
+				applyTypeStyleWithTheme(th, ui.Text(c, o.Suffix).NoWrap().Shrink(0).TextColor(variationInk), dm.textRole)
 			}
 			if o.TrailingIcon != nil {
 				if o.OnTrailing != nil {
@@ -281,21 +282,21 @@ func buildTextField(c *ui.Context, value *string, multiline bool, o TextFieldOpt
 					trailing = ui.ButtonBase(c.Key(textFieldTrailingKey{})).
 						DimDisabled(false).
 						FocusRing(false).
-						Size(40, 40).
+						Size(dm.trailingBtn, dm.trailingBtn).
 						Shrink(0).
 						Disabled(disabled).
 						Label(labelOr(o.TrailingLabel, "Action")).
 						TextColor(variationInk)
 					attachRippleWithTheme(th, trailing, StateLayerOptions{
 						Color:    variationInk,
-						Radius:   20,
+						Radius:   dm.trailingBtn / 2,
 						Disabled: disabled,
 					})
 					trailing.Children(func() {
-						drawIconBox(c, o.TrailingIcon, textFieldIconSize, variationInk)
+						drawIconBox(c, o.TrailingIcon, dm.iconSize, variationInk)
 					})
 				} else {
-					drawIconBox(c, o.TrailingIcon, textFieldIconSize, variationInk)
+					drawIconBox(c, o.TrailingIcon, dm.iconSize, variationInk)
 				}
 			}
 		})
@@ -332,9 +333,9 @@ func buildTextField(c *ui.Context, value *string, multiline bool, o TextFieldOpt
 	submitted := input.Submitted()
 
 	// The label anchor is the content start, shifted past a leading icon.
-	labelInset := float32(textFieldPad)
+	labelInset := dm.pad
 	if o.LeadingIcon != nil {
-		labelInset += textFieldIconSize + textFieldGap
+		labelInset += dm.iconSize + textFieldGap
 	}
 	bg := cs.SurfaceContainerHighest
 	if bg.A == 0 {
@@ -367,8 +368,8 @@ func buildTextField(c *ui.Context, value *string, multiline bool, o TextFieldOpt
 	style := labelStyle
 	hasEndIcon := o.TrailingIcon != nil
 	isErr := o.Error
-	restCenterOffset := float32(textFieldHeight) * scaleUp / 2
-	floatOffset := 12 * scaleUp
+	restCenterOffset := dm.height * scaleUp / 2
+	floatOffset := dm.floatOffset * scaleUp
 	field.Draw(func(p *ui.Painter, r ui.Rect) {
 		if r.W <= 0 || r.H <= 0 {
 			return
@@ -391,11 +392,11 @@ func buildTextField(c *ui.Context, value *string, multiline bool, o TextFieldOpt
 		var labelW float32
 		var clipR ui.Rect
 		if label != "" {
-			restEndInset := float32(textFieldPad)
+			restEndInset := dm.pad
 			if hasEndIcon {
-				restEndInset += textFieldIconSize + textFieldGap
+				restEndInset += dm.iconSize + textFieldGap
 			}
-			endInset := restEndInset + (float32(textFieldPad)-restEndInset)*clampF32(labelT, 0, 1)
+			endInset := restEndInset + (dm.pad-restEndInset)*clampF32(labelT, 0, 1)
 			maxLabelW := max(0, r.W-labelInset-endInset)
 			drawLabel, labelW = fitTextFieldLabel(p, label, labelColor, style, maxLabelW, sc)
 			clipX := anchor
@@ -483,7 +484,7 @@ func buildTextField(c *ui.Context, value *string, multiline bool, o TextFieldOpt
 		outer.Children(func() {
 			row := ui.Row(c).
 				Height(textFieldSupportH*scaleUp).
-				PaddingX(textFieldPad).
+				PaddingX(dm.pad).
 				Gap(textFieldGap).
 				Margin(textFieldSupportGap, 0, 0, 0).
 				AlignItems(ui.Center)
@@ -647,4 +648,46 @@ func outlinedFieldPath(r ui.Rect, radius, strokeW, notchStart, notchEnd float32)
 	p.CubeTo(x0, y0+innerR-k, x0+innerR-k, y0, x0+innerR, y0)
 	p.LineTo(notchStart, y0)
 	return &p
+}
+
+type textFieldDensityMetrics struct {
+	height      float32
+	pad         float32
+	iconSize    float32
+	trailingBtn float32
+	floatOffset float32
+	textRole    tokens.TypeRole
+}
+
+func textFieldMetricsForDensity(d tokens.Density) textFieldDensityMetrics {
+	h := float32(d.TextFieldHeight())
+	switch d.Normalize() {
+	case tokens.DensityDesktop:
+		return textFieldDensityMetrics{
+			height:      h,
+			pad:         12,
+			iconSize:    20,
+			trailingBtn: 32,
+			floatOffset: 9,
+			textRole:    tokens.BodyMedium,
+		}
+	case tokens.DensityCompact:
+		return textFieldDensityMetrics{
+			height:      h,
+			pad:         10,
+			iconSize:    18,
+			trailingBtn: 28,
+			floatOffset: 8,
+			textRole:    tokens.BodyMedium,
+		}
+	default:
+		return textFieldDensityMetrics{
+			height:      h,
+			pad:         textFieldPad,
+			iconSize:    textFieldIconSize,
+			trailingBtn: 40,
+			floatOffset: 12,
+			textRole:    tokens.BodyLarge,
+		}
+	}
 }

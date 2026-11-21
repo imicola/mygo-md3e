@@ -463,3 +463,45 @@ func TestButtonOutOfRangeSizeTierNormalizesToXS(t *testing.T) {
 		t.Fatalf("invalid tier widths (%v, %v) != SizeXS (%v) — label typography mismatch", big.Bounds.W, neg.Bounds.W, xs.Bounds.W)
 	}
 }
+
+func TestButtonDensitySizingRTLAndReduceMotion(t *testing.T) {
+	for _, d := range []tokens.Density{tokens.DensityComfortable, tokens.DensityDesktop, tokens.DensityCompact} {
+		th := ThemeFromSeed(DefaultSeedColor, ThemeOptions{
+			Density:      d,
+			ReduceMotion: true,
+		})
+		tt := ui.NewTester(func(c *ui.Context) {
+			ThemeScope(c, th, func() {
+				ui.Column(c).Size(320, 260).Padding(16).Gap(8).Children(func() {
+					Button(c, "XS", ButtonOptions{Size: tokens.SizeXS, LeadingIcon: mdicon.Add.Draw})
+					Button(c, "Small", ButtonOptions{Size: tokens.SizeS, Shape: ButtonShapeSquare})
+					Button(c, "Medium", ButtonOptions{Size: tokens.SizeM, Variant: ButtonOutlined})
+				})
+			})
+		}, 320, 260)
+		tt.SetDirection(ui.RightToLeft)
+		tt.Frame()
+
+		for _, tc := range []struct {
+			label string
+			tier  tokens.SizeTier
+		}{
+			{"XS", tokens.SizeXS},
+			{"Small", tokens.SizeS},
+			{"Medium", tokens.SizeM},
+		} {
+			info := buttonInfo(t, tt, ui.RoleButton, tc.label)
+			wantH := float32(d.ButtonSpec(tc.tier).Height)
+			if absF32(info.Bounds.H-wantH) > 0.5 {
+				t.Fatalf("density %v tier %v: height = %.1f, want %.1f", d, tc.tier, info.Bounds.H, wantH)
+			}
+		}
+		xs := buttonInfo(t, tt, ui.RoleButton, "XS")
+		tt.Press(xs.Bounds.X+xs.Bounds.W/2, xs.Bounds.Y+xs.Bounds.H/2)
+		tt.Release(xs.Bounds.X+xs.Bounds.W/2, xs.Bounds.Y+xs.Bounds.H/2)
+		tt.Frame()
+		if tt.FramePending() {
+			t.Fatalf("density %v: ReduceMotion button left pending frames", d)
+		}
+	}
+}

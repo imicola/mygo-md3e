@@ -100,7 +100,7 @@ func Button(c *ui.Context, label string, opts ...ButtonOptions) ui.Element {
 
 	th := CurrentTheme(c)
 	o.Size = normalizeSizeTier(o.Size)
-	spec := tierSpec(o.Size)
+	spec := tierSpecForDensity(th.Density, o.Size)
 	rest := restingRadius(spec, o.Shape)
 
 	el := ui.ButtonBase(c).
@@ -108,7 +108,7 @@ func Button(c *ui.Context, label string, opts ...ButtonOptions) ui.Element {
 		FocusRing(false).
 		Height(float32(spec.Height)).
 		PaddingX(float32(spec.Padding)).
-		Gap(iconLabelGap(o.Size))
+		Gap(iconLabelGapForDensity(th.Density, o.Size))
 	// A disabled ancestor also disables the button: use MD3E's disabled palette
 	// so it does not look enabled while ignoring input.
 	disabled := o.Disabled || el.IsDisabled()
@@ -163,7 +163,12 @@ func Button(c *ui.Context, label string, opts ...ButtonOptions) ui.Element {
 			drawIconBox(c, o.LeadingIcon, float32(spec.IconSize), pal.content)
 		}
 		if label != "" {
-			applyTypeStyleWithTheme(th, ui.Text(c, label).NoWrap(), role)
+			txt := applyTypeStyleWithTheme(th, ui.Text(c, label).NoWrap(), role)
+			if th.Density.Normalize() != tokens.DensityComfortable {
+				scale := th.EffectiveTextScale()
+				txt.FontSize(float32(spec.TextSize) * scale).
+					FixedLineHeight(float32(spec.TextSize+4) * scale)
+			}
 		}
 		if o.TrailingIcon != nil {
 			drawIconBox(c, o.TrailingIcon, float32(spec.IconSize), pal.content)
@@ -236,6 +241,25 @@ func normalizeSizeTier(t tokens.SizeTier) tokens.SizeTier {
 // outside SizeXS..SizeXL.
 func tierSpec(t tokens.SizeTier) tokens.SizeSpec {
 	return normalizeSizeTier(t).Spec()
+}
+
+// tierSpecForDensity returns the density-adapted button geometry of t.
+func tierSpecForDensity(d tokens.Density, t tokens.SizeTier) tokens.SizeSpec {
+	return d.ButtonSpec(normalizeSizeTier(t))
+}
+
+func iconLabelGapForDensity(d tokens.Density, t tokens.SizeTier) float32 {
+	if d.Normalize() == tokens.DensityComfortable {
+		return iconLabelGap(t)
+	}
+	switch normalizeSizeTier(t) {
+	case tokens.SizeL:
+		return 10
+	case tokens.SizeXL:
+		return 12
+	default:
+		return 6
+	}
 }
 
 // restingRadius returns the idle corner radius of shape at spec. Round is a

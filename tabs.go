@@ -114,8 +114,9 @@ func buildTabs(c *ui.Context, items []TabItem, opts []TabsOptions, primary bool)
 	if label == "" {
 		label = "Tabs"
 	}
+	tabH, padX, iconSize, iconGap := tabsMetricsForDensity(th.Density)
 
-	root := ui.Column(c).FillWidth().Height(tabsHeight).DimDisabled(false)
+	root := ui.Column(c).FillWidth().Height(tabH).DimDisabled(false)
 	root.Disabled(o.Disabled)
 	selected := o.Selected
 	if selected == nil {
@@ -145,7 +146,7 @@ func buildTabs(c *ui.Context, items []TabItem, opts []TabsOptions, primary bool)
 
 	buildList := func() {
 		tabs = ui.TabsBase(c, selected, len(items))
-		tabs.List.DimDisabled(false).Label(label).Height(tabsHeight)
+		tabs.List.DimDisabled(false).Label(label).Height(tabH)
 		if !o.Scrollable {
 			tabs.List.FillWidth()
 		}
@@ -159,9 +160,9 @@ func buildTabs(c *ui.Context, items []TabItem, opts []TabsOptions, primary bool)
 				c.Key(key)
 				tab := tabs.Tab(i).
 					DimDisabled(false).
-					Height(tabsHeight).
-					PaddingX(tabsPaddingX).
-					Gap(tabsIconGap).
+					Height(tabH).
+					PaddingX(padX).
+					Gap(iconGap).
 					AlignItems(ui.Center).
 					Justify(ui.Center)
 				if o.Scrollable {
@@ -185,7 +186,7 @@ func buildTabs(c *ui.Context, items []TabItem, opts []TabsOptions, primary bool)
 					TextColor(ink)
 				tab.Children(func() {
 					if item.Icon != nil {
-						drawIconBox(c, item.Icon, tabsIconSize, ink)
+						drawIconBox(c, item.Icon, iconSize, ink)
 					}
 					txt := ui.Text(c, item.Label).NoWrap()
 					applyTypeStyleWithTheme(th, txt, tokens.LabelLarge, on)
@@ -207,7 +208,7 @@ func buildTabs(c *ui.Context, items []TabItem, opts []TabsOptions, primary bool)
 			scrollEl = ui.ScrollHorizontal(c).
 				TrackScroll(scrollState).
 				DimDisabled(false).
-				Height(tabsHeight).
+				Height(tabH).
 				FillWidth().
 				Scrollbars(false)
 			scrollEl.Disabled(o.Disabled)
@@ -363,4 +364,16 @@ func tabsIndicatorBand(primary bool, tabW float32) (inset, width float32) {
 		w = tabW
 	}
 	return (tabW - w) / 2, w
+}
+
+func tabsMetricsForDensity(d tokens.Density) (height, padX, iconSize, iconGap float32) {
+	height = float32(d.TabHeight())
+	switch d.Normalize() {
+	case tokens.DensityDesktop:
+		return height, 12, 20, 6
+	case tokens.DensityCompact:
+		return height, 10, 18, 6
+	default:
+		return height, tabsPaddingX, tabsIconSize, tabsIconGap
+	}
 }

@@ -143,6 +143,15 @@ func List(c *ui.Context, items []ListItem, opts ...ListOptions) ui.Element {
 type listStyle struct {
 	large           float32
 	small           float32
+	oneLineH        float32
+	twoLineH        float32
+	threeLineH      float32
+	padX            float32
+	slotGap         float32
+	textGap         float32
+	iconSize        float32
+	headlineRole    tokens.TypeRole
+	supportingRole  tokens.TypeRole
 	base            ui.Color
 	selectedBg      ui.Color
 	content         ui.Color
@@ -162,9 +171,41 @@ func newListStyle(th *Theme, segmented bool) listStyle {
 	if selectedBg.A == 0 {
 		selectedBg = cs.PrimaryContainer
 	}
+	oneH, twoH, threeH := th.Density.ListHeights()
+	padX := float32(listRowPadding)
+	slotGap := float32(listSlotGap)
+	textGap := float32(2)
+	iconSize := float32(listIconSize)
+	headlineRole := tokens.BodyLarge
+	supportingRole := tokens.BodyMedium
+	switch th.Density.Normalize() {
+	case tokens.DensityDesktop:
+		padX = 12
+		slotGap = 12
+		textGap = 1
+		iconSize = 20
+		headlineRole = tokens.BodyMedium
+		supportingRole = tokens.BodySmall
+	case tokens.DensityCompact:
+		padX = 10
+		slotGap = 10
+		textGap = 0
+		iconSize = 18
+		headlineRole = tokens.BodyMedium
+		supportingRole = tokens.BodySmall
+	}
 	return listStyle{
 		large:           th.Shapes.Radius(tokens.ShapeLarge),
 		small:           th.Shapes.Radius(tokens.ShapeSmall),
+		oneLineH:        float32(oneH),
+		twoLineH:        float32(twoH),
+		threeLineH:      float32(threeH),
+		padX:            padX,
+		slotGap:         slotGap,
+		textGap:         textGap,
+		iconSize:        iconSize,
+		headlineRole:    headlineRole,
+		supportingRole:  supportingRole,
 		base:            base,
 		selectedBg:      selectedBg,
 		content:         cs.OnSurface,
@@ -201,14 +242,14 @@ func listRow(c *ui.Context, th *Theme, st listStyle, item *ListItem, i, n int, o
 	if item.SupportingText != "" {
 		lines++
 	}
-	height := float32(listOneLineHeight)
+	height := st.oneLineH
 	switch lines {
 	case 2:
-		height = listTwoLineHeight
+		height = st.twoLineH
 	case 3:
-		height = listThreeLineHeight
+		height = st.threeLineH
 	}
-	row.Height(height).FillWidth().PaddingX(listRowPadding).Gap(listSlotGap).AlignItems(ui.Center).
+	row.Height(height).FillWidth().PaddingX(st.padX).Gap(st.slotGap).AlignItems(ui.Center).
 		Disabled(item.Disabled)
 	if item.Headline != "" {
 		row.Label(item.Headline)
@@ -274,9 +315,9 @@ func listRow(c *ui.Context, th *Theme, st listStyle, item *ListItem, i, n int, o
 				el.Shrink(0)
 			}
 		} else if item.Icon != nil {
-			drawIconBox(c, item.Icon, listIconSize, content)
+			drawIconBox(c, item.Icon, st.iconSize, content)
 		}
-		ui.Column(c).Grow(1).Shrink(1).MinWidth(0).Clip().AlignItems(ui.Start).Gap(2).Children(func() {
+		ui.Column(c).Grow(1).Shrink(1).MinWidth(0).Clip().AlignItems(ui.Start).Gap(st.textGap).Children(func() {
 			if item.Overline != "" {
 				over := ui.Text(c, item.Overline).SingleLine()
 				applyTypeStyleWithTheme(th, over, tokens.LabelSmall)
@@ -284,12 +325,12 @@ func listRow(c *ui.Context, th *Theme, st listStyle, item *ListItem, i, n int, o
 			}
 			if item.Headline != "" {
 				h := ui.Text(c, item.Headline).SingleLine()
-				applyTypeStyleWithTheme(th, h, tokens.BodyLarge)
+				applyTypeStyleWithTheme(th, h, st.headlineRole)
 				h.TextColor(content)
 			}
 			if item.SupportingText != "" {
 				s := ui.Text(c, item.SupportingText).SingleLine()
-				applyTypeStyleWithTheme(th, s, tokens.BodyMedium)
+				applyTypeStyleWithTheme(th, s, st.supportingRole)
 				s.TextColor(supporting)
 			}
 		})

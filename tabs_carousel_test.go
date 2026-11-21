@@ -707,3 +707,39 @@ func TestTabsInitialOffscreenScrollDynamicWidthAndShrink(t *testing.T) {
 		t.Fatalf("stale indicator still painted at tab edge %+v", rightEdgePx)
 	}
 }
+
+func TestTabsDensityRTLAndReduceMotion(t *testing.T) {
+	for _, d := range []tokens.Density{tokens.DensityComfortable, tokens.DensityDesktop, tokens.DensityCompact} {
+		th := ThemeFromSeed(DefaultSeedColor, ThemeOptions{
+			Density:      d,
+			ReduceMotion: true,
+		})
+		sel := 0
+		tt := containerCanvas(th, func(c *ui.Context) {
+			PrimaryTabs(c, []TabItem{
+				{Label: "Overview", Icon: func(p *ui.Painter, r ui.Rect, ink ui.Color) { p.Fill(r, ink, 0) }},
+				{Label: "Logs"},
+			}, TabsOptions{Selected: &sel, Label: "DenseTabs"}).Width(300)
+		})
+		tt.SetDirection(ui.RightToLeft)
+		tt.Frame()
+		tt.Advance(50 * time.Millisecond)
+		if tt.FramePending() {
+			t.Fatalf("density %v: ReduceMotion tabs left pending frames", d)
+		}
+		ov := tabInfo(t, tt, "Overview")
+		wantH := float32(d.TabHeight())
+		if absF32(ov.Bounds.H-wantH) > 0.5 {
+			t.Fatalf("density %v: tab height = %.1f, want %.1f", d, ov.Bounds.H, wantH)
+		}
+		logs := tabInfo(t, tt, "Logs")
+		tt.ClickAt(center(logs.Bounds))
+		tt.Frame()
+		if sel != 1 {
+			t.Fatalf("density %v: RTL tab click selected %d, want 1", d, sel)
+		}
+		if tt.FramePending() {
+			t.Fatalf("density %v: ReduceMotion tab switch left pending frames", d)
+		}
+	}
+}

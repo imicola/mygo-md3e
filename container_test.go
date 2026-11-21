@@ -676,3 +676,42 @@ func TestListOnClickDeleteResetsSelectionSafely(t *testing.T) {
 		t.Fatalf("callback order = %v, want %v", events, wantEvents)
 	}
 }
+
+func TestListDensityMetricsRTLAndReduceMotion(t *testing.T) {
+	densities := []tokens.Density{
+		tokens.DensityComfortable,
+		tokens.DensityDesktop,
+		tokens.DensityCompact,
+	}
+	for _, d := range densities {
+		th := ThemeFromSeed(DefaultSeedColor, ThemeOptions{
+			Density:      d,
+			ReduceMotion: true,
+		})
+		sel := 0
+		tt := containerCanvas(th, func(c *ui.Context) {
+			ui.Box(c).Width(320).Children(func() {
+				List(c, []ListItem{
+					{Headline: "OneLine", Icon: func(p *ui.Painter, r ui.Rect, ink ui.Color) { p.Fill(r, ink, 0) }},
+					{Headline: "TwoLine", SupportingText: "Subtext"},
+					{Overline: "OVER", Headline: "ThreeLine", SupportingText: "Subtext"},
+				}, ListOptions{Selected: &sel, Segmented: true, Label: "DenseList"})
+			})
+		})
+		tt.SetDirection(ui.RightToLeft)
+		tt.Frame()
+		if tt.FramePending() {
+			t.Fatalf("density %v: ReduceMotion list left pending frames", d)
+		}
+		w1, w2, w3 := d.ListHeights()
+		r1 := listItemInfo(t, tt, "OneLine")
+		r2 := listItemInfo(t, tt, "TwoLine")
+		r3 := listItemInfo(t, tt, "ThreeLine")
+		if absF32(r1.Bounds.H-float32(w1)) > 0.5 ||
+			absF32(r2.Bounds.H-float32(w2)) > 0.5 ||
+			absF32(r3.Bounds.H-float32(w3)) > 0.5 {
+			t.Fatalf("density %v: row heights = (%.1f, %.1f, %.1f), want (%v, %v, %v)",
+				d, r1.Bounds.H, r2.Bounds.H, r3.Bounds.H, w1, w2, w3)
+		}
+	}
+}

@@ -703,3 +703,40 @@ func TestTextFieldEmptyLabelAndEmptyAffixSettles(t *testing.T) {
 		t.Fatal("empty-label TextField indicator did not settle cleanly")
 	}
 }
+
+func TestTextFieldDensityRTLAndReduceMotion(t *testing.T) {
+	for _, d := range []tokens.Density{tokens.DensityComfortable, tokens.DensityDesktop, tokens.DensityCompact} {
+		th := ThemeFromSeed(DefaultSeedColor, ThemeOptions{
+			Density:      d,
+			ReduceMotion: true,
+		})
+		val := ""
+		var boxR ui.Rect
+		tt := fieldCanvas(th, func(c *ui.Context) {
+			TextField(c, &val, TextFieldOptions{
+				Variant:      TextFieldOutlined,
+				Label:        "Host",
+				TrailingIcon: mdicon.Clear.Draw,
+				OnTrailing:   func() { val = "" },
+			}).Width(260).DrawOver(func(_ *ui.Painter, r ui.Rect) { boxR = r })
+		})
+		tt.SetDirection(ui.RightToLeft)
+		tt.Frame()
+
+		wantFieldH := float32(d.TextFieldHeight())
+		// Outlined outer adds textFieldOuterTop (10 DIP) top padding.
+		wantOuterH := wantFieldH + textFieldOuterTop
+		if absF32(boxR.H-wantOuterH) > 0.5 {
+			t.Fatalf("density %v: TextField outer height = %.1f, want %.1f", d, boxR.H, wantOuterH)
+		}
+		info := buttonInfo(t, tt, ui.RoleTextField, "Host")
+		tt.ClickAt(info.Bounds.X+info.Bounds.W/2, info.Bounds.Y+info.Bounds.H/2)
+		tt.Type("127.0.0.1")
+		if val != "127.0.0.1" {
+			t.Fatalf("density %v: typed value = %q, want 127.0.0.1", d, val)
+		}
+		if tt.FramePending() {
+			t.Fatalf("density %v: ReduceMotion TextField left pending frames", d)
+		}
+	}
+}

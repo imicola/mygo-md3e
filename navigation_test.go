@@ -1084,3 +1084,66 @@ func TestNavigationRailRTLPillAndNarrowNavBarClamp(t *testing.T) {
 	}
 	_ = bg
 }
+
+func TestNavigationRailDensityAndExpandedWidth(t *testing.T) {
+	cases := []struct {
+		name     string
+		density  tokens.Density
+		override float32
+		wantW    float32
+	}{
+		{"ComfortableDefault", tokens.DensityComfortable, 0, 256},
+		{"DesktopDefault", tokens.DensityDesktop, 0, 192},
+		{"CompactDefault", tokens.DensityCompact, 0, 180},
+		{"ExplicitOverride", tokens.DensityDesktop, 220, 220},
+		{"NaNFallback", tokens.DensityDesktop, float32(math.NaN()), 192},
+		{"InfFallback", tokens.DensityCompact, float32(math.Inf(1)), 180},
+		{"TooSmallClamped", tokens.DensityDesktop, 40, navRailCollapsedWidth},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			th := ThemeFromSeed(DefaultSeedColor, ThemeOptions{
+				Density:      tc.density,
+				ReduceMotion: true,
+			})
+			expanded := true
+			selected := 0
+			tt := navigationCanvas(th, 400, 300, func(c *ui.Context) {
+				ui.Row(c).FillHeight().Children(func() {
+					NavigationRail(c, []NavigationDestination{
+						{Label: "Home", Icon: mdicon.Add.Draw},
+						{Label: "Search", Icon: mdicon.Search.Draw},
+					}, NavigationRailOptions{
+						Selected:      &selected,
+						Expanded:      &expanded,
+						ExpandedWidth: tc.override,
+						Label:         "Rail",
+					})
+				})
+			})
+			if tt.FramePending() {
+				t.Fatal("ReduceMotion rail should settle immediately without pending frames")
+			}
+			rail, ok := tt.AccessByRole(ui.RoleNavigation, "Rail")
+			if !ok {
+				t.Fatal("NavigationRail missing from access tree")
+			}
+			if absF32(rail.Bounds.W-tc.wantW) > 0.5 {
+				t.Fatalf("expanded rail width = %.1f, want %.1f", rail.Bounds.W, tc.wantW)
+			}
+
+			// Verify RTL layout and collapse transition settle cleanly.
+			tt.SetDirection(ui.RightToLeft)
+			expanded = false
+			tt.Frame()
+			if tt.FramePending() {
+				t.Fatal("ReduceMotion RTL collapse left pending frames")
+			}
+			rail, _ = tt.AccessByRole(ui.RoleNavigation, "Rail")
+			if absF32(rail.Bounds.W-navRailCollapsedWidth) > 0.5 {
+				t.Fatalf("collapsed rail width = %.1f, want %v", rail.Bounds.W, navRailCollapsedWidth)
+			}
+		})
+	}
+}
