@@ -120,7 +120,7 @@ func buildActionChip(c *ui.Context, label string, o ChipOptions, panicMsg string
 	if pal.border.A > 0 {
 		borderInset = 1
 	}
-	attachRippleWithTheme(th, el, StateLayerOptions{
+	attachRippleWithContext(c, th, el, StateLayerOptions{
 		Color:       pal.content,
 		Radius:      chipRadius,
 		BorderInset: borderInset,
@@ -238,7 +238,7 @@ func FilterChip(c *ui.Context, selected *bool, label string, opts ...FilterChipO
 	})
 	content := pal.content.MixOklab(pal.selectedContent, selectT)
 	iconColor := pal.icon.MixOklab(pal.selectedContent, selectT)
-	attachRippleWithTheme(th, el, StateLayerOptions{
+	attachRippleWithContext(c, th, el, StateLayerOptions{
 		Color:    content,
 		Radius:   chipRadius,
 		Disabled: disabled,
@@ -390,7 +390,7 @@ func InputChip(c *ui.Context, label string, opts ...InputChipOptions) ui.Element
 			PaddingEnd(4).
 			Label(labelOr(o.Label, label))
 		body.TextColor(bodyInk)
-		attachRippleWithTheme(th, body, StateLayerOptions{
+		attachRippleWithContext(c, th, body, StateLayerOptions{
 			Color:    bodyInk,
 			Radii:    bodyRadii,
 			HasRadii: true,
@@ -426,7 +426,7 @@ func InputChip(c *ui.Context, label string, opts ...InputChipOptions) ui.Element
 			Disabled(disabled).
 			Label(removeLabel).
 			TextColor(closeInk)
-		attachRippleWithTheme(th, closeEl, StateLayerOptions{
+		attachRippleWithContext(c, th, closeEl, StateLayerOptions{
 			Color:    closeInk,
 			Radii:    closeRadii,
 			HasRadii: true,

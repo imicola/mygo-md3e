@@ -141,7 +141,7 @@ func IconButton(c *ui.Context, label string, icon IconDraw, opts ...IconButtonOp
 	if pal.border.A > 0 {
 		borderInset = 1
 	}
-	attachRippleWithTheme(th, el, StateLayerOptions{
+	attachRippleWithContext(c, th, el, StateLayerOptions{
 		Color:       pal.content,
 		Radius:      radius,
 		BorderInset: borderInset,
@@ -216,7 +216,7 @@ func ToggleIconButton(c *ui.Context, on *bool, label string, icon IconDraw, opts
 	if pal.border.A > 0 {
 		borderInset = 1
 	}
-	attachRippleWithTheme(th, el, StateLayerOptions{
+	attachRippleWithContext(c, th, el, StateLayerOptions{
 		Color:       pal.content,
 		Radius:      radius,
 		BorderInset: borderInset,

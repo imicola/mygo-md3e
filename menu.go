@@ -109,7 +109,7 @@ func DropdownMenu(c *ui.Context, label string, items []MenuItem, opts ...MenuOpt
 		if grow {
 			trigger.Grow(1)
 		}
-		attachRippleWithTheme(th, trigger, StateLayerOptions{
+		attachRippleWithContext(c, th, trigger, StateLayerOptions{
 			Color:    ink,
 			Radius:   menuTriggerRadius,
 			Disabled: disabled,
@@ -177,7 +177,7 @@ func MenuButton(c *ui.Context, label string, icon IconDraw, items []MenuItem, op
 			ink = cs.OnSurface.Alpha(float32(tokens.DisabledContentOpacity))
 		}
 		trigger.Background(bg).TextColor(ink)
-		attachRippleWithTheme(th, trigger, StateLayerOptions{
+		attachRippleWithContext(c, th, trigger, StateLayerOptions{
 			Color:    ink,
 			Radius:   menuTriggerHeight / 2,
 			Disabled: disabled,

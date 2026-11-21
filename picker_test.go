@@ -303,8 +303,8 @@ func TestDatePickerModalFocusAndEscape(t *testing.T) {
 
 	tt.Click(pickerDayLabel(pickerDay(2026, time.November, 20)))
 	tt.Advance(300 * time.Millisecond)
-	if value.Day() != 20 {
-		t.Fatalf("a click in the modal chose day %d, want 20", value.Day())
+	if value.Day() != 12 {
+		t.Fatalf("draft click in modal mutated committed value to day %d before OK", value.Day())
 	}
 	if _, ok := tt.AccessByRole(ui.RoleDialog, "Due date"); !ok {
 		t.Fatal("choosing a day closed the modal before OK")
@@ -313,6 +313,9 @@ func TestDatePickerModalFocusAndEscape(t *testing.T) {
 	tt.Advance(time.Second)
 	if open {
 		t.Fatal("Escape did not close the modal")
+	}
+	if value.Day() != 12 {
+		t.Fatalf("Escape committed draft day %d instead of discarding", value.Day())
 	}
 	if _, ok := tt.AccessByRole(ui.RoleDialog, "Due date"); ok {
 		t.Fatal("the closed modal still shows")
@@ -326,10 +329,17 @@ func TestDatePickerModalFocusAndEscape(t *testing.T) {
 
 	tt.Click("Open date")
 	tt.Advance(500 * time.Millisecond)
+	tt.Click(pickerDayLabel(pickerDay(2026, time.November, 20)))
 	tt.Click("OK")
 	tt.Advance(time.Second)
 	if open {
 		t.Fatal("OK did not close the modal")
+	}
+	if value.Day() != 20 {
+		t.Fatalf("OK did not commit draft day 20, got %d", value.Day())
+	}
+	if !tt.Focused("Open date") {
+		t.Fatal("closing via OK does not give focus back to the trigger")
 	}
 }
 
@@ -1503,5 +1513,162 @@ func TestTimePickerTextScaleInputWidth(t *testing.T) {
 		_ = dialLabels(timeSegmentMinute, false)
 	}); allocs != 0 {
 		t.Fatalf("dialLabels allocated %.0f times per run, want 0", allocs)
+	}
+}
+
+// TestDatePickerModalInsideAlertDialogRestoresFocusAndIsTransactional checks
+// that a DatePickerModal opened from inside an AlertDialog restores focus to
+// its exact trigger (not an earlier sibling in the AlertDialog) on Escape,
+// Cancel, and OK, and commits edits only on OK.
+func TestDatePickerModalInsideAlertDialogRestoresFocusAndIsTransactional(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor)
+	openDialog := false
+	openPicker := false
+	value := pickerDay(2026, time.November, 12)
+	changes := 0
+
+	tt := ui.NewTester(func(c *ui.Context) {
+		ThemeScope(c, th, func() {
+			ui.Box(c).Size(640, 620).Background(canvasRGB).Padding(20).Children(func() {
+				if Button(c, "Open dialog").Clicked() {
+					openDialog = true
+				}
+				AlertDialog(c, &openDialog, AlertDialogOptions{
+					Headline: "Schedule",
+					Content: func() ui.Element {
+						return ui.Column(c).Gap(8).Children(func() {
+							Button(c, "Earlier sibling")
+							if Button(c, "Pick date").Clicked() {
+								openPicker = true
+							}
+							DatePicker(c, &value, DatePickerOptions{
+								Mode:      DatePickerModal,
+								Open:      &openPicker,
+								Label:     "Due date",
+								OnChanged: func() { changes++ },
+							})
+						})
+					},
+					Dismiss: &DialogAction{Label: "Close"},
+				})
+			})
+		})
+	}, 640, 620)
+
+	tt.Click("Open dialog")
+	tt.Advance(400 * time.Millisecond)
+	tt.Click("Pick date")
+	tt.Advance(500 * time.Millisecond)
+
+	if _, ok := tt.AccessByRole(ui.RoleDialog, "Due date"); !ok {
+		t.Fatal("nested DatePickerModal did not open inside AlertDialog")
+	}
+	tt.Click(pickerDayLabel(pickerDay(2026, time.November, 20)))
+	tt.Advance(300 * time.Millisecond)
+	if value.Day() != 12 || changes != 0 {
+		t.Fatalf("draft edit leaked before OK: day=%d changes=%d", value.Day(), changes)
+	}
+
+	// Escape must close the nested picker, discard the draft, keep AlertDialog
+	// open, and immediately restore focus to "Pick date" (not "Earlier sibling").
+	tt.Key(0, ui.KeyEscape)
+	tt.Frame()
+	if openPicker {
+		t.Fatal("Escape did not close nested DatePickerModal")
+	}
+	if !openDialog {
+		t.Fatal("Escape closed outer AlertDialog alongside nested DatePickerModal")
+	}
+	if value.Day() != 12 || changes != 0 {
+		t.Fatalf("Escape did not discard draft: day=%d changes=%d", value.Day(), changes)
+	}
+	if !tt.Focused("Pick date") {
+		var focusNames []string
+		for _, a := range tt.AccessAll() {
+			if a.Focused {
+				focusNames = append(focusNames, a.Name)
+			}
+		}
+		t.Fatalf("nested modal Escape did not restore focus to trigger inside AlertDialog (focused=%v, after=%v)", focusNames, tt.FramePending())
+	}
+	tt.Advance(time.Second)
+	if !tt.Focused("Pick date") {
+		t.Fatal("focus drifted from trigger after nested modal exit animation settled")
+	}
+	if tt.FramePending() {
+		t.Fatal("nested modal exit left pending frames")
+	}
+
+	// Cancel also discards the draft and restores trigger focus.
+	tt.Click("Pick date")
+	tt.Advance(500 * time.Millisecond)
+	tt.Click(pickerDayLabel(pickerDay(2026, time.November, 22)))
+	tt.Click("Cancel")
+	tt.Advance(time.Second)
+	if value.Day() != 12 || changes != 0 {
+		t.Fatalf("Cancel did not discard draft: day=%d changes=%d", value.Day(), changes)
+	}
+	if !tt.Focused("Pick date") {
+		t.Fatal("Cancel did not restore focus to trigger inside AlertDialog")
+	}
+
+	// OK commits the draft once and fires OnChanged.
+	tt.Click("Pick date")
+	tt.Advance(500 * time.Millisecond)
+	tt.Click(pickerDayLabel(pickerDay(2026, time.November, 25)))
+	tt.Click("OK")
+	tt.Advance(time.Second)
+	if value.Day() != 25 || changes != 1 {
+		t.Fatalf("OK commit got day=%d changes=%d, want day=25 changes=1", value.Day(), changes)
+	}
+	if !tt.Focused("Pick date") {
+		t.Fatal("OK did not restore focus to trigger inside AlertDialog")
+	}
+}
+
+// TestDateRangePickerModalTransactional checks DateRangePicker in modal mode
+// isolates edits in a draft until OK and discards them on Cancel.
+func TestDateRangePickerModalTransactional(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor, ThemeOptions{ReduceMotion: true})
+	open := false
+	start := pickerDay(2026, time.November, 10)
+	end := pickerDay(2026, time.November, 14)
+	changes := 0
+	tt := pickerCanvas(th, func(c *ui.Context) {
+		ui.Column(c).Children(func() {
+			if Button(c, "Pick range").Clicked() {
+				open = true
+			}
+			DateRangePicker(c, &start, &end, DatePickerOptions{
+				Mode:      DatePickerModal,
+				Open:      &open,
+				Label:     "Trip dates",
+				OnChanged: func() { changes++ },
+			})
+		})
+	})
+
+	tt.Click("Pick range")
+	tt.Frame()
+	tt.Click(pickerDayLabel(pickerDay(2026, time.November, 18)))
+	tt.Click(pickerDayLabel(pickerDay(2026, time.November, 21)))
+	tt.Frame()
+	if start.Day() != 10 || end.Day() != 14 || changes != 0 {
+		t.Fatalf("range draft leaked before OK: %d..%d changes=%d", start.Day(), end.Day(), changes)
+	}
+	tt.Click("Cancel")
+	tt.Frame()
+	if start.Day() != 10 || end.Day() != 14 || changes != 0 {
+		t.Fatalf("range Cancel did not discard draft: %d..%d changes=%d", start.Day(), end.Day(), changes)
+	}
+
+	tt.Click("Pick range")
+	tt.Frame()
+	tt.Click(pickerDayLabel(pickerDay(2026, time.November, 18)))
+	tt.Click(pickerDayLabel(pickerDay(2026, time.November, 21)))
+	tt.Click("OK")
+	tt.Frame()
+	if start.Day() != 18 || end.Day() != 21 || changes != 1 {
+		t.Fatalf("range OK got %d..%d changes=%d, want 18..21 changes=1", start.Day(), end.Day(), changes)
 	}
 }

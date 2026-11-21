@@ -2,7 +2,9 @@ package md3e
 
 import (
 	"math"
+	"sync"
 	"time"
+	"weak"
 
 	"github.com/egoist/mygo/ui"
 
@@ -147,7 +149,68 @@ type rippleState struct {
 	hasDrawOver    bool
 	hoverHook      func(p *ui.Painter, now time.Time, hovered bool)
 
+	focusHandle *ui.Handle
+	srv         ui.Services
+
 	halo haloFadeState
+}
+
+type windowFocusSlot struct {
+	srv    ui.Services
+	handle weak.Pointer[ui.Handle]
+}
+
+var (
+	focusTriggerMu    sync.Mutex
+	focusTriggerSlots [16]windowFocusSlot
+	focusTriggerNext  int
+)
+
+func recordFocusTrigger(srv ui.Services, h *ui.Handle) {
+	if srv == (ui.Services{}) || h == nil {
+		return
+	}
+	wp := weak.Make(h)
+	focusTriggerMu.Lock()
+	defer focusTriggerMu.Unlock()
+	for i := range focusTriggerSlots {
+		if focusTriggerSlots[i].srv == srv {
+			focusTriggerSlots[i].handle = wp
+			return
+		}
+	}
+	for i := range focusTriggerSlots {
+		if focusTriggerSlots[i].srv == (ui.Services{}) || focusTriggerSlots[i].handle.Value() == nil {
+			focusTriggerSlots[i] = windowFocusSlot{srv: srv, handle: wp}
+			return
+		}
+	}
+	focusTriggerSlots[focusTriggerNext] = windowFocusSlot{srv: srv, handle: wp}
+	focusTriggerNext = (focusTriggerNext + 1) % len(focusTriggerSlots)
+}
+
+func focusedTriggerHandle(c *ui.Context) *ui.Handle {
+	if c == nil {
+		return nil
+	}
+	srv := c.Services()
+	if srv == (ui.Services{}) {
+		return nil
+	}
+	focusTriggerMu.Lock()
+	var wp weak.Pointer[ui.Handle]
+	for i := range focusTriggerSlots {
+		if focusTriggerSlots[i].srv == srv {
+			wp = focusTriggerSlots[i].handle
+			break
+		}
+	}
+	focusTriggerMu.Unlock()
+	h := wp.Value()
+	if h == nil || !h.Focused(c) {
+		return nil
+	}
+	return h
 }
 
 const (
@@ -217,7 +280,7 @@ func AttachStateLayer(c *ui.Context, el ui.Element, opts ...StateLayerOptions) u
 }
 
 func attachStateLayerWithTheme(th *Theme, el ui.Element, opt StateLayerOptions) ui.Element {
-	return attachOverlayFeedbackWithTheme(th, el, false, opt)
+	return attachOverlayFeedbackWithTheme(nil, th, el, false, opt)
 }
 
 // AttachRipple attaches both MD3E StateLayer and ExpressiveRipple wave feedback
@@ -232,14 +295,18 @@ func AttachRipple(c *ui.Context, el ui.Element, opts ...StateLayerOptions) ui.El
 	if len(opts) == 1 {
 		opt = opts[0]
 	}
-	return attachRippleWithTheme(CurrentTheme(c), el, opt)
+	return attachRippleWithContext(c, CurrentTheme(c), el, opt)
 }
 
 func attachRippleWithTheme(th *Theme, el ui.Element, opt StateLayerOptions) ui.Element {
-	return attachOverlayFeedbackWithTheme(th, el, !opt.DisableRipple, opt)
+	return attachOverlayFeedbackWithTheme(nil, th, el, !opt.DisableRipple, opt)
 }
 
-func attachOverlayFeedbackWithTheme(th *Theme, el ui.Element, withRipple bool, opt StateLayerOptions) ui.Element {
+func attachRippleWithContext(c *ui.Context, th *Theme, el ui.Element, opt StateLayerOptions) ui.Element {
+	return attachOverlayFeedbackWithTheme(c, th, el, !opt.DisableRipple, opt)
+}
+
+func attachOverlayFeedbackWithTheme(c *ui.Context, th *Theme, el ui.Element, withRipple bool, opt StateLayerOptions) ui.Element {
 	st := ui.Local(el, rippleLocalKey{}, func() rippleState { return rippleState{} })
 	if st == nil {
 		return el
@@ -251,6 +318,9 @@ func attachOverlayFeedbackWithTheme(th *Theme, el ui.Element, withRipple bool, o
 	st.allowWaves = withRipple && !thReduceMotion
 	st.hasDrawOver = true
 	st.hoverHook = nil
+	if c != nil {
+		st.srv = c.Services()
+	}
 
 	ink := opt.Color
 	if ink.A == 0 {
@@ -263,8 +333,27 @@ func attachOverlayFeedbackWithTheme(th *Theme, el ui.Element, withRipple bool, o
 	}
 
 	if withRipple {
+		if c != nil && !opt.Disabled {
+			if st.focusHandle == nil {
+				st.focusHandle = new(ui.Handle)
+			}
+			el.Bind(st.focusHandle)
+		}
 		el.ObserveInput(func(ev ui.InputEvent) {
-			if opt.Disabled || !st.allowWaves {
+			if opt.Disabled {
+				return
+			}
+			switch ev.Kind {
+			case ui.InputPointerDown:
+				if ev.Button == 0 && st.srv != (ui.Services{}) && st.focusHandle != nil {
+					recordFocusTrigger(st.srv, st.focusHandle)
+				}
+			case ui.InputKeyDown:
+				if (ev.Key == ui.KeyEnter || ev.Key == ui.KeySpace) && !ev.Repeat && st.srv != (ui.Services{}) && st.focusHandle != nil {
+					recordFocusTrigger(st.srv, st.focusHandle)
+				}
+			}
+			if !st.allowWaves {
 				return
 			}
 			switch ev.Kind {

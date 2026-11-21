@@ -158,7 +158,7 @@ func Card(c *ui.Context, content func(), opts ...CardOptions) ui.Element {
 		if border.A > 0 {
 			borderInset = 1
 		}
-		attachRippleWithTheme(th, el, StateLayerOptions{
+		attachRippleWithContext(c, th, el, StateLayerOptions{
 			Color:       ink,
 			Radius:      radius,
 			BorderInset: borderInset,

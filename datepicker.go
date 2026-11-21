@@ -81,7 +81,6 @@ const (
 // Locals, channels and states of a date picker.
 type (
 	datePickerStateKey struct{}
-	datePickerShowKey  struct{}
 
 	datePickerState struct {
 		ready    bool
@@ -105,9 +104,20 @@ type (
 		startErr   bool
 		endErr     bool
 
-		// The modal's show progress and exit retention.
-		shown    bool
-		appeared bool
+		// Transactional modal draft state, committed to caller pointers on OK
+		// and discarded on Cancel, Escape, or scrim dismissal.
+		wasOpen    bool
+		opener     *ui.Handle
+		draftValue time.Time
+		draftStart time.Time
+		draftEnd   time.Time
+
+		// Cached accessible labels ("January 2, 2006") for the 42 day grid.
+		cachedDayValid  bool
+		cachedDayYear   int
+		cachedDayMonth  time.Month
+		cachedFirstDay  time.Weekday
+		cachedDayLabels [42]string
 	}
 )
 
@@ -191,7 +201,7 @@ func buildDatePicker(c *ui.Context, m datePickerModel, opts []DatePickerOptions)
 			return datePickerState{view: dateViewCalendar}
 		})
 		st.syncSelection(m, now)
-		fillDatePickerPanel(c, th, panel, st, m, o, today)
+		fillDatePickerPanel(c, th, panel, st, m, o, today, nil)
 		return panel
 	}
 
@@ -205,83 +215,107 @@ func buildDatePicker(c *ui.Context, m datePickerModel, opts []DatePickerOptions)
 		o.Disabled = true
 	}
 
-	st.syncSelection(m, now)
-
-	if !*o.Open && !st.shown {
+	if !*o.Open {
+		if st.wasOpen {
+			st.wasOpen = false
+			if st.opener != nil {
+				if el := c.Resolve(*st.opener); !el.Valid() || !el.IsDisabled() {
+					st.opener.Focus(c)
+				}
+				st.opener = nil
+			}
+		}
 		return anchor
 	}
-	if *o.Open && !st.shown {
-		// Every opening starts from the calendar, on the chosen month, with
-		// no stale text buffer from an earlier visit.
-		st.view = dateViewCalendar
-		st.cursor = st.selectionAnchor(m, now)
-		st.syncInputsFromSelection(m)
-	}
 
-	show := float32(1)
-	exiting := false
-	switch {
-	case *o.Open && !st.appeared:
-		st.appeared = true
-		st.shown = true
-		if reduce {
-			show = anchor.Jump(datePickerShowKey{}, 1)
+	draftM := datePickerModel{
+		value: &st.draftValue,
+		start: &st.draftStart,
+		end:   &st.draftEnd,
+	}
+	if m.rangeMode() {
+		draftM.value = nil
+	} else {
+		draftM.start, draftM.end = nil, nil
+	}
+	if !st.wasOpen {
+		// Every opening snapshots the committed selection into an isolated
+		// draft on the calendar view, clearing any stale text from an earlier
+		// canceled session, and records the focused trigger for nested modal
+		// focus restoration.
+		st.wasOpen = true
+		st.opener = focusedTriggerHandle(c)
+		if m.rangeMode() {
+			st.draftStart, st.draftEnd = *m.start, *m.end
+			st.draftValue = time.Time{}
+			st.lastFrom, st.lastTo = st.draftStart, st.draftEnd
 		} else {
-			anchor.Jump(datePickerShowKey{}, 0)
-			show = 0
-			c.Invalidate()
+			st.draftValue = *m.value
+			st.draftStart, st.draftEnd = time.Time{}, time.Time{}
+			st.lastDate = st.draftValue
 		}
-	case !*o.Open && reduce:
-		st.shown, st.appeared = false, false
-		c.Invalidate()
-		return anchor
-	case !*o.Open:
-		exiting = true
-		show = animateValue(anchor, datePickerShowKey{}, 0, th.Animation(motion.FastSpatial), false)
-		if anchor.Arrived(datePickerShowKey{}) || (anchor.Settled(datePickerShowKey{}) && show <= 0.001) {
-			st.shown, st.appeared = false, false
-			c.Invalidate()
-			return anchor
-		}
-	default:
-		st.shown = true
-		show = animateValue(anchor, datePickerShowKey{}, 1, th.Animation(motion.FastSpatial), false)
+		st.ready = true
+		st.view = dateViewCalendar
+		st.cursor = st.selectionAnchor(draftM, now)
+		st.syncInputsFromSelection(draftM)
+	} else {
+		st.syncSelection(draftM, now)
 	}
+	draftOpts := o
+	draftOpts.OnChanged = nil
 
 	cs := th.Colors
 	scrim := cs.Scrim
 	if scrim.A == 0 {
 		scrim = ui.RGB(0, 0, 0)
 	}
-	closeModal := func() {
-		if o.Open != nil && *o.Open {
-			*o.Open = false
-		}
+	backTr := ui.ElementTransition{
+		Duration: -1,
+		Enter:    &ui.Motion{Opacity: 0},
+		Exit:     &ui.Motion{Opacity: 0},
 	}
-	ui.Overlay(c, func() {
-		back := ui.Row(c).Absolute().Left(0).Top(0).Right(0).Bottom(0).
-			Justify(ui.Center).AlignItems(ui.Center).
-			Background(scrim.Alpha(0.32 * clampF32(show, 0, 1)))
-		if !exiting {
-			back.Modal()
-		}
-		back.IgnoreInput(exiting).AccessHidden(exiting)
-		back.Children(func() {
-			panel := newDatePickerPanel(c, m, o)
-			panel.Opacity(clampF32(show, 0, 1))
-			panel.Scale(0.9+0.1*clampF32(show, 0, 1), 0.9+0.1*clampF32(show, 0, 1))
-			fillDatePickerPanel(c, th, panel, st, m, o, today)
-			// A press on the panel must not reach the scrim.
-			panel.Clicked()
-		})
-		if !exiting {
-			if back.Clicked() {
-				closeModal()
+	panelTr := ui.ElementTransition{
+		Duration: -1,
+		Enter:    &ui.Motion{Opacity: 0, Scale: 0.9},
+		Exit:     &ui.Motion{Opacity: 0, Scale: 0.9},
+	}
+	if !reduce {
+		anim := th.Animation(motion.FastSpatial)
+		backTr.Duration, backTr.Animation = 0, &anim
+		panelTr.Duration, panelTr.Animation = 0, &anim
+	}
+	ui.DialogBase(c, o.Open, func(back, panel ui.Element) {
+		back.Background(scrim.Alpha(0.32)).Transition(backTr)
+		panel.Transition(panelTr)
+		styleDatePickerPanel(th, panel, m, o)
+		onConfirm := func() {
+			if o.Disabled {
+				return
 			}
-			if back.OverlayShortcut(0, ui.KeyEscape) {
-				closeModal()
+			if st.view == dateViewInput {
+				if !m.rangeMode() && st.inputErr || m.rangeMode() && (st.startErr || st.endErr) {
+					return
+				}
+			}
+			if m.rangeMode() {
+				if !(*m.start).Equal(st.draftStart) || !(*m.end).Equal(st.draftEnd) {
+					*m.start = st.draftStart
+					*m.end = st.draftEnd
+					if o.OnChanged != nil {
+						o.OnChanged()
+					}
+				}
+			} else if !(*m.value).Equal(st.draftValue) {
+				*m.value = st.draftValue
+				if o.OnChanged != nil {
+					o.OnChanged()
+				}
+			}
+			if o.Open != nil {
+				*o.Open = false
 			}
 		}
+		fillDatePickerPanel(c, th, panel, st, draftM, draftOpts, today, onConfirm)
 	})
 	return anchor
 }
@@ -359,6 +393,15 @@ func (st *datePickerState) syncInputsFromSelection(m datePickerModel) {
 // newDatePickerPanel builds the empty Surface card or dialog panel, before its
 // state is bound or its content built.
 func newDatePickerPanel(c *ui.Context, m datePickerModel, o DatePickerOptions) ui.Element {
+	panel := Surface(c, SurfaceOptions{
+		Elevation:  tokens.Level2,
+		ShapeScale: tokens.ShapeExtraLarge,
+	}).Role(ui.RoleGroup)
+	styleDatePickerPanel(CurrentTheme(c), panel, m, o)
+	return panel
+}
+
+func styleDatePickerPanel(th *Theme, panel ui.Element, m datePickerModel, o DatePickerOptions) {
 	name := o.Label
 	if name == "" {
 		if m.rangeMode() {
@@ -367,22 +410,18 @@ func newDatePickerPanel(c *ui.Context, m datePickerModel, o DatePickerOptions) u
 			name = datePickerLabel
 		}
 	}
-	panel := Surface(c, SurfaceOptions{
-		Elevation:  tokens.Level2,
-		ShapeScale: tokens.ShapeExtraLarge,
-	}).Width(datePickerWidth).Padding(datePickerPad).Gap(dateFieldGap).DimDisabled(false).Disabled(o.Disabled)
-	if o.Mode == DatePickerModal {
-		panel.Role(ui.RoleDialog)
-	} else {
-		panel.Role(ui.RoleGroup)
-	}
-	panel.Label(name)
-	return panel
+	panel.Width(datePickerWidth).Padding(datePickerPad).Gap(dateFieldGap).
+		Radius(th.Shapes.Radius(tokens.ShapeExtraLarge)).
+		Background(SurfaceColorForElevation(th, tokens.Level2)).
+		TextColor(th.Colors.OnSurface).
+		DimDisabled(false).Disabled(o.Disabled).
+		Label(name)
+	ApplyElevationShadows(th, panel, tokens.Level2)
 }
 
 // fillDatePickerPanel adds the header, the calendar, year grid or text fields,
 // and a modal's actions to the panel.
-func fillDatePickerPanel(c *ui.Context, th *Theme, panel ui.Element, st *datePickerState, m datePickerModel, o DatePickerOptions, today time.Time) {
+func fillDatePickerPanel(c *ui.Context, th *Theme, panel ui.Element, st *datePickerState, m datePickerModel, o DatePickerOptions, today time.Time, onConfirm func()) {
 	rtl := c.Direction() == ui.RightToLeft
 	disabled := o.Disabled || panel.IsDisabled()
 
@@ -398,7 +437,7 @@ func fillDatePickerPanel(c *ui.Context, th *Theme, panel ui.Element, st *datePic
 			buildDateCalendar(c, th, st, m, o, today, rtl, disabled)
 		}
 		if o.Mode == DatePickerModal {
-			buildDatePickerActions(c, o)
+			buildDatePickerActions(c, o, onConfirm)
 		}
 	})
 }
@@ -530,6 +569,7 @@ func buildDateCalendar(c *ui.Context, th *Theme, st *datePickerState, m datePick
 		}
 
 		names := pickerWeekdays(first)
+		dayLabels := st.monthDayLabels(month, start, o.FirstWeekday)
 		grid.Children(func() {
 			header := ui.Row(c).Height(dateWeekdayH).Role(ui.RoleRow)
 			header.Children(func() {
@@ -580,9 +620,10 @@ func buildDateCalendar(c *ui.Context, th *Theme, st *datePickerState, m datePick
 							visual.onBand = cs.OnSecondaryContainer
 						}
 
+						cellIdx := w*7 + d
 						cell := ui.Box(c).Size(dateCellWidth, dateCellHeight).Shrink(0).
 							Role(ui.RoleCell).
-							Label(day.Format("January 2, 2006")).
+							Label(dayLabels[cellIdx]).
 							AccessSelected(chosen || inRange)
 						if sameCalendarDay(day, today) {
 							cell.Current(ui.CurrentDate)
@@ -696,8 +737,38 @@ func drawDateCell(cell ui.Element, v dateCellPaint, dayNum int) {
 			p.Stroke(ring, color, ring.W/2, 1)
 		}
 		paintCenteredSpan(p, r.X+r.W/2, r.Y+r.H/2,
-			ui.Span{Text: strconv.Itoa(dayNum), Size: 13, Weight: 500, Color: ink})
+			ui.Span{Text: dateDayText(dayNum), Size: 13, Weight: 500, Color: ink})
 	})
+}
+
+var dateDayTexts = [32]string{
+	"", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10",
+	"11", "12", "13", "14", "15", "16", "17", "18", "19", "20",
+	"21", "22", "23", "24", "25", "26", "27", "28", "29", "30", "31",
+}
+
+func dateDayText(dayNum int) string {
+	if dayNum >= 1 && dayNum < len(dateDayTexts) {
+		return dateDayTexts[dayNum]
+	}
+	return strconv.Itoa(dayNum)
+}
+
+func (st *datePickerState) monthDayLabels(month, start time.Time, first time.Weekday) *[42]string {
+	if st.cachedDayValid &&
+		st.cachedDayYear == month.Year() &&
+		st.cachedDayMonth == month.Month() &&
+		st.cachedFirstDay == first {
+		return &st.cachedDayLabels
+	}
+	st.cachedDayValid = true
+	st.cachedDayYear = month.Year()
+	st.cachedDayMonth = month.Month()
+	st.cachedFirstDay = first
+	for i := range st.cachedDayLabels {
+		st.cachedDayLabels[i] = start.AddDate(0, 0, i).Format("January 2, 2006")
+	}
+	return &st.cachedDayLabels
 }
 
 // dateBandRadii rounds a range band's outer edge at the row's ends, on the
@@ -841,7 +912,7 @@ func buildDateInputs(c *ui.Context, st *datePickerState, m datePickerModel, o Da
 }
 
 // buildDatePickerActions builds a modal's Cancel and OK buttons.
-func buildDatePickerActions(c *ui.Context, o DatePickerOptions) {
+func buildDatePickerActions(c *ui.Context, o DatePickerOptions, onConfirm func()) {
 	row := ui.Row(c).FillWidth().Justify(ui.End).Gap(8).Margin(4, 0, 0, 0)
 	row.Children(func() {
 		if Button(c, "Cancel", ButtonOptions{Variant: ButtonText, Size: tokens.SizeXS}).Clicked() {
@@ -849,10 +920,8 @@ func buildDatePickerActions(c *ui.Context, o DatePickerOptions) {
 				*o.Open = false
 			}
 		}
-		if Button(c, "OK", ButtonOptions{Variant: ButtonFilled, Size: tokens.SizeXS}).Clicked() {
-			if o.Open != nil {
-				*o.Open = false
-			}
+		if Button(c, "OK", ButtonOptions{Variant: ButtonFilled, Size: tokens.SizeXS}).Clicked() && onConfirm != nil {
+			onConfirm()
 		}
 	})
 }

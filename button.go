@@ -143,7 +143,7 @@ func Button(c *ui.Context, label string, opts ...ButtonOptions) ui.Element {
 	if o.Variant == ButtonOutlined {
 		borderInset = 1
 	}
-	attachRippleWithTheme(th, el, StateLayerOptions{
+	attachRippleWithContext(c, th, el, StateLayerOptions{
 		Color:       pal.content,
 		Radius:      radius,
 		BorderInset: borderInset,

@@ -167,7 +167,7 @@ func FAB(c *ui.Context, label string, icon IconDraw, opts ...FABOptions) ui.Elem
 	corner := animateWithTheme(el, th, fabCornerKey{}, radius, motion.FastSpatial)
 	el.Radius(corner)
 
-	attachRippleWithTheme(th, el, StateLayerOptions{
+	attachRippleWithContext(c, th, el, StateLayerOptions{
 		Color:    pal.content,
 		Radius:   corner,
 		Disabled: disabled,
@@ -312,7 +312,7 @@ func ExtendedFAB(c *ui.Context, label string, icon IconDraw, opts ...ExtendedFAB
 		labelFade = animateWithTheme(el, th, extFabFadeKey{}, progress, motion.FastEffects)
 	}
 
-	attachRippleWithTheme(th, el, StateLayerOptions{
+	attachRippleWithContext(c, th, el, StateLayerOptions{
 		Color:    pal.content,
 		Radius:   radius,
 		Disabled: disabled,

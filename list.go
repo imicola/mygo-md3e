@@ -228,7 +228,7 @@ func listRow(c *ui.Context, th *Theme, item *ListItem, i, n int, o ListOptions) 
 	}
 	row.Background(bg).TextColor(content)
 	if interactive {
-		attachRippleWithTheme(th, row, StateLayerOptions{
+		attachRippleWithContext(c, th, row, StateLayerOptions{
 			Color:    content,
 			Radii:    radii,
 			HasRadii: true,

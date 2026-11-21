@@ -261,7 +261,7 @@ func styleSplitSegment(c *ui.Context, th *Theme, el ui.Element, pal buttonColors
 	if pal.border.A > 0 {
 		borderInset = 1
 	}
-	attachRippleWithTheme(th, el, StateLayerOptions{
+	attachRippleWithContext(c, th, el, StateLayerOptions{
 		Color:       pal.content,
 		Radii:       radii,
 		HasRadii:    true,
