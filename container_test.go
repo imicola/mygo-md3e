@@ -715,3 +715,87 @@ func TestListDensityMetricsRTLAndReduceMotion(t *testing.T) {
 		}
 	}
 }
+
+func TestCardShapeScaleHairlineGradientBackdropAndPress(t *testing.T) {
+	dark := ThemeFromSeed(DefaultSeedColor, ThemeOptions{Dark: true})
+	clicks := 0
+	backdropRan := 0
+
+	tt := ui.NewTester(func(c *ui.Context) {
+		ThemeScope(c, dark, func() {
+			ui.Row(c).Size(360, 180).Background(ui.RGB(10, 10, 10)).Padding(20).Gap(16).Children(func() {
+				Card(c, func() {
+					ui.Box(c).Size(120, 100)
+				}, CardOptions{
+					Variant:       CardFilled,
+					ShapeScale:    tokens.ShapeExtraLarge, // 28 DIP Bento radius
+					Hairline:      true,
+					HairlineColor: ui.RGB(255, 160, 40),
+					LinearGradient: &ui.LinearGradient{
+						From:  ui.RGB(220, 60, 20),
+						To:    ui.RGB(40, 20, 180),
+						Angle: 90,
+					},
+					Backdrop: func(p *ui.Painter, r ui.Rect) {
+						backdropRan++
+						p.Fill(r, ui.RGBA(255, 255, 255, 0.10), 0)
+					},
+					OnClick: func() { clicks++ },
+					Label:   "HeroCard",
+				})
+
+				// Disabled card with gradient must keep disabled surface fill without gradient.
+				Card(c, func() {
+					ui.Box(c).Size(80, 80)
+				}, CardOptions{
+					Variant:  CardFilled,
+					Disabled: true,
+					LinearGradient: &ui.LinearGradient{
+						From:  ui.RGB(255, 0, 0),
+						To:    ui.RGB(0, 255, 0),
+						Angle: 90,
+					},
+					Clickable: true,
+					Label:     "DisabledCard",
+				})
+			})
+		})
+	}, 360, 180)
+
+	if backdropRan == 0 {
+		t.Fatal("Card Backdrop callback was never invoked")
+	}
+	hero := buttonInfo(t, tt, ui.RoleButton, "HeroCard")
+	img := tt.Image()
+	// Corner pixel (x+2, y+2) is well outside 28 DIP ShapeExtraLarge radius -> stays near canvas (10,10,10).
+	cornerPx := img.RGBAAt(int(hero.Bounds.X)+2, int(hero.Bounds.Y)+2)
+	if cornerPx.R > 30 || cornerPx.G > 30 || cornerPx.B > 30 {
+		t.Fatalf("ShapeExtraLarge card corner was not rounded: %+v", cornerPx)
+	}
+	// Top edge midpoint shows HairlineColor (bright warm orange).
+	topEdge := img.RGBAAt(int(hero.Bounds.X+hero.Bounds.W/2), int(hero.Bounds.Y))
+	if topEdge.R < 180 || topEdge.B > 80 {
+		t.Fatalf("Card Hairline top edge = %+v, want warm orange", topEdge)
+	}
+
+	// Disabled card should not render bright red/green gradient.
+	dis := buttonInfo(t, tt, ui.RoleButton, "DisabledCard")
+	disCenter := img.RGBAAt(int(dis.Bounds.X+dis.Bounds.W/2), int(dis.Bounds.Y+dis.Bounds.H/2))
+	if disCenter.R > 120 || disCenter.G > 120 {
+		t.Fatalf("disabled card leaked gradient color: %+v", disCenter)
+	}
+
+	// Press, release, and confirm click + FastSpatial radius morph settles cleanly.
+	cx, cy := center(hero.Bounds)
+	tt.Press(cx, cy)
+	tt.Advance(80 * time.Millisecond)
+	tt.Release(cx, cy)
+	tt.Move(0, 0)
+	tt.Advance(600 * time.Millisecond)
+	if clicks != 1 {
+		t.Fatalf("HeroCard clicks = %d, want 1", clicks)
+	}
+	if tt.FramePending() {
+		t.Fatal("HeroCard press animation did not settle")
+	}
+}

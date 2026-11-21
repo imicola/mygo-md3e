@@ -108,6 +108,23 @@ type SurfaceOptions struct {
 	BorderWidth float32
 	// BorderColor overrides the outline color (defaults to Theme.Colors.OutlineVariant).
 	BorderColor ui.Color
+	// Hairline draws a subtle 1 DIP tonal highlight border when BorderWidth <= 0,
+	// adapting to light, dark, and high-contrast themes for crisp surface separation.
+	Hairline bool
+	// HairlineColor overrides the default Hairline stroke color when A > 0.
+	HairlineColor ui.Color
+
+	// Optional gradient fills applied over the surface container. When both are
+	// supplied, LinearGradient paints first and RadialGradient overlays it.
+	LinearGradient *ui.LinearGradient
+	RadialGradient *ui.RadialGradient
+
+	// Backdrop optionally paints custom decorative graphics (such as Hero card
+	// organic waves or clipped geometric patterns) inside the surface bounds
+	// after the fill/gradient and before children. The callback must be pure
+	// and must not request animation frames or query element state so exit
+	// transitions remain ghost-draw safe.
+	Backdrop func(p *ui.Painter, r ui.Rect)
 
 	// Shape selection priority: Shape polygon > Radii [4] > Radius > ShapeScale.
 	ShapeScale tokens.ShapeScale
@@ -150,9 +167,15 @@ func resolveSurfaceShape(th *Theme, opt SurfaceOptions) resolvedSurfaceShape {
 	}
 	switch {
 	case opt.HasRadii || opt.Radii != [4]float32{}:
-		return resolvedSurfaceShape{radii: opt.Radii, hasMask: true}
-	case opt.HasRadius || opt.Radius > 0:
-		r := max(opt.Radius, 0)
+		radii := [4]float32{
+			sanitizeNonNegF32(opt.Radii[0]),
+			sanitizeNonNegF32(opt.Radii[1]),
+			sanitizeNonNegF32(opt.Radii[2]),
+			sanitizeNonNegF32(opt.Radii[3]),
+		}
+		return resolvedSurfaceShape{radii: radii, hasMask: true}
+	case opt.HasRadius || isPositiveFiniteF32(opt.Radius):
+		r := sanitizeNonNegF32(opt.Radius)
 		return resolvedSurfaceShape{radii: [4]float32{r, r, r, r}, hasMask: r > 0}
 	case opt.ShapeScale != tokens.ShapeNone:
 		r := th.Shapes.Radius(opt.ShapeScale)
@@ -160,6 +183,45 @@ func resolveSurfaceShape(th *Theme, opt SurfaceOptions) resolvedSurfaceShape {
 	default:
 		return resolvedSurfaceShape{}
 	}
+}
+
+func resolveHairlineColor(th *Theme, override ui.Color) ui.Color {
+	if override.A > 0 {
+		return override
+	}
+	cs := th.Colors
+	if th.Contrast >= tokens.ContrastHigh && cs.Outline.A > 0 {
+		return cs.Outline
+	}
+	base := cs.OutlineVariant
+	if base.A == 0 {
+		base = cs.Outline
+	}
+	if base.A == 0 {
+		if th.Dark {
+			return ui.RGBA(255, 255, 255, 0.14)
+		}
+		return ui.RGBA(0, 0, 0, 0.12)
+	}
+	if th.Dark {
+		if cs.OnSurface.A > 0 {
+			return base.Mix(cs.OnSurface, 0.15).Alpha(0.42)
+		}
+		return base.Alpha(0.42)
+	}
+	return base.Alpha(0.45)
+}
+
+func clipSurfaceRadii(p *ui.Painter, r ui.Rect, radii [4]float32, fn func()) {
+	if radii[0] == radii[1] && radii[1] == radii[2] && radii[2] == radii[3] {
+		p.Clip(r, radii[0], fn)
+		return
+	}
+	if path := roundedRectPath(r, radii); path != nil {
+		p.ClipPath(path, fn)
+		return
+	}
+	fn()
 }
 
 func resolveSurfaceBackground(th *Theme, opt SurfaceOptions) ui.Color {
@@ -200,12 +262,16 @@ func Surface(c *ui.Context, opts ...SurfaceOptions) ui.Element {
 		fg = th.ContentColorFor(bg)
 	}
 
+	borderW := sanitizeNonNegF32(opt.BorderWidth)
 	borderCol := opt.BorderColor
-	if opt.BorderWidth > 0 && borderCol.A == 0 {
+	if borderW > 0 && borderCol.A == 0 {
 		borderCol = th.Colors.OutlineVariant
 		if th.Contrast >= tokens.ContrastHigh && th.Colors.Outline.A > 0 {
 			borderCol = th.Colors.Outline
 		}
+	} else if borderW == 0 && opt.Hairline {
+		borderW = 1
+		borderCol = resolveHairlineColor(th, opt.HairlineColor)
 	}
 
 	el := ui.Column(c)
@@ -216,16 +282,29 @@ func Surface(c *ui.Context, opts ...SurfaceOptions) ui.Element {
 		applyTypeStyleWithTheme(th, el, opt.TypeRole, opt.TypeEmphasized)
 	}
 
+	var linGrad *ui.LinearGradient
+	if opt.LinearGradient != nil {
+		g := *opt.LinearGradient
+		linGrad = &g
+	}
+	var radGrad *ui.RadialGradient
+	if opt.RadialGradient != nil {
+		g := *opt.RadialGradient
+		radGrad = &g
+	}
+	backdrop := opt.Backdrop
+
 	if geom.poly != nil {
 		poly := geom.poly
-		bw := opt.BorderWidth
+		bw := borderW
+		bCol := borderCol
 		if opt.Clip {
 			// ui clips children to boxes only; the polygon's own corners are
 			// painted above, and this keeps content inside its bounds.
 			el.Clip()
 		}
 		el.Draw(func(p *ui.Painter, r ui.Rect) {
-			if r.W <= 0 || r.H <= 0 {
+			if !isPositiveFiniteF32(r.W) || !isPositiveFiniteF32(r.H) {
 				return
 			}
 			path := poly.ToPath(r)
@@ -247,8 +326,21 @@ func Surface(c *ui.Context, opts ...SurfaceOptions) ui.Element {
 			if bg.A > 0 {
 				p.FillPath(path, bg)
 			}
-			if bw > 0 && borderCol.A > 0 {
-				p.StrokePath(path, bw, borderCol)
+			if linGrad != nil {
+				p.FillPathGradient(path, *linGrad)
+			}
+			if radGrad != nil || backdrop != nil {
+				p.ClipPath(path, func() {
+					if radGrad != nil {
+						p.FillRadialGradient(r, *radGrad, 0)
+					}
+					if backdrop != nil {
+						backdrop(p, r)
+					}
+				})
+			}
+			if bw > 0 && bCol.A > 0 {
+				p.StrokePath(path, bw, bCol)
 			}
 		})
 	} else {
@@ -256,8 +348,30 @@ func Surface(c *ui.Context, opts ...SurfaceOptions) ui.Element {
 			el.Background(bg)
 		}
 		el.Radius(geom.radii[0], geom.radii[1], geom.radii[2], geom.radii[3])
-		if opt.BorderWidth > 0 && borderCol.A > 0 {
-			el.Border(opt.BorderWidth, borderCol)
+		if linGrad != nil {
+			el.LinearGradient(*linGrad)
+		} else if radGrad != nil {
+			el.RadialGradient(*radGrad)
+		}
+		if (linGrad != nil && radGrad != nil) || backdrop != nil {
+			radii := geom.radii
+			overlayRadial := linGrad != nil && radGrad != nil
+			el.Draw(func(p *ui.Painter, r ui.Rect) {
+				if !isPositiveFiniteF32(r.W) || !isPositiveFiniteF32(r.H) {
+					return
+				}
+				clipSurfaceRadii(p, r, radii, func() {
+					if overlayRadial {
+						p.FillRadialGradient(r, *radGrad, 0)
+					}
+					if backdrop != nil {
+						backdrop(p, r)
+					}
+				})
+			})
+		}
+		if borderW > 0 && borderCol.A > 0 {
+			el.Border(borderW, borderCol)
 		}
 		if !opt.DisableShadow && opt.Elevation > tokens.Level0 {
 			ApplyElevationShadows(th, el, opt.Elevation)

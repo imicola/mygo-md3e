@@ -39,9 +39,28 @@ type CardOptions struct {
 	Label string
 	// Padding is the content inset in DIP; 16 when zero or negative.
 	Padding float32
-	// Radius overrides the resting corner radius in DIP; the Medium shape when
-	// zero or negative.
+	// ShapeScale selects an MD3E corner radius token for the card (for example
+	// tokens.ShapeLargeIncreased or tokens.ShapeExtraLarge for Bento layouts).
+	// The zero value (ShapeNone) keeps tokens.ShapeMedium. Radius > 0 overrides
+	// ShapeScale when set.
+	ShapeScale tokens.ShapeScale
+	// Radius overrides the resting corner radius in DIP; takes precedence over
+	// ShapeScale when positive and finite.
 	Radius float32
+	// Hairline draws a subtle 1 DIP tonal highlight border on elevated or filled
+	// cards (ignored when disabled). On outlined cards, HairlineColor can still
+	// customize the border color.
+	Hairline bool
+	// HairlineColor overrides the default Hairline stroke color when A > 0.
+	HairlineColor ui.Color
+	// Optional gradient fills applied when the card is enabled. When both are
+	// set, LinearGradient paints first and RadialGradient overlays it.
+	LinearGradient *ui.LinearGradient
+	RadialGradient *ui.RadialGradient
+	// Backdrop optionally paints clipped decorative graphics inside the card
+	// bounds after the fill/gradient and before children. The callback must be
+	// pure and ghost-draw safe (no animation requests or interaction queries).
+	Backdrop func(p *ui.Painter, r ui.Rect)
 }
 
 // cardCornerKey is the AnimateTo channel of a card's corner radius.
@@ -103,7 +122,11 @@ func Card(c *ui.Context, content func(), opts ...CardOptions) ui.Element {
 	cs := th.Colors
 
 	interactive := o.Clickable || o.OnClick != nil
-	rest := sanitizePositiveF32(o.Radius, th.Shapes.Radius(tokens.ShapeMedium))
+	baseScale := tokens.ShapeMedium
+	if o.ShapeScale > tokens.ShapeNone && o.ShapeScale <= tokens.ShapeFull {
+		baseScale = o.ShapeScale
+	}
+	rest := sanitizePositiveF32(o.Radius, th.Shapes.Radius(baseScale))
 	padding := sanitizePositiveF32(o.Padding, 16)
 
 	var el ui.Element
@@ -117,6 +140,11 @@ func Card(c *ui.Context, content func(), opts ...CardOptions) ui.Element {
 	disabled := o.Disabled || el.IsDisabled()
 
 	bg, border, elevation := cardPalette(th, o.Variant, disabled)
+	if !disabled && o.Hairline {
+		if border.A == 0 || o.HairlineColor.A > 0 {
+			border = resolveHairlineColor(th, o.HairlineColor)
+		}
+	}
 	if disabled {
 		bg = cs.OnSurface.Alpha(float32(tokens.DisabledContainerOpacity))
 		border = ui.Transparent
@@ -140,6 +168,41 @@ func Card(c *ui.Context, content func(), opts ...CardOptions) ui.Element {
 	el.Padding(padding).Radius(radius)
 	if bg.A > 0 {
 		el.Background(bg)
+	}
+	var linGrad *ui.LinearGradient
+	var radGrad *ui.RadialGradient
+	if !disabled {
+		if o.LinearGradient != nil {
+			g := *o.LinearGradient
+			linGrad = &g
+		}
+		if o.RadialGradient != nil {
+			g := *o.RadialGradient
+			radGrad = &g
+		}
+		if linGrad != nil {
+			el.LinearGradient(*linGrad)
+		} else if radGrad != nil {
+			el.RadialGradient(*radGrad)
+		}
+	}
+	if (linGrad != nil && radGrad != nil) || o.Backdrop != nil {
+		drawRadius := radius
+		backdrop := o.Backdrop
+		overlayRadial := linGrad != nil && radGrad != nil
+		el.Draw(func(p *ui.Painter, r ui.Rect) {
+			if !isPositiveFiniteF32(r.W) || !isPositiveFiniteF32(r.H) {
+				return
+			}
+			p.Clip(r, drawRadius, func() {
+				if overlayRadial {
+					p.FillRadialGradient(r, *radGrad, 0)
+				}
+				if backdrop != nil {
+					backdrop(p, r)
+				}
+			})
+		})
 	}
 	if border.A > 0 {
 		el.Border(1, border)

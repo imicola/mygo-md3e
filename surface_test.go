@@ -686,3 +686,128 @@ func TestRippleOriginWithBorderInsetAndClip(t *testing.T) {
 		t.Fatal("ripple with BorderInset and Clip did not settle")
 	}
 }
+
+func TestSurfaceHairlineGradientsBackdropAndExitSafety(t *testing.T) {
+	dark := ThemeFromSeed(DefaultSeedColor, ThemeOptions{Dark: true})
+	highContrast := ThemeFromSeed(DefaultSeedColor, ThemeOptions{Contrast: tokens.ContrastHigh})
+
+	// 1. Hairline draws 1px border in dark and high-contrast themes without breaking BorderWidth.
+	if hc := resolveHairlineColor(highContrast, ui.Color{}); hc != highContrast.Colors.Outline {
+		t.Fatalf("high-contrast hairline = %+v, want Outline %+v", hc, highContrast.Colors.Outline)
+	}
+	imgHairline := ui.Render(func(c *ui.Context) {
+		ThemeScope(c, dark, func() {
+			ui.Box(c).Size(120, 80).Background(dark.Colors.Surface).Padding(10).Children(func() {
+				Surface(c, SurfaceOptions{
+					Color:         dark.Colors.Surface,
+					Hairline:      true,
+					HairlineColor: ui.RGB(255, 80, 0),
+					Radius:        4,
+				}).Size(100, 60)
+			})
+		})
+	}, 120, 80, 1)
+	if edge := imgHairline.RGBAAt(60, 10); edge.R < 200 || edge.B > 40 {
+		t.Fatalf("hairline top edge = %+v, want bright orange hairline", edge)
+	}
+
+	// 2. LinearGradient + RadialGradient + Backdrop clipped inside rounded rect and polygon.
+	rectBackdropCalls := 0
+	polyBackdropCalls := 0
+	imgGrad := ui.Render(func(c *ui.Context) {
+		ThemeScope(c, dark, func() {
+			ui.Row(c).Size(260, 120).Background(ui.RGB(20, 20, 20)).Padding(10).Gap(10).Children(func() {
+				Surface(c, SurfaceOptions{
+					Radius: 24,
+					LinearGradient: &ui.LinearGradient{
+						From:  ui.RGB(255, 0, 0),
+						To:    ui.RGB(0, 0, 255),
+						Angle: 90,
+					},
+					RadialGradient: &ui.RadialGradient{
+						Stops: []ui.GradientStop{
+							{Color: ui.RGBA(0, 255, 0, 0.5), At: 0},
+							{Color: ui.Transparent, At: 1},
+						},
+					},
+					Backdrop: func(p *ui.Painter, r ui.Rect) {
+						rectBackdropCalls++
+						// Paint a giant stripe that should stay clipped inside the 24dp corners.
+						p.Fill(ui.Rect{X: r.X - 10, Y: r.Y - 10, W: r.W + 20, H: r.H + 20}, ui.RGBA(255, 255, 0, 0.25), 0)
+					},
+				}).Size(110, 100)
+
+				Surface(c, SurfaceOptions{
+					Shape:    shape.Circle(),
+					Hairline: true,
+					LinearGradient: &ui.LinearGradient{
+						From:  ui.RGB(255, 100, 0),
+						To:    ui.RGB(0, 180, 255),
+						Angle: 90,
+					},
+					Backdrop: func(p *ui.Painter, r ui.Rect) {
+						polyBackdropCalls++
+						p.Fill(r, ui.RGBA(255, 255, 255, 0.2), 0)
+					},
+				}).Size(100, 100)
+			})
+		})
+	}, 260, 120, 1)
+
+	if rectBackdropCalls == 0 || polyBackdropCalls == 0 {
+		t.Fatalf("backdrop callbacks missing: rect=%d poly=%d", rectBackdropCalls, polyBackdropCalls)
+	}
+	// Left side of gradient rect should be redder than right side; corner (11,11) stays clipped to dark bg.
+	leftPx := imgGrad.RGBAAt(25, 60)
+	rightPx := imgGrad.RGBAAt(105, 60)
+	if leftPx.R <= rightPx.R || rightPx.B <= leftPx.B {
+		t.Fatalf("linear gradient did not blend left->right: left=%+v right=%+v", leftPx, rightPx)
+	}
+	if cornerPx := imgGrad.RGBAAt(11, 11); absColorDiff(cornerPx, color.RGBA{R: 20, G: 20, B: 20, A: 255}) > 6 {
+		t.Fatalf("backdrop/gradient bled outside 24dp corner: %+v", cornerPx)
+	}
+	// Polygon circle corner at (132, 12) stays outside the inscribed circle.
+	if polyCorner := imgGrad.RGBAAt(132, 12); absColorDiff(polyCorner, color.RGBA{R: 20, G: 20, B: 20, A: 255}) > 6 {
+		t.Fatalf("polygon gradient/backdrop bled outside Circle corner: %+v", polyCorner)
+	}
+
+	// 3. Zero-sized surface does not invoke Backdrop, non-finite Radii/BorderWidth do not panic,
+	//    and ElementTransition ghost draw settles cleanly with FramePending() == false.
+	zeroCalls := 0
+	show := true
+	tt := ui.NewTester(func(c *ui.Context) {
+		ThemeScope(c, dark, func() {
+			ui.Column(c).Size(160, 120).Children(func() {
+				Surface(c, SurfaceOptions{
+					Radius:      float32(math.NaN()),
+					BorderWidth: float32(math.Inf(1)),
+					Backdrop: func(p *ui.Painter, r ui.Rect) {
+						zeroCalls++
+					},
+				}).Size(0, 0)
+				if show {
+					Surface(c.Key("ghost-surface"), SurfaceOptions{
+						ShapeScale: tokens.ShapeLarge,
+						Hairline:   true,
+						Backdrop: func(p *ui.Painter, r ui.Rect) {
+							p.Fill(r, ui.RGBA(255, 255, 255, 0.08), 0)
+						},
+					}).Size(100, 60).Transition(ui.ElementTransition{
+						Duration: 120 * time.Millisecond,
+						Exit:     &ui.Motion{Opacity: 0},
+					})
+				}
+			})
+		})
+	}, 160, 120)
+
+	if zeroCalls != 0 {
+		t.Fatalf("zero-sized surface invoked Backdrop %d times, want 0", zeroCalls)
+	}
+	show = false
+	tt.Frame()
+	tt.Advance(250 * time.Millisecond)
+	if tt.FramePending() {
+		t.Fatal("exiting Surface with Backdrop/Hairline left pending frames")
+	}
+}
