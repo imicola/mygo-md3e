@@ -201,3 +201,26 @@ MD3E 将动效分为 **Spatial（空间：位移、缩放、尺寸、圆角、�
 - **`AdaptiveScaffold`**：随断点自动在底部 `NavigationBar`（Compact）、折叠 `NavigationRail`（Medium）与展开 `NavigationRail`（Expanded）间切换，并保持内容槽位位于稳定父级与固定 `Key` 下，确保局部状态不因窗口缩放丢失。
 - **`ListDetailPane` / `SupportingPane` / `BentoGrid`**：复用上游 `ui.Split`/`ui.SplitPercent` + `.SplitReset(...)` 与 `ui.Grid`，在 `WindowCompact` 下自动退化为单栏堆叠/受控单页视图，完整支持 RTL 镜像。
 - **`WindowTitleBar`**：基于 `c.TitleBar()` 自动预留 macOS 左交通灯与 Windows/Linux 系统按钮物理安全区，支持 `DragWindow()`、`.MaximizeButton()` 与零后端耦合的 `WindowController`（`*mygo.Window` 原生满足该接口）。
+
+---
+
+## 7. Expressive 异形交互、高频微组件与零膨胀图标子包（M10）
+
+### 7.1 异形按钮与图标徽章（`shapebutton.go`）
+- **`ShapeButton` & `MorphIconButton`**：构建在 `ui.ButtonBase` 之上，接入 `Theme.Density.ButtonSpec(size)`，支持 `ShapeButtonFilled`（默认零值）/ `Tonal` / `Outlined` / `Standard` 四种变体与任意 `*shape.RoundedPolygon`。
+  - 按压态使用 `motion.FastSpatial`（或自定义 `Spring`）连续 `shape.Morph`；`MorphIconButton` 绑定 `*bool` 并在 `Shape` ↔ `SelectedShape` 间双向 Morph，同时用 `motion.FastEffects` 对 `Icon` ↔ `SelectedIcon` 进行交叉淡入与轻微缩放（`0.75..1.0`），并将 `StateLayer` 与 `Expressive Ripple` 通过 `StateLayerOptions.ClipPath` 严格裁切在当前帧 Morph 轮廓内。
+  - 无障碍：`ShapeButton` 使用 `ui.RoleButton`，`MorphIconButton` 使用 `ui.RoleToggleButton` + `Checked(*on)`，二者均强制非空 `Label` 并响应点击、Enter 与 Space，支持 `ReduceMotion` 即时收敛与退场幽灵绘制安全。
+- **`IconBadge`**：支持 `Tonal` / `Filled` / `Outlined` / `PrimaryTonal` / `TertiaryTonal` / `ErrorTonal` 及自定义色覆盖，支持 `ShapeScale` / `Radius` 圆角矩形与任意 `*shape.RoundedPolygon` 异形底托。
+
+### 7.2 胶囊标签栏与高频微组件（`pilltabs.go` / `status.go` / `tiles.go` / `feedback_extra.go`）
+- **`PillTabs` & `SegmentedTabs`**：基于 `ui.TabsBase` 构建，保留完整 `RoleTabList` / `RoleTab`、Arrow/Home/End 跳过禁用项及 RTL 方向键镜像。胶囊底槽与滑动选中胶囊在 `tabs.List.Draw`（子内容之下）以 `motion.FastSpatial` 弹簧平滑滑动，首帧直接落位于当前选中项而不从 0 飞入；支持 `TabItem.Badge`（同步暴露至 `tab.Description`）与 `TabItem.BadgeDot`。
+- **`Tag` & `StatusPill` & `Avatar`**：
+  - `SemanticTone`（`Neutral` / `Primary` / `Secondary` / `Tertiary` / `Error` / `Warning` / `Success`），其中 `Warning`（Hue 68°）与 `Success`（Hue 145°）通过 `tokens.HCT` 按亮/暗色与高对比度动态生成谐调容器/前景色。
+  - `StatusPill` 的呼吸脉冲圆点（`Pulsing: true`）与 `Skeleton` 的 Tonal 柔和脉冲严格在 `Draw` 内通过 `p.AnimationFrame()` 驱动，结合 `p.Visible()` 视口相交检测保证滚出可视区域后零动画帧，同时遵守 `ReduceMotion` 与 `!el.Valid()` 幽灵安全。
+  - `Avatar` 支持中英文首字母提取、`ui.ImageSource`（`ui.Cover`）配合圆形或 `*shape.RoundedPolygon` 裁切、以及 RTL 自适应底端状态圆点（Online/Busy/Away/Offline）。
+- **`SwitchCard` & `ActionTile`**：`SwitchCard` 将调用方 `c.Key(...)` 保留在外层卡片、内部 `Switch` 使用独立稳定子 Key，同步整行点击与开关点击而不发生双重翻转；`ActionTile` 基于 `ui.ButtonBase` 提供 `Meta`、`Badge` 与 RTL 自适应 `ChevronRight`/`ChevronLeft`。
+- **`EmptyState` & `Banner`**：`EmptyState` 提供插图/异形 `IconBadge` 槽位与主/次 CTA 按钮；`Banner` 支持 `*bool` 可见性、语义色角色（Error/Warning 使用 `ui.RoleAlert`，其余使用 `ui.RoleStatus`）、1–2 个操作按钮与关闭回调。
+
+### 7.3 零膨胀符号子包（`symbols/`）
+- 独立公开子包 `github.com/imicola/mygo-md3e/symbols` 仅依赖标准库与 `github.com/egoist/mygo/ui`，导出 **252** 个 24×24 viewBox 圆角矢量符号（分 7 个功能域文件）与 `Custom`/`CustomEvenOdd` 扩展入口。
+- 零 `init()`、零全局注册表、零 `sync.OnceValue`；每个符号为独立包级 `*Symbol` 变量，内部使用零值 `sync.Once` 延迟解析 `ui.ParsePath` 并缓存，确保 Go 链接器实现单图标级死代码消除（DCE）。

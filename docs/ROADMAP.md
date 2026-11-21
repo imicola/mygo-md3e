@@ -94,15 +94,15 @@ tokens  ──►  motion  ──►  shape  ──►  md3e (根包：核心美
 #### M10 — Expressive 异形交互、高频微组件与零膨胀图标库
 > **目标**：补齐 Flutter/Compose 生态和现代桌面应用中最常用的“黏合剂组件”与开箱即用的图标体验。
 
-- [ ] **M10.1 异形交互控件（`shapebutton.go`）**
+- [x] **M10.1 异形交互控件（`shapebutton.go`）**
   - `ShapeButton` / `MorphIconButton`：支持传入任意 `shape.RoundedPolygon`（如 `Cookie9Sided`、`SoftBurst`、`Sunny`、`Circle`）并在 Pressed/Selected/Toggled 状态间平滑 Morph（例如播放↔暂停键）。
   - `IconBadge`：带 MD3E Tonal / 异形容器底色的图标徽章（适用于快捷开关行、列表前缀、状态角标）。
-- [ ] **M10.2 高频组合与反馈微组件**
+- [x] **M10.2 高频组合与反馈微组件**
   - `PillTabs` / `SegmentedTabs`：胶囊底槽 + 弹簧滑动选中胶囊块 + 可选计数徽章（区别于下划线 `PrimaryTabs`）。
   - `Tag` & `StatusPill`：紧凑只读信息标签与带呼吸/静态圆点的状态胶囊（如 `● 运行中`、`机房`）。
   - `SwitchCard` / `ActionTile`：一行卡片式快捷开关/跳转行（图标徽章 + 标题/副标 + Switch/Chevron）。
   - `Avatar`（文字/图片/异形裁切 + 在线状态点）、`Skeleton`（Tonal 柔和脉冲骨架屏，尊重 `ReduceMotion`）、`EmptyState`（插图/图标 + 标题 + 操作按钮占位）、`Banner`（顶部非模态提示横幅）。
-- [ ] **M10.3 零膨胀公开图标子包（`symbols/`）**
+- [x] **M10.3 零膨胀公开图标子包（`symbols/`）**
   - 导出 200+ 高频 Material Symbols Rounded 24×24 矢量图标（覆盖导航、媒体播放、文档编辑、网络/系统、文件、状态、操作）。
   - 保持零 `init()`、零全局 map、延迟解析与 `ui.Path` 复用，实现单图标级 DCE；提供 `symbols.Custom(svgPath)` 供业务方扩展。
 

@@ -34,6 +34,15 @@ Go 模块路径：`github.com/imicola/mygo-md3e`（直接依赖上游 `github.co
 │   ├── catalog.go          # 35 种 MD3E 形状定义（Circle, Sunny, Cookie4..12, Heart...）
 │   ├── morph.go            # Morph(from, to) 特征对齐插值与 *ui.Path 渲染输出
 │   └── draw.go             # ui.Painter 辅助绘制/裁切函数
+├── symbols/                # M10: 零膨胀 252 个 24×24 圆角矢量符号子包（独立无环，单图标级 DCE）
+│   ├── symbols.go          # Symbol、Custom、CustomEvenOdd、Path、Draw（兼容 md3e.IconDraw）、Stroke
+│   ├── navigation.go       # 导航、方向与窗口/布局控制符号（38）
+│   ├── actions.go          # 常用操作、CRUD 与筛选符号（44）
+│   ├── media.go            # 音视频播放、相机与媒体控制符号（35）
+│   ├── editor.go           # 文本编辑、Markdown、表格与排版符号（32）
+│   ├── files.go            # 文件、目录、邮件与云存储符号（28）
+│   ├── system.go           # 系统、网络、安全、硬件与时间符号（43）
+│   └── status.go           # 状态、告警、人员、图表与徽章符号（32）
 ├── internal/
 │   └── mdicon/             # M3: 内置无外部依赖矢量路径/图标（Check, Close, Chevron, Search...）
 ├── theme.go                # M3/M9: md3e.Theme（含 Density/MonoFont）、ThemeScope、系统偏好桥接、ui.Theme 转换
@@ -74,6 +83,11 @@ Go 模块路径：`github.com/imicola/mygo-md3e`（直接依赖上游 `github.co
 ├── timepicker.go           # M8: TimePicker (Dial / Input)
 ├── shell.go                # M9: WindowTitleBar 与 WindowController（零后端耦合的桌面标题栏外壳）
 ├── adaptive.go             # M9: WindowSizeClass、AdaptiveScaffold、ListDetailPane、SupportingPane、BentoGrid
+├── shapebutton.go          # M10: ShapeButton、MorphIconButton（双向 Morph + 图标交叉过渡）与 IconBadge
+├── pilltabs.go             # M10: PillTabs 与 SegmentedTabs（胶囊滑动指示器 + 徽章）
+├── status.go               # M10: SemanticTone、Tag、StatusPill（离屏零帧呼吸点）与 Avatar（异形/图片/状态点）
+├── tiles.go                # M10: SwitchCard（Key 隔离防双切）与 ActionTile（RTL 自适应箭头）
+├── feedback_extra.go       # M10: Skeleton（Tonal 柔和脉冲骨架屏）、EmptyState 与 Banner
 ├── golden_test.go          # 纯几何 Golden 视觉基线测试（testdata/）
 └── examples/
     ├── m2-demo/            # M2: 独立可运行的令牌/动效/形状预览模块
@@ -88,8 +102,9 @@ Go 模块路径：`github.com/imicola/mygo-md3e`（直接依赖上游 `github.co
    - `tokens` 仅依赖 Go 标准库 + `github.com/egoist/mygo/ui`（仅使用 `ui.Color` 类型或与 `ui.RGB`/`RGBA` 互转，不依赖布局/引擎）。
    - `motion` 仅依赖 `tokens` 与 `github.com/egoist/mygo/ui`（`Animation`、`SpringOptions`、`Preferences`）。
    - `shape` 仅依赖 `github.com/egoist/mygo/ui`（`Path`、`Painter`、`Rect`、`Point`）。
+   - `symbols` 仅依赖 Go 标准库与 `github.com/egoist/mygo/ui`（`Path`、`Painter`、`Rect`、`Color`），不导入 `md3e`，其 `(*Symbol).Draw` 方法值签名与 `md3e.IconDraw` 完全一致。
    - `md3e`（根包）整合 `tokens`、`motion`、`shape`、`internal/mdicon` 与 `github.com/egoist/mygo/ui`。
-   - **禁止循环依赖**：`tokens`、`motion`、`shape` 不得导入根包 `md3e`。
+   - **禁止循环依赖**：`tokens`、`motion`、`shape`、`symbols` 不得导入根包 `md3e`。
 2. **零 `init()` 注册表**：任何包不得在 `init()` 中构造大对象或注册全量组件表，确保用户应用只链接实际调用的组件（遵循 MyGo“按需付费”原则）。
 
 ---

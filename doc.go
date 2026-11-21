@@ -11,6 +11,8 @@
 //     physics, converting damping ratios to physical damping coefficients.
 //   - [github.com/imicola/mygo-md3e/shape] builds the 35 Material Expressive shapes and morphs
 //     between them as closed cubic Bézier loops.
+//   - [github.com/imicola/mygo-md3e/symbols] provides 252 zero-bloat rounded 24x24 vector icons
+//     whose (*Symbol).Draw method values plug directly into [IconDraw].
 //   - package md3e itself holds the components, from buttons and selection
 //     controls to navigation and overlays.
 //

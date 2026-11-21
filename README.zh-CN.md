@@ -10,7 +10,8 @@
 - **完整 MD3E 设计令牌（`tokens`）**：HCT / CAM16 色彩科学、`TonalPalette`、7 种 `DynamicScheme` Variant（`TonalSpot`、`Expressive`、`Vibrant`、`Neutral`、`Monochrome`、`Fidelity`、`Content`）、3 档 Contrast、45+ 语义色角色、10 档形状圆角、XS–XL 五档尺寸、30 组 Standard / Emphasized 排版样式及 6 级 Elevation。
 - **物理弹簧动效（`motion`）**：12 组 Expressive / Standard 弹簧预设（Spatial 与 Effects），将 MD3E 的阻尼比 $\zeta$ 与刚度 $k$ 精确换算为 MyGo 物理阻尼系数 $c = 2\zeta\sqrt{k}$（$m=1$），Effects 类令牌启用 Oklab 插值与临界阻尼无过冲。
 - **35 种表现力形状与双向变形（`shape`）**：内置 `Circle` 至 `Heart` 共 35 种 `RoundedPolygon` 几何基元与双向 Cubic Bézier Morph，可直接通过 `ui.Path` 绘制与裁切。
-- **全套 MD3E 原生组件（`md3e`）**：覆盖按钮/按钮组/SplitButton/FAB/FABMenu/工具栏/AppBar、选择控件/滑块/Chips/输入框、形状变形加载器/波浪进度条/Badge/Tooltip/Snackbar、卡片/分割线/分段列表/导航栏-侧栏-抽屉/滑动指示 Tabs/Carousel/Dialog/BottomSheet/Menu 与 Date/Time Picker。
+- **零膨胀矢量图标子包（`symbols`）**：内置 252 个 24×24 圆角矢量符号（分 7 个功能域），零 `init()`、零全局注册表，实现单图标级死代码消除；`symbols.<Name>.Draw` 可直接传入任意 `md3e.IconDraw` 槽位。
+- **全套 MD3E 原生组件（`md3e`）**：覆盖按钮/异形形变按钮（`ShapeButton` / `MorphIconButton`）/按钮组/SplitButton/FAB/FABMenu/工具栏/AppBar、选择控件/滑块/Chips/输入框、形状变形加载器/波浪进度条/Badge/Tooltip/Snackbar、卡片/`SwitchCard`/`ActionTile`/分割线/分段列表/导航栏-侧栏-抽屉/下划线与胶囊分段 Tabs、`Tag`/`StatusPill`/`Avatar`/`Skeleton`/`EmptyState`/`Banner`、Carousel/Dialog/BottomSheet/Menu、Date/Time Picker 与桌面 `WindowTitleBar`/Adaptive 布局。
 - **按需链接（Zero-Bloat）**：无包级 `init()` 全局注册表，仅使用 `Button` 的应用不会链接进未使用的重型组件或多余内置图标。
 - **无障碍、RTL 与无头可测**：构建在 `ui.*Base` 原语之上，完整支持键盘导航、`ReduceMotion` 零空转帧收敛、从右到左（RTL）布局镜像，以及基于 `ui.NewTester` 虚拟时钟和 `ui/golden` 的自动化测试。
 
@@ -119,6 +120,7 @@ func main() {
 ├── tokens/            # HCT/CAM16 色彩引擎、TonalPalette、DynamicScheme、形状/字体/Elevation 令牌
 ├── motion/            # Expressive / Standard 物理弹簧系统（ζ -> c 换算与 12 档预设）
 ├── shape/             # RoundedPolygon 基元、35 种内置 MD3E 形状与双向 Cubic Bézier Morph
+├── symbols/           # 252 个零膨胀 24×24 圆角矢量符号子包（单图标级 DCE，Draw 兼容 IconDraw）
 ├── internal/mdicon/   # 内置零全局注册表的 24×24 矢量图标
 ├── theme.go           # Theme（含 Density 与 MonoFont）/ ThemeFromSeed / DefaultTheme / ThemeScope / CurrentTheme
 ├── surface.go         # Surface 容器、Tonal Elevation、阴影、Hairline 微高光、渐变与 Backdrop 装饰槽
@@ -132,13 +134,18 @@ func main() {
 ├── timepicker.go      # TimePicker（Dial / Input，12h / 24h）
 ├── shell.go           # 桌面标题栏 WindowTitleBar 与 WindowController
 ├── adaptive.go        # WindowSizeClass、AdaptiveScaffold、ListDetailPane、SupportingPane、BentoGrid/BentoSpan
+├── shapebutton.go     # ShapeButton、MorphIconButton 与 IconBadge
+├── pilltabs.go        # PillTabs 与 SegmentedTabs
+├── status.go          # SemanticTone、Tag、StatusPill 与 Avatar
+├── tiles.go           # SwitchCard 与 ActionTile
+├── feedback_extra.go  # Skeleton、EmptyState 与 Banner
 ├── docs/              # 架构设计规范与 MD3E 技术规格基线
 └── examples/
     ├── gallery/       # 全量交互式展示画廊（属于根模块）
     └── m2-demo/       # M1–M2 令牌/动效/形状独立演示模块
 ```
 
-包依赖严格保持单向：`tokens` → `motion` → `shape` → 根包 `md3e`（子包不导入 `md3e`）。
+包依赖严格保持单向：`tokens` → `motion` → `shape` → 根包 `md3e`，`symbols` 仅依赖 `github.com/egoist/mygo/ui` 与标准库（子包绝不导入 `md3e`）。
 
 ---
 
@@ -171,6 +178,7 @@ func main() {
 | 组件 | 主要入口 |
 | --- | --- |
 | Button（5 变体 × 5 尺寸 × Round/Square） | `Button` |
+| Expressive 异形按钮与图标徽章 | `ShapeButton`、`MorphIconButton`、`IconBadge` |
 | IconButton / ToggleIconButton | `IconButton`、`ToggleIconButton` |
 | ButtonGroup（Standard / Connected / Multi / Actions） | `ButtonGroup`、`ButtonGroupMulti`、`ButtonGroupActions` |
 | SplitButton | `SplitButton` |
@@ -196,6 +204,8 @@ func main() {
 | 多边形变形加载器（Standard / Contained） | `LoadingIndicator`、`DefaultLoadingPolygons` |
 | 线性与环形进度条（标准 / Wavy） | `LinearProgress`、`LinearWavyProgress`、`CircularProgress`、`CircularWavyProgress` |
 | Badge | `Badge`、`SmallBadge`、`BadgedBox` |
+| 标签、状态胶囊与头像 | `Tag`、`StatusPill`、`Avatar`、`SemanticTone` |
+| 骨架屏、空状态与提示横幅 | `Skeleton`、`EmptyState`、`Banner` |
 | Tooltip | `PlainTooltip`、`RichTooltip` |
 | Snackbar | `SnackbarHost`、`SnackbarState` |
 
@@ -204,14 +214,42 @@ func main() {
 | 组件 | 主要入口 |
 | --- | --- |
 | Card 与 Divider | `ElevatedCard`、`FilledCard`、`OutlinedCard`、`Card`、`Divider` |
+| 卡片式快捷开关与操作行 | `SwitchCard`、`ActionTile` |
 | Expressive 分段列表 | `List`、`ListItem` |
 | 导航组件 | `NavigationBar`、`NavigationRail`、`NavigationDrawer` |
-| 滑动指示器 Tabs | `PrimaryTabs`、`SecondaryTabs` |
+| 滑动指示器与胶囊分段 Tabs | `PrimaryTabs`、`SecondaryTabs`、`PillTabs`、`SegmentedTabs` |
 | Carousel（Hero / MultiBrowse / Uncontained） | `Carousel` |
 | 对话框与底部抽屉 | `AlertDialog`、`FullScreenDialog`、`BottomSheet` |
 | 菜单 | `DropdownMenu`、`MenuButton`、`ContextMenu` |
 | 日期与时间选择器 | `DatePicker`、`DateRangePicker`、`TimePicker` |
 | 桌面外壳与 Adaptive 布局 | `WindowTitleBar`、`WindowController`、`WindowSizeClass`、`WindowSizeClassForWidth`、`WindowSizeClassOf`、`AdaptiveScaffold`、`ListDetailPane`、`SupportingPane`、`BentoGrid`、`BentoSpan` |
+| 零膨胀矢量图标子包（`symbols`） | 252 个圆角 24×24 图标（`symbols.Home`、`symbols.PlayArrow`、`symbols.Pause`、`symbols.Settings`、`symbols.Terminal` 等）、`symbols.Custom`、`symbols.CustomEvenOdd` |
+
+### 使用零膨胀 `symbols` 与异形交互组件
+
+```go
+import (
+	md3e "github.com/imicola/mygo-md3e"
+	"github.com/imicola/mygo-md3e/shape"
+	"github.com/imicola/mygo-md3e/symbols"
+	"github.com/imicola/mygo-md3e/tokens"
+)
+
+// 每个图标的 Draw 方法值直接匹配 md3e.IconDraw，且按单图标级 DCE 剪裁：
+md3e.MorphIconButton(c.Key("play"), &playing, "Play or pause", symbols.PlayArrow.Draw,
+	md3e.MorphIconButtonOptions{
+		Size:          tokens.SizeM,
+		Shape:         shape.Cookie9Sided(),
+		SelectedShape: shape.Circle(),
+		SelectedIcon:  symbols.Pause.Draw,
+	})
+
+md3e.SwitchCard(c.Key("proxy"), "System Proxy", &proxyOn, md3e.SwitchCardOptions{
+	Subtitle:    "自动接管桌面系统代理",
+	LeadingIcon: symbols.Public.Draw,
+	Hairline:    true,
+})
+```
 
 ---
 

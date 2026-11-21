@@ -10,7 +10,8 @@ English | [简体中文](README.zh-CN.md)
 - **Full MD3E Design System (`tokens`)**: HCT / CAM16 color space, `TonalPalette`, 7 `DynamicScheme` variants (`TonalSpot`, `Expressive`, `Vibrant`, `Neutral`, `Monochrome`, `Fidelity`, `Content`), 3 contrast tiers, 45+ semantic color roles, 10 shape scales, XS–XL size tiers, 15 standard + 15 emphasized typography styles, and 6 elevation levels.
 - **Physics-Driven Spring Motion (`motion`)**: 12 Expressive and Standard spring presets (Spatial & Effects) converting MD3E damping ratio $\zeta$ and stiffness $k$ to MyGo's viscous damping coefficient $c = 2\zeta\sqrt{k}$ (`Mass = 1`), with Oklab interpolation for effect tokens.
 - **35 Expressive Shapes & Bidirectional Morphing (`shape`)**: Built-in `RoundedPolygon` primitives (`Circle` through `Heart`) and bijective cubic Bézier morphing rendered and clipped via `ui.Path`.
-- **Rich Component Suite (`md3e`)**: Action buttons & split buttons, button groups, FABs & FAB menus, floating toolbars & app bars, selection controls, sliders, chips, text fields, shape-morphing loading indicators, wavy progress bars, tooltips, snackbars, cards, segmented lists, navigation bar/rail/drawer, sliding-indicator tabs, carousels, dialogs, bottom sheets, menus, and date/time pickers.
+- **Zero-Bloat Vector Symbol Library (`symbols`)**: 252 rounded 24×24 vector symbols across 7 functional domains with zero `init()` or global registries for verified per-icon dead-code elimination; `symbols.<Name>.Draw` plugs directly into any `md3e.IconDraw` slot.
+- **Rich Component Suite (`md3e`)**: Action buttons, shape-morphing buttons (`ShapeButton` / `MorphIconButton`), split buttons, button groups, FABs & FAB menus, floating toolbars & app bars, selection controls, sliders, chips, text fields, shape-morphing loading indicators, wavy progress bars, tooltips, snackbars, cards, `SwitchCard`/`ActionTile`, segmented lists, navigation bar/rail/drawer, underline & pill/segmented tabs, `Tag`/`StatusPill`/`Avatar`/`Skeleton`/`EmptyState`/`Banner`, carousels, dialogs, bottom sheets, menus, date/time pickers, desktop `WindowTitleBar`, and adaptive layouts.
 - **Zero-Bloat Dead-Code Elimination**: No package-level `init()` component or icon registries—applications only link the components and built-in vector icons they actually reference.
 - **Accessible, RTL-Ready, Headless-Testable**: Built over `ui.*Base` primitives with keyboard navigation, `ReduceMotion` frame-settling, right-to-left mirroring, and deterministic `ui.NewTester` + `ui/golden` verification.
 
@@ -119,6 +120,7 @@ Key conventions:
 ├── tokens/            # HCT/CAM16 color science, TonalPalette, DynamicScheme, shape/type/elevation/size tokens
 ├── motion/            # Expressive & Standard spring physics (ζ -> c conversion, 12 motion tokens)
 ├── shape/             # RoundedPolygon primitives, 35 built-in MD3E shapes, bijective cubic Bézier Morph
+├── symbols/           # 252 zero-bloat rounded 24x24 vector symbols (per-icon DCE, Draw matches IconDraw)
 ├── internal/mdicon/   # Zero-registry 24x24 vector icons used by library chrome
 ├── theme.go           # Theme (with Density & MonoFont), ThemeFromSeed, DefaultTheme, ThemeScope, CurrentTheme
 ├── surface.go         # Surface container, tonal elevation, shadows, Hairline, gradients, Backdrop slot
@@ -132,13 +134,18 @@ Key conventions:
 ├── timepicker.go      # TimePicker (Dial / Input, 12h / 24h)
 ├── shell.go           # Desktop WindowTitleBar & WindowController
 ├── adaptive.go        # WindowSizeClass, AdaptiveScaffold, ListDetailPane, SupportingPane, BentoGrid/BentoSpan
+├── shapebutton.go     # ShapeButton, MorphIconButton, IconBadge
+├── pilltabs.go        # PillTabs & SegmentedTabs
+├── status.go          # SemanticTone, Tag, StatusPill, Avatar
+├── tiles.go           # SwitchCard & ActionTile
+├── feedback_extra.go  # Skeleton, EmptyState, Banner
 ├── docs/              # Architecture guide & MD3E specification baseline
 └── examples/
     ├── gallery/       # Full interactive showcase application (part of root module)
     └── m2-demo/       # Standalone M1–M2 tokens/motion/shape preview module
 ```
 
-Dependencies are strictly acyclic: `tokens` -> `motion` -> `shape` -> root `md3e` (subpackages never import `md3e`).
+Dependencies are strictly acyclic: `tokens` -> `motion` -> `shape` -> root `md3e`, and `symbols` depends only on `github.com/egoist/mygo/ui` + stdlib (subpackages never import `md3e`).
 
 ---
 
@@ -171,6 +178,7 @@ Dependencies are strictly acyclic: `tokens` -> `motion` -> `shape` -> root `md3e
 | Component | Entry Points |
 | --- | --- |
 | Button (5 variants × 5 sizes × Round/Square) | `Button` |
+| Expressive Shape Buttons & Icon Badge | `ShapeButton`, `MorphIconButton`, `IconBadge` |
 | IconButton & Morphing ToggleIconButton | `IconButton`, `ToggleIconButton` |
 | ButtonGroup (Standard / Connected / Multi / Actions) | `ButtonGroup`, `ButtonGroupMulti`, `ButtonGroupActions` |
 | SplitButton | `SplitButton` |
@@ -196,6 +204,8 @@ Dependencies are strictly acyclic: `tokens` -> `motion` -> `shape` -> root `md3e
 | Shape-Morphing LoadingIndicator (Standard / Contained) | `LoadingIndicator`, `DefaultLoadingPolygons` |
 | Linear / LinearWavy / Circular / CircularWavy Progress | `LinearProgress`, `LinearWavyProgress`, `CircularProgress`, `CircularWavyProgress` |
 | Badge | `Badge`, `SmallBadge`, `BadgedBox` |
+| Tags, Status & Avatar | `Tag`, `StatusPill`, `Avatar`, `SemanticTone` |
+| Skeleton, EmptyState & Banner | `Skeleton`, `EmptyState`, `Banner` |
 | Tooltip | `PlainTooltip`, `RichTooltip` |
 | Snackbar | `SnackbarHost`, `SnackbarState` |
 
@@ -204,14 +214,42 @@ Dependencies are strictly acyclic: `tokens` -> `motion` -> `shape` -> root `md3e
 | Component | Entry Points |
 | --- | --- |
 | Cards & Divider | `ElevatedCard`, `FilledCard`, `OutlinedCard`, `Card`, `Divider` |
+| Quick Toggle & Action Tiles | `SwitchCard`, `ActionTile` |
 | Expressive Segmented List | `List`, `ListItem` |
 | Navigation Bar / Rail / Drawer | `NavigationBar`, `NavigationRail`, `NavigationDrawer` |
-| Sliding-Indicator Tabs | `PrimaryTabs`, `SecondaryTabs` |
+| Sliding-Indicator & Pill Tabs | `PrimaryTabs`, `SecondaryTabs`, `PillTabs`, `SegmentedTabs` |
 | Carousel (Hero / MultiBrowse / Uncontained) | `Carousel` |
 | Dialogs & BottomSheet | `AlertDialog`, `FullScreenDialog`, `BottomSheet` |
 | Menus | `DropdownMenu`, `MenuButton`, `ContextMenu` |
 | Date & Time Pickers | `DatePicker`, `DateRangePicker`, `TimePicker` |
 | Desktop Shell & Adaptive Layouts | `WindowTitleBar`, `WindowController`, `WindowSizeClass`, `WindowSizeClassForWidth`, `WindowSizeClassOf`, `AdaptiveScaffold`, `ListDetailPane`, `SupportingPane`, `BentoGrid`, `BentoSpan` |
+| Zero-Bloat Vector Symbols (`symbols`) | 252 rounded 24×24 icons (`symbols.Home`, `symbols.PlayArrow`, `symbols.Pause`, `symbols.Settings`, `symbols.Terminal`, …), `symbols.Custom`, `symbols.CustomEvenOdd` |
+
+### Using Zero-Bloat `symbols` & Expressive Shape Controls
+
+```go
+import (
+	md3e "github.com/imicola/mygo-md3e"
+	"github.com/imicola/mygo-md3e/shape"
+	"github.com/imicola/mygo-md3e/symbols"
+	"github.com/imicola/mygo-md3e/tokens"
+)
+
+// Every symbol's Draw method matches md3e.IconDraw with per-icon DCE:
+md3e.MorphIconButton(c.Key("play"), &playing, "Play or pause", symbols.PlayArrow.Draw,
+	md3e.MorphIconButtonOptions{
+		Size:          tokens.SizeM,
+		Shape:         shape.Cookie9Sided(),
+		SelectedShape: shape.Circle(),
+		SelectedIcon:  symbols.Pause.Draw,
+	})
+
+md3e.SwitchCard(c.Key("proxy"), "System Proxy", &proxyOn, md3e.SwitchCardOptions{
+	Subtitle:    "Route desktop traffic automatically",
+	LeadingIcon: symbols.Public.Draw,
+	Hairline:    true,
+})
+```
 
 ---
 
