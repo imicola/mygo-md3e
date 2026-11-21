@@ -22,8 +22,9 @@ type StateLayerOptions struct {
 	// Radius sets a uniform corner radius when Radii is unset.
 	Radius float32
 	// Clip confines the state layer and ripple to a box and corner radii it
-	// computes from the element's own box, as a navigation destination's pill
-	// inside its full-cell button. Nil paints them over the whole box.
+	// computes from the element's own painted window-space rectangle r, returning
+	// (box, radii) in the same window coordinates (e.g. a navigation destination's
+	// indicator pill inside its full-cell button). Nil paints over the whole box.
 	Clip func(r ui.Rect) (box ui.Rect, radii [4]float32)
 	// Shape optionally clips the state layer and ripple to a custom polygon.
 	Shape *shape.RoundedPolygon
@@ -249,6 +250,7 @@ func attachOverlayFeedbackWithTheme(th *Theme, el ui.Element, withRipple bool, o
 	thReduceMotion := th.ReduceMotion
 	st.allowWaves = withRipple && !thReduceMotion
 	st.hasDrawOver = true
+	st.hoverHook = nil
 
 	ink := opt.Color
 	if ink.A == 0 {
@@ -346,7 +348,7 @@ func attachOverlayFeedbackWithTheme(th *Theme, el ui.Element, withRipple bool, o
 			kept := st.waves[:0]
 			for i := range st.waves {
 				w := st.waves[i]
-				ox, oy := rippleOrigin(&w, opt.BorderInset, r, clipRect)
+				ox, oy := rippleOrigin(&w, r, clipRect)
 				curR, enterAlpha, fadeAlpha, animating, alive := evalRippleWave(&w, ox, oy, clipRect, now)
 				if alive && fadeAlpha > 0.001 {
 					kept = append(kept, w)
@@ -420,14 +422,15 @@ func attachOverlayFeedbackWithTheme(th *Theme, el ui.Element, withRipple bool, o
 	return el
 }
 
-func rippleOrigin(w *rippleWave, inset float32, r, inner ui.Rect) (float32, float32) {
+func rippleOrigin(w *rippleWave, r, inner ui.Rect) (float32, float32) {
 	if w.centered {
 		return inner.W * 0.5, inner.H * 0.5
 	}
-	// w.ox is in the element's own axes while inner is in window axes; move
-	// the origin into the clip box before clamping the wave into it.
-	ox := clampF32(r.X+w.ox-inner.X-inset, 0, inner.W)
-	oy := clampF32(r.Y+w.oy-inner.Y-inset, 0, inner.H)
+	// w.ox is in r's coordinates while inner is already in window coordinates
+	// (including any BorderInset from insetRect), so inner.X/Y already account
+	// for both element origin and inset.
+	ox := clampF32(r.X+w.ox-inner.X, 0, inner.W)
+	oy := clampF32(r.Y+w.oy-inner.Y, 0, inner.H)
 	return ox, oy
 }
 

@@ -630,3 +630,59 @@ func TestStateLayerOnlyPressWithoutWavesAndPolygonClip(t *testing.T) {
 		t.Fatal("StateLayer-only polygon did not settle cleanly")
 	}
 }
+
+// TestRippleOriginWithBorderInsetAndClip checks pointer ripple waves stay
+// centered on the pointer press even when BorderInset and Clip are combined.
+func TestRippleOriginWithBorderInsetAndClip(t *testing.T) {
+	tt := ui.NewTester(func(c *ui.Context) {
+		ThemeScope(c, nil, func() {
+			ui.Box(c).Size(200, 140).Background(ui.RGB(255, 255, 255)).Padding(20).Children(func() {
+				s := Surface(c, SurfaceOptions{
+					Color:  ui.RGB(255, 255, 255),
+					Radius: 12,
+				}).Size(140, 100)
+				AttachRipple(c, s, StateLayerOptions{
+					Color: ui.RGB(0, 0, 0),
+					Clip: func(r ui.Rect) (ui.Rect, [4]float32) {
+						return ui.Rect{X: r.X + 12, Y: r.Y + 8, W: r.W - 24, H: r.H - 16},
+							[4]float32{8, 8, 8, 8}
+					},
+					BorderInset: 16,
+				})
+			})
+		})
+	}, 200, 140)
+
+	// Element sits at (20,20)..(160,120). Clip sits at (32,28)..(148,112).
+	// BorderInset=16 puts inner clipRect at (48,44)..(132,96), center (90,70).
+	tt.Press(90, 70)
+	tt.Advance(20 * time.Millisecond)
+
+	img := tt.Image()
+	centerPx := img.RGBAAt(90, 70)
+	leftPx := img.RGBAAt(82, 70)
+	rightPx := img.RGBAAt(98, 70)
+	topPx := img.RGBAAt(90, 62)
+	bottomPx := img.RGBAAt(90, 78)
+	shiftedOriginPx := img.RGBAAt(62, 46)
+
+	if centerPx.R >= 245 {
+		t.Fatalf("ripple did not paint at press point (90,70): %+v", centerPx)
+	}
+	if diffLR := int(leftPx.R) - int(rightPx.R); diffLR < -3 || diffLR > 3 {
+		t.Fatalf("ripple is horizontally asymmetric around press point: left=%+v right=%+v", leftPx, rightPx)
+	}
+	if diffTB := int(topPx.R) - int(bottomPx.R); diffTB < -3 || diffTB > 3 {
+		t.Fatalf("ripple is vertically asymmetric around press point: top=%+v bottom=%+v", topPx, bottomPx)
+	}
+	if centerPx.R >= shiftedOriginPx.R {
+		t.Fatalf("ripple appears shifted toward (62,46)=%+v over press (90,70)=%+v", shiftedOriginPx, centerPx)
+	}
+
+	tt.Release(90, 70)
+	tt.Move(2, 2)
+	tt.Advance(700 * time.Millisecond)
+	if tt.FramePending() {
+		t.Fatal("ripple with BorderInset and Clip did not settle")
+	}
+}
