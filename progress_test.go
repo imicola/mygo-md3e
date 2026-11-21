@@ -599,3 +599,41 @@ func TestProgressDisabledIndeterminateStopsFrames(t *testing.T) {
 		t.Fatalf("disabled indeterminate indicators changed %d pixels", diff)
 	}
 }
+
+// TestProgressExitTransitionGhostStaysVisibleAndSettles verifies progress
+// indicators keep painting frozen waves on ElementTransition exit ghosts and
+// stop requesting frames once exited.
+func TestProgressExitTransitionGhostStaysVisibleAndSettles(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor)
+	exitTr := ui.ElementTransition{
+		Duration: 200 * time.Millisecond,
+		Exit:     &ui.Motion{Opacity: 0},
+	}
+	show := true
+	tt := progressCanvas(th, func(c *ui.Context) {
+		if show {
+			LinearWavyProgress(c.Key("exit-wave"), 0.5, ProgressOptions{Label: "ExitWave"}).Transition(exitTr)
+			CircularWavyProgress(c.Key("exit-ring"), -1, ProgressOptions{Label: "ExitRing", Size: 64}).Transition(exitTr)
+		}
+	})
+	waveBounds := progressInfo(t, tt, "ExitWave").Bounds
+	ringBounds := progressInfo(t, tt, "ExitRing").Bounds
+	tt.Advance(100 * time.Millisecond)
+
+	show = false
+	tt.Frame()
+	tt.Advance(40 * time.Millisecond)
+	midExit := tt.Image()
+
+	tt.Advance(400 * time.Millisecond)
+	if tt.FramePending() {
+		t.Fatal("exited progress ghost left pending animation frames")
+	}
+	settled := tt.Image()
+	if diff := indicatorBoxDiff(midExit, settled, waveBounds); diff < 40 {
+		t.Fatalf("exiting linear wavy ghost rendered only %d differing pixels vs settled canvas", diff)
+	}
+	if diff := indicatorBoxDiff(midExit, settled, ringBounds); diff < 60 {
+		t.Fatalf("exiting circular wavy ghost rendered only %d differing pixels vs settled canvas", diff)
+	}
+}

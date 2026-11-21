@@ -493,7 +493,7 @@ func buildTimeDial(c *ui.Context, th *Theme, st *timePickerState, value *time.Ti
 		paint.handInk = cs.OnSurface.Alpha(float32(tokens.DisabledContentOpacity))
 	}
 	dial.Draw(func(p *ui.Painter, r ui.Rect) {
-		if !dial.Valid() || r.W <= 0 || r.H <= 0 {
+		if r.W <= 0 || r.H <= 0 {
 			return
 		}
 		drawTimeDial(p, r, paint)

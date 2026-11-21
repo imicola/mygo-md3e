@@ -107,6 +107,27 @@ func TestGoldenProgress(t *testing.T) {
 	})
 }
 
+// TestGoldenProgressWavy covers wavy progress geometry with motion enabled at
+// a fixed virtual clock instant so determinate sine waves and indeterminate
+// bands/arcs are verified without ReduceMotion flattening.
+func TestGoldenProgressWavy(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor)
+	tt := ui.NewTester(func(c *ui.Context) {
+		ThemeScope(c, th, func() {
+			ui.Column(c).Fill().Background(th.Colors.Surface).Padding(16).Gap(18).Children(func() {
+				LinearWavyProgress(c, 0.4, ProgressOptions{Label: "Wavy linear determinate"})
+				LinearWavyProgress(c, -1, ProgressOptions{Label: "Wavy linear indeterminate"})
+				ui.Row(c).Gap(24).Children(func() {
+					CircularWavyProgress(c, 0.4, ProgressOptions{Label: "Wavy circular determinate", Size: 96})
+					CircularWavyProgress(c, -1, ProgressOptions{Label: "Wavy circular indeterminate", Size: 96})
+				})
+			})
+		})
+	}, 360, 230)
+	tt.Advance(250 * time.Millisecond)
+	golden.Match(t, tt, goldenPath("progress_wavy"), goldenTolerance)
+}
+
 // TestGoldenSelectionGeometry covers the switch tracks, the slider track and
 // handle and the range slider at fixed values, with no labels drawn.
 func TestGoldenSelectionGeometry(t *testing.T) {

@@ -133,10 +133,11 @@ func sameLoadingPolys(a, b []*shape.RoundedPolygon) bool {
 // loadingClock tracks the indicator's start and any pause, so resuming plays
 // on from the shape it froze on rather than jumping ahead.
 type loadingClock struct {
-	start    time.Time
-	paused   bool
-	pausedAt time.Time
-	offset   time.Duration
+	start       time.Time
+	paused      bool
+	pausedAt    time.Time
+	offset      time.Duration
+	lastElapsed time.Duration
 }
 
 // elapsed returns how much animation time has passed at now.
@@ -232,12 +233,19 @@ func LoadingIndicator(c *ui.Context, opts ...LoadingOptions) ui.Element {
 	morphSpring := motion.Spring(th.Motion, motion.SlowSpatial)
 
 	el.Draw(func(p *ui.Painter, r ui.Rect) {
-		if !el.Valid() || r.W <= 0 || r.H <= 0 || len(st.morphs) == 0 {
+		if r.W <= 0 || r.H <= 0 || len(st.morphs) == 0 {
 			return
 		}
+		live := el.Valid()
 		reduceMotion := th.ReduceMotion || p.Preferences().ReduceMotion
-		elapsed := clock.elapsed(p.Now())
-		if reduceMotion {
+		elapsed := clock.lastElapsed
+		if live {
+			elapsed = clock.elapsed(p.Now())
+			if reduceMotion {
+				elapsed = 0
+			}
+			clock.lastElapsed = elapsed
+		} else if reduceMotion {
 			elapsed = 0
 		}
 
@@ -277,7 +285,7 @@ func LoadingIndicator(c *ui.Context, opts ...LoadingOptions) ui.Element {
 			p.Clip(r, 0, draw)
 		}
 
-		if !reduceMotion && !clock.paused && !disabled && len(st.morphs) > 1 {
+		if live && !reduceMotion && !clock.paused && !disabled && len(st.morphs) > 1 {
 			p.AnimationFrame()
 		}
 	})

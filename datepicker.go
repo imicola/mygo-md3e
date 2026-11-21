@@ -587,7 +587,7 @@ func buildDateCalendar(c *ui.Context, th *Theme, st *datePickerState, m datePick
 					head := ui.Box(c).Size(dateCellWidth, dateWeekdayH).Shrink(0).
 						Role(ui.RoleColumnHeader).Label(name)
 					head.Draw(func(p *ui.Painter, r ui.Rect) {
-						if !head.Valid() || r.W <= 0 || r.H <= 0 {
+						if r.W <= 0 || r.H <= 0 {
 							return
 						}
 						ink := cs.OnSurfaceVariant
@@ -701,9 +701,10 @@ type dateCellPaint struct {
 // today ring and day number.
 func drawDateCell(cell ui.Element, v dateCellPaint, dayNum int) {
 	cell.Draw(func(p *ui.Painter, r ui.Rect) {
-		if !cell.Valid() || r.W <= 0 || r.H <= 0 {
+		if r.W <= 0 || r.H <= 0 {
 			return
 		}
+		live := cell.Valid()
 		circle := ui.Rect{X: r.X + 4, Y: r.Y + 4, W: r.W - 8, H: r.H - 8}
 		disabledInk := v.ink.Alpha(float32(tokens.DisabledContentOpacity))
 		disabledContainer := v.ink.Alpha(float32(tokens.DisabledContainerOpacity))
@@ -730,7 +731,7 @@ func drawDateCell(cell ui.Element, v dateCellPaint, dayNum int) {
 				ink = v.onBand
 			}
 		}
-		if !v.disabled && !v.selected && !v.band {
+		if live && !v.disabled && !v.selected && !v.band {
 			if cell.Pressed() {
 				p.Fill(circle, v.hoverInk.Alpha(float32(tokens.StatePressedOpacity)), circle.W/2)
 			} else if cell.Hovered() {
@@ -822,9 +823,10 @@ func buildDateYearGrid(c *ui.Context, th *Theme, st *datePickerState, disabled b
 							AccessSelected(selected).
 							Disabled(disabled)
 						cell.Draw(func(p *ui.Painter, r ui.Rect) {
-							if !cell.Valid() || r.W <= 0 || r.H <= 0 {
+							if r.W <= 0 || r.H <= 0 {
 								return
 							}
+							live := cell.Valid()
 							ink := cs.OnSurface
 							switch {
 							case selected && disabled:
@@ -836,7 +838,7 @@ func buildDateYearGrid(c *ui.Context, th *Theme, st *datePickerState, disabled b
 								ink = cs.OnPrimary
 							case disabled:
 								ink = cs.OnSurface.Alpha(float32(tokens.DisabledContentOpacity))
-							case cell.Hovered():
+							case live && cell.Hovered():
 								p.Fill(r, cs.OnSurface.Alpha(float32(tokens.StateHoverOpacity)),
 									float32(th.Shapes.Radius(tokens.ShapeSmall)))
 							}

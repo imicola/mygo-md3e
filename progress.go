@@ -61,6 +61,7 @@ type progressPaths struct {
 	track         ui.Path
 	paused        bool
 	pausedElapsed time.Duration
+	lastElapsed   time.Duration
 }
 
 // progressIndicatorKind selects one of the four indicators.
@@ -195,27 +196,33 @@ func progressIndicator(c *ui.Context, kind progressIndicatorKind, value float64,
 	wavy := kind == progressLinearWavy || kind == progressCircularWavy
 
 	el.Draw(func(p *ui.Painter, r ui.Rect) {
-		if !el.Valid() || r.W <= 0 || r.H <= 0 {
+		if r.W <= 0 || r.H <= 0 {
 			return
 		}
+		live := el.Valid()
 		reduce := reduceMotion || p.Preferences().ReduceMotion
-		now := p.Now()
-		var elapsed time.Duration
-		switch {
-		case reduce:
+		elapsed := paths.lastElapsed
+		if live {
+			now := p.Now()
+			switch {
+			case reduce:
+				elapsed = 0
+			case disabled:
+				if !paths.paused {
+					paths.paused = true
+					paths.pausedElapsed = max(now.Sub(*start), 0)
+				}
+				elapsed = paths.pausedElapsed
+			default:
+				if paths.paused {
+					paths.paused = false
+					*start = now.Add(-paths.pausedElapsed)
+				}
+				elapsed = max(now.Sub(*start), 0)
+			}
+			paths.lastElapsed = elapsed
+		} else if reduce {
 			elapsed = 0
-		case disabled:
-			if !paths.paused {
-				paths.paused = true
-				paths.pausedElapsed = max(now.Sub(*start), 0)
-			}
-			elapsed = paths.pausedElapsed
-		default:
-			if paths.paused {
-				paths.paused = false
-				*start = now.Add(-paths.pausedElapsed)
-			}
-			elapsed = max(now.Sub(*start), 0)
 		}
 		p.Clip(r, 0, func() {
 			if linear {
@@ -249,7 +256,7 @@ func progressIndicator(c *ui.Context, kind progressIndicatorKind, value float64,
 		// disabled or under reduced motion it rests flat and asks for no
 		// frames, as a plain determinate indicator does.
 		flowing := indeterminate || (wavy && shown > 0 && shown < 1)
-		if flowing && !reduce && !disabled {
+		if live && flowing && !reduce && !disabled {
 			p.AnimationFrame()
 		}
 	})

@@ -1672,3 +1672,82 @@ func TestDateRangePickerModalTransactional(t *testing.T) {
 		t.Fatalf("range OK got %d..%d changes=%d, want 18..21 changes=1", start.Day(), end.Day(), changes)
 	}
 }
+
+// TestPickerExitTransitionGhostStaysVisible verifies TimePicker dials and
+// DatePicker headers/day cells continue painting on ElementTransition exit ghosts.
+func TestPickerExitTransitionGhostStaysVisible(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor)
+	exitTr := ui.ElementTransition{
+		Duration: 200 * time.Millisecond,
+		Exit:     &ui.Motion{Opacity: 0},
+	}
+
+	t.Run("timepicker-exit-ghost", func(t *testing.T) {
+		show := true
+		val := time.Date(2026, time.May, 1, 10, 30, 0, 0, time.Local)
+		tt := pickerCanvas(th, func(c *ui.Context) {
+			if show {
+				ui.Column(c.Key("tp-exit")).Transition(exitTr).Children(func() {
+					TimePicker(c, &val, TimePickerOptions{HourCycle: 12})
+				})
+			}
+		})
+		dial, _, _ := dialInfo(t, tt)
+		tt.Advance(100 * time.Millisecond)
+
+		show = false
+		tt.Frame()
+		tt.Advance(40 * time.Millisecond)
+		midExit := tt.Image()
+
+		tt.Advance(400 * time.Millisecond)
+		if tt.FramePending() {
+			t.Fatal("exited TimePicker ghost left pending frames")
+		}
+		settled := tt.Image()
+		if diff := indicatorBoxDiff(midExit, settled, dial.Bounds); diff < 100 {
+			t.Fatalf("exiting TimePicker dial ghost painted only %d differing pixels", diff)
+		}
+	})
+
+	t.Run("datepicker-modal-exit-ghost", func(t *testing.T) {
+		open := false
+		val := pickerDay(2026, time.November, 12)
+		tt := pickerCanvas(th, func(c *ui.Context) {
+			if Button(c, "Pick ghost").Clicked() {
+				open = true
+			}
+			DatePicker(c, &val, DatePickerOptions{
+				Mode: DatePickerModal,
+				Open: &open,
+			})
+		})
+		tt.Click("Pick ghost")
+		tt.Advance(400 * time.Millisecond)
+
+		wedInfo, ok := tt.AccessByRole(ui.RoleColumnHeader, "Wed")
+		if !ok {
+			t.Fatal("weekday column header not found")
+		}
+		dayInfo, ok := tt.AccessByRole(ui.RoleCell, pickerDayLabel(pickerDay(2026, time.November, 15)))
+		if !ok {
+			t.Fatal("November 15 day cell not found")
+		}
+
+		tt.Click("Cancel")
+		tt.Advance(30 * time.Millisecond)
+		midExit := tt.Image()
+
+		tt.Advance(500 * time.Millisecond)
+		if tt.FramePending() {
+			t.Fatal("DatePickerModal exit left pending frames")
+		}
+		settled := tt.Image()
+		if diff := indicatorBoxDiff(midExit, settled, dayInfo.Bounds); diff < 10 {
+			t.Fatalf("exiting DatePicker day cell ghost painted only %d differing pixels", diff)
+		}
+		if diff := indicatorBoxDiff(midExit, settled, wedInfo.Bounds); diff < 4 {
+			t.Fatalf("exiting DatePicker weekday header ghost painted only %d differing pixels", diff)
+		}
+	})
+}

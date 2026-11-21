@@ -395,3 +395,40 @@ func TestDefaultLoadingPolygonsConcurrentAndIsolated(t *testing.T) {
 		t.Fatal("mutating DefaultLoadingPolygons return slice corrupted cached slice")
 	}
 }
+
+// TestLoadingIndicatorExitTransitionGhostStaysVisibleAndSettles checks an
+// exiting LoadingIndicator keeps painting its frozen morph during an exit
+// transition instead of vanishing abruptly on the first ghost frame.
+func TestLoadingIndicatorExitTransitionGhostStaysVisibleAndSettles(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor)
+	exitTr := ui.ElementTransition{
+		Duration: 200 * time.Millisecond,
+		Exit:     &ui.Motion{Opacity: 0},
+	}
+	show := true
+	tt := loadingCanvas(th, func(c *ui.Context) {
+		if show {
+			LoadingIndicator(c.Key("exit-load"), LoadingOptions{
+				Style: LoadingContained,
+				Size:  64,
+				Label: "ExitLoad",
+			}).Transition(exitTr)
+		}
+	})
+	info := loadingInfo(t, tt, "ExitLoad")
+	tt.Advance(100 * time.Millisecond)
+
+	show = false
+	tt.Frame()
+	tt.Advance(40 * time.Millisecond)
+	midExit := tt.Image()
+
+	tt.Advance(400 * time.Millisecond)
+	if tt.FramePending() {
+		t.Fatal("exited LoadingIndicator ghost left pending animation frames")
+	}
+	settled := tt.Image()
+	if diff := indicatorBoxDiff(midExit, settled, info.Bounds); diff < 80 {
+		t.Fatalf("exiting LoadingIndicator ghost painted only %d differing pixels vs settled canvas", diff)
+	}
+}
