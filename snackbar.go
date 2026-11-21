@@ -45,9 +45,36 @@ type snackbarItem struct {
 	opts     SnackbarOptions
 	seq      uint64
 	deadline time.Time
+	hovered  bool
+	focused  bool
 	paused   bool
 	pausedAt time.Time
 	exiting  bool
+}
+
+// syncPause updates the snackbar's pause state and returns remaining duration
+// before auto-dismiss when active is false and the deadline has not elapsed.
+func (it *snackbarItem) syncPause(now time.Time, active bool) time.Duration {
+	if it.exiting {
+		it.paused = false
+		return 0
+	}
+	if active {
+		if !it.paused {
+			it.paused = true
+			it.pausedAt = now
+		}
+		return 0
+	}
+	if it.paused {
+		it.deadline = it.deadline.Add(now.Sub(it.pausedAt))
+		it.paused = false
+	}
+	if !now.Before(it.deadline) {
+		it.exiting = true
+		return 0
+	}
+	return it.deadline.Sub(now)
 }
 
 // SnackbarState is a single-queue Material Design 3 snackbar controller. Show
@@ -188,21 +215,30 @@ func SnackbarHost(c *ui.Context, state *SnackbarState) ui.Element {
 			)
 			sb.IgnoreInput(item.exiting).AccessHidden(item.exiting)
 
-			// The countdown pauses while the pointer rests on the snackbar or
-			// the focus is in it, and picks up the remaining time on leave.
-			hovered := !item.exiting && (sb.Hovered() || sb.FocusWithin())
+			// Pause the countdown while hovered (checked in DrawOver to avoid hover
+			// rebuilds) or focused within, resuming with remaining duration on leave.
+			srv := c.Services()
+			item.focused = !item.exiting && sb.FocusWithin()
 			if item.exiting {
+				item.hovered = false
 				item.paused = false
-			} else if hovered && !item.paused {
-				item.paused = true
-				item.pausedAt = now
-			} else if !hovered && item.paused {
-				item.deadline = item.deadline.Add(now.Sub(item.pausedAt))
-				item.paused = false
+			} else {
+				item.syncPause(now, item.hovered || item.focused)
 			}
-			if !item.exiting && !hovered && !now.Before(item.deadline) {
-				item.exiting = true
-			}
+			sb.DrawOver(func(p *ui.Painter, r ui.Rect) {
+				if !sb.Valid() || item.exiting {
+					return
+				}
+				item.hovered = sb.Hovered()
+				rem := item.syncPause(p.Now(), item.hovered || item.focused)
+				if item.exiting {
+					srv.Invalidate()
+					return
+				}
+				if rem > 0 {
+					p.After(rem)
+				}
+			})
 
 			// A horizontal drag past the threshold dismisses it; a shorter one
 			// springs back as it is let go.
@@ -244,11 +280,6 @@ func SnackbarHost(c *ui.Context, state *SnackbarState) ui.Element {
 		})
 	})
 
-	if !item.exiting && !item.paused {
-		if d := item.deadline.Sub(now); d > 0 {
-			c.After(d)
-		}
-	}
 	return host
 }
 

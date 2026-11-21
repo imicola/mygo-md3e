@@ -730,3 +730,59 @@ func TestRichTooltipClampsToViewport(t *testing.T) {
 		t.Fatalf("action clicked %d times, want 1", clicked)
 	}
 }
+
+// TestSnackbarHoverDoesNotRebuildTree verifies hovering/leaving a snackbar
+// pauses and resumes the countdown via DrawOver + Painter.After without
+// polling rebuilds during pause or before the deadline.
+func TestSnackbarHoverDoesNotRebuildTree(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor)
+	state := &SnackbarState{}
+	state.Show(SnackbarOptions{Message: "NoRebuildToast", Duration: 3 * time.Second})
+	builds := 0
+	tt := ui.NewTester(func(c *ui.Context) {
+		builds++
+		ThemeScope(c, th, func() {
+			ui.Box(c).Size(440, 320).Background(canvasRGB).Padding(16).Children(func() {
+				SnackbarHost(c, state)
+			})
+		})
+	}, 440, 320)
+	tt.Frame()
+	tt.Advance(400 * time.Millisecond)
+	info, ok := tt.AccessByRole(ui.RoleStatus, "NoRebuildToast")
+	if !ok {
+		t.Fatal("snackbar missing before hover check")
+	}
+
+	// ui.Tester.Move settles one synchronous frame per input event; verify
+	// advancing across the entire 3s timeout while hovering triggers 0 rebuilds.
+	cx, cy := center(info.Bounds)
+	tt.Move(cx, cy)
+	afterHoverEnter := builds
+	tt.Advance(3500 * time.Millisecond)
+	if !tt.HasText("NoRebuildToast") {
+		t.Fatal("hovered snackbar dismissed early")
+	}
+	if builds != afterHoverEnter {
+		t.Fatalf("holding hover on snackbar triggered %d rebuild(s), want 0", builds-afterHoverEnter)
+	}
+
+	// Leaving resumes the remaining ~2.6s countdown via Painter.After without
+	// extra polling rebuilds before the resumed deadline fires.
+	tt.Move(5, 5)
+	afterHoverLeave := builds
+	tt.Advance(1500 * time.Millisecond)
+	if !tt.HasText("NoRebuildToast") {
+		t.Fatal("snackbar dismissed before remaining resumed duration elapsed")
+	}
+	if builds != afterHoverLeave {
+		t.Fatalf("resumed snackbar rebuilt %d time(s) before deadline, want 0", builds-afterHoverLeave)
+	}
+	tt.Advance(2 * time.Second)
+	if tt.HasText("NoRebuildToast") {
+		t.Fatal("snackbar did not dismiss after leaving hover")
+	}
+	if tt.FramePending() {
+		t.Fatal("dismissed snackbar left pending frames")
+	}
+}

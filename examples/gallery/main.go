@@ -95,7 +95,9 @@ type app struct {
 
 	// scrolls keeps where each page was scrolled, by its place in
 	// galleryRoutes, so the rail brings a page back where it was left.
-	scrolls []ui.ScrollState
+	scrolls      []ui.ScrollState
+	dests        []md3e.NavigationDestination
+	variantCache []md3e.MenuItem
 
 	shapes     shapePage
 	motionPage motionPage
@@ -107,11 +109,25 @@ type app struct {
 }
 
 func newApp() *app {
-	return &app{
-		router:  ui.NewRouter(galleryRoutes[0].path),
-		snack:   &md3e.SnackbarState{},
-		scrolls: make([]ui.ScrollState, len(galleryRoutes)),
+	a := &app{
+		router:       ui.NewRouter(galleryRoutes[0].path),
+		snack:        &md3e.SnackbarState{},
+		scrolls:      make([]ui.ScrollState, len(galleryRoutes)),
+		dests:        make([]md3e.NavigationDestination, 0, len(galleryRoutes)),
+		variantCache: make([]md3e.MenuItem, 0, len(variantNames)),
 	}
+	for _, route := range galleryRoutes {
+		a.dests = append(a.dests, md3e.NavigationDestination{Label: route.label, Icon: route.icon})
+	}
+	for i, name := range variantNames {
+		idx := i
+		a.variantCache = append(a.variantCache, md3e.MenuItem{
+			Label:   name,
+			Radio:   true,
+			OnClick: func() { a.variantIdx = idx },
+		})
+	}
+	return a
 }
 
 // pageScroll is where a page path was scrolled.
@@ -222,11 +238,7 @@ func (a *app) route(c *ui.Context, r *ui.Route) {
 
 // destinations are the rail's pages.
 func (a *app) destinations() []md3e.NavigationDestination {
-	dest := make([]md3e.NavigationDestination, 0, len(galleryRoutes))
-	for _, route := range galleryRoutes {
-		dest = append(dest, md3e.NavigationDestination{Label: route.label, Icon: route.icon})
-	}
-	return dest
+	return a.dests
 }
 
 // header holds the live theme controls.
@@ -284,17 +296,10 @@ func (a *app) header(c *ui.Context, th *md3e.Theme) {
 
 // variantItems are the menu rows that pick a DynamicScheme variant.
 func (a *app) variantItems() []md3e.MenuItem {
-	items := make([]md3e.MenuItem, 0, len(variantNames))
-	for i, name := range variantNames {
-		idx := i
-		items = append(items, md3e.MenuItem{
-			Label:   name,
-			Radio:   true,
-			Checked: i == a.variantIdx,
-			OnClick: func() { a.variantIdx = idx },
-		})
+	for i := range a.variantCache {
+		a.variantCache[i].Checked = i == a.variantIdx
 	}
-	return items
+	return a.variantCache
 }
 
 // railHeader shows the palette preview above the rail's destinations.

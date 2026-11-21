@@ -10,10 +10,19 @@ import (
 	"github.com/imicola/mygo-md3e/tokens"
 )
 
+// shapeTileCache caches each catalog entry's polygon and last built path.
+type shapeTileCache struct {
+	shape myshape.Shape
+	poly  *myshape.RoundedPolygon
+	rect  ui.Rect
+	path  *ui.Path
+}
+
 // shapePage holds the morph playground: the two ends, the progress and the
 // built morph, rebuilt only when an end changes.
 type shapePage struct {
 	all      []myshape.Shape
+	tiles    []shapeTileCache
 	a, b     float64
 	progress float64
 	morph    *myshape.Morph
@@ -24,9 +33,14 @@ type shapePage struct {
 func (p *shapePage) ensure() {
 	if p.all == nil {
 		p.all = myshape.All()
-		byName := map[string]int{}
+		p.tiles = make([]shapeTileCache, len(p.all))
+		byName := make(map[string]int, len(p.all))
 		for i, s := range p.all {
 			byName[s.Name] = i
+			p.tiles[i] = shapeTileCache{
+				shape: s,
+				poly:  s.Polygon(),
+			}
 		}
 		p.b = float64(byName["SoftBurst"])
 		p.progress = 0.55
@@ -35,7 +49,7 @@ func (p *shapePage) ensure() {
 	to := clampShapeIndex(int(math.Round(p.b)), len(p.all))
 	if p.morph == nil || p.from != from || p.to != to {
 		p.from, p.to = from, to
-		p.morph = myshape.NewMorph(p.all[from].Polygon(), p.all[to].Polygon())
+		p.morph = myshape.NewMorph(p.tiles[from].poly, p.tiles[to].poly)
 	}
 }
 
@@ -111,7 +125,9 @@ func (a *app) shapesPageView(c *ui.Context) {
 			section(c, "Shape catalog", func() {
 				caption(c, "Choose any shape as the morph's end; the current ends read highlighted.")
 				ui.Row(c).Wrap().Gap(8).Children(func() {
-					for i, sh := range p.all {
+					for i := range p.tiles {
+						entry := &p.tiles[i]
+						sh := entry.shape
 						idx := i
 						active := i == p.from || i == p.to
 						bg := cs.SurfaceContainer
@@ -127,11 +143,17 @@ func (a *app) shapesPageView(c *ui.Context) {
 						if tile.Clicked() {
 							p.b = float64(idx)
 						}
-						poly := sh.Polygon()
 						tile.Children(func() {
 							iconInk := ink
 							ui.Box(c).Size(38, 38).Draw(func(paint *ui.Painter, r ui.Rect) {
-								paint.FillPath(poly.ToPath(r), iconInk)
+								if r.W <= 0 || r.H <= 0 {
+									return
+								}
+								if entry.path == nil || entry.rect != r {
+									entry.rect = r
+									entry.path = entry.poly.ToPath(r)
+								}
+								paint.FillPath(entry.path, iconInk)
 							})
 							md3e.Text(c, sh.Name, tokens.LabelSmall).TextColor(text)
 						})
