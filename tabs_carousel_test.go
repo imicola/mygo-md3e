@@ -633,3 +633,77 @@ func TestCarouselZeroWidthEmptyResetAndCancelDrag(t *testing.T) {
 		t.Fatalf("rebuilt carousel failed to align active index 2 cleanly: %+v", cInfo.Bounds)
 	}
 }
+
+// TestTabsInitialOffscreenScrollDynamicWidthAndShrink checks initial selection
+// off-screen scrolls horizontally into view, dynamic width changes re-sync the
+// indicator bar, and shrinking items clamps Selected cleanly.
+func TestTabsInitialOffscreenScrollDynamicWidthAndShrink(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor)
+	sel := 5
+	items := []TabItem{
+		{Key: "k0", Label: "One"},
+		{Key: "k1", Label: "Two"},
+		{Key: "k2", Label: "Three"},
+		{Key: "k3", Label: "Four"},
+		{Key: "k4", Label: "Five"},
+		{Key: "k5", Label: "Six"},
+		{Key: "k6", Label: "Seven"},
+	}
+	tt := containerCanvas(th, func(c *ui.Context) {
+		PrimaryTabs(c, items, TabsOptions{
+			Selected:   &sel,
+			Scrollable: true,
+			Label:      "LongTabs",
+		}).Width(260)
+	})
+	tt.Advance(300 * time.Millisecond)
+	six := tabInfo(t, tt, "Six")
+	if six.Offscreen || six.Bounds.X+six.Bounds.W > 285 || six.Bounds.X < 20 {
+		t.Fatalf("initial off-screen selected tab 5 did not scroll into 260-wide bar: %+v", six.Bounds)
+	}
+	if tt.FramePending() {
+		t.Fatal("tabs initial off-screen scroll did not settle")
+	}
+
+	// Dynamic label width change on selected tab re-syncs indicator width/bounds.
+	sel2 := 0
+	longTabLabel := "A"
+	barW := float32(280)
+	cs := th.Colors
+	ttDyn := containerCanvas(th, func(c *ui.Context) {
+		PrimaryTabs(c, []TabItem{
+			{Key: "dyn0", Label: longTabLabel},
+			{Key: "dyn1", Label: "Next"},
+		}, TabsOptions{
+			Selected: &sel2,
+			Label:    "DynTabs",
+		}).Width(barW)
+	})
+	ttDyn.Advance(400 * time.Millisecond)
+	// Shrink items slice past sel and verify clamping instead of panic.
+	items = items[:2]
+	tt.Frame()
+	tt.Advance(300 * time.Millisecond)
+	if sel != 1 {
+		t.Fatalf("shrunk tabs selected = %d, want clamped 1", sel)
+	}
+
+	barW = 560
+	longTabLabel = "Expanded Tab Label"
+	ttDyn.Frame()
+	ttDyn.Advance(time.Second)
+	if ttDyn.FramePending() {
+		t.Fatal("dynamic tab width sync left pending frames")
+	}
+	t0 := tabInfo(t, ttDyn, "Expanded Tab Label")
+	// Center of expanded tab 0 bottom bar should paint Primary.
+	indPx := ttDyn.Image().RGBAAt(int(t0.Bounds.X+t0.Bounds.W/2), int(t0.Bounds.Y+t0.Bounds.H)-2)
+	if !colorMatches(indPx, cs.Primary, 16) {
+		t.Fatalf("expanded tab indicator at center = %+v, want Primary %+v", indPx, rgbOf(cs.Primary))
+	}
+	// Right edge of expanded 560-wide bar past center+maxW/2 should be bare Surface (no stale indicator).
+	rightEdgePx := ttDyn.Image().RGBAAt(int(t0.Bounds.X+t0.Bounds.W)-4, int(t0.Bounds.Y+t0.Bounds.H)-2)
+	if colorMatches(rightEdgePx, cs.Primary, 16) {
+		t.Fatalf("stale indicator still painted at tab edge %+v", rightEdgePx)
+	}
+}
