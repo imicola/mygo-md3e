@@ -569,3 +569,67 @@ func TestDisabledAncestorTabsCarouselAndNarrowSnap(t *testing.T) {
 		t.Fatalf("ancestor-disabled carousel changed index to %d", disIdx)
 	}
 }
+
+// TestCarouselZeroWidthEmptyResetAndCancelDrag checks a zero-width carousel
+// does not loop Invalidate forever, clears drag/align state across empty and
+// resized item lists, and clears drag state on pointer cancel.
+func TestCarouselZeroWidthEmptyResetAndCancelDrag(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor)
+	width := float32(0)
+	idx := 0
+	items := carouselItems(4)
+	builds := 0
+	tt := ui.NewTester(func(c *ui.Context) {
+		builds++
+		ThemeScope(c, th, func() {
+			ui.Box(c).Size(640, 260).Background(canvasRGB).Padding(20).Children(func() {
+				Carousel(c, items, CarouselOptions{
+					Index:  &idx,
+					Layout: CarouselHero,
+					Height: 180,
+				}).Width(width)
+			})
+		})
+	}, 640, 260)
+
+	tt.Advance(500 * time.Millisecond)
+	if tt.FramePending() {
+		t.Fatal("zero-width carousel left pending invalidation frames")
+	}
+	if builds > 5 {
+		t.Fatalf("zero-width carousel triggered %d rebuilds, expected no loop", builds)
+	}
+
+	// Expanding to 360 lays out items and resets to non-zero proportions cleanly.
+	width = 360
+	tt.Frame()
+	tt.Advance(600 * time.Millisecond)
+	a := buttonInfo(t, tt, ui.RoleButton, "A")
+	wantW := carouselItemWidth(CarouselHero, 0, 360)
+	if absF32(a.Bounds.W-wantW) > 1.5 {
+		t.Fatalf("expanded carousel slide A width = %.1f, want %.1f", a.Bounds.W, wantW)
+	}
+
+	// Start a drag and cancel the pointer mid-drag, then click cleanly.
+	ax, ay := center(a.Bounds)
+	tt.Move(ax, ay)
+	tt.Press(ax, ay)
+	tt.Move(ax-20, ay)
+	tt.CancelPress()
+	tt.Advance(200 * time.Millisecond)
+
+	// Transition items empty -> rebuilt non-empty resets index and drag state.
+	items = nil
+	tt.Frame()
+	items = carouselItems(3)
+	idx = 2
+	tt.Frame()
+	tt.Advance(800 * time.Millisecond)
+	if idx != 2 {
+		t.Fatalf("rebuilt carousel index = %d, want 2", idx)
+	}
+	cInfo := buttonInfo(t, tt, ui.RoleButton, "C")
+	if cInfo.Bounds.X+cInfo.Bounds.W > 385 {
+		t.Fatalf("rebuilt carousel failed to align active index 2 cleanly: %+v", cInfo.Bounds)
+	}
+}

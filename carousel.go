@@ -76,8 +76,9 @@ type (
 // carouselSizeState remembers the viewport width and whether the first real
 // layout has placed the slides.
 type carouselSizeState struct {
-	init  bool
-	viewW float32
+	init   bool
+	probed bool
+	viewW  float32
 }
 
 // carouselDragState is the pointer panning of the strip, and the bookkeeping
@@ -94,9 +95,11 @@ type carouselDragState struct {
 	stable     int
 	synced     bool
 	aligning   bool
-	// lastAlignX and lastAlignIndex remember the last alignment asked for, so
-	// one that cannot move the strip (its end is too short for the slide) is
-	// not asked for again frame after frame.
+	lastCount  int
+	// alignInit, lastAlignX, and lastAlignIndex remember the last alignment
+	// asked for, so one that cannot move the strip (its end is too short for
+	// the slide) is not asked for again frame after frame.
+	alignInit      bool
 	lastAlignX     float32
 	lastAlignIndex int
 }
@@ -143,20 +146,31 @@ func Carousel(c *ui.Context, items []CarouselItem, opts ...CarouselOptions) ui.E
 	if index == nil {
 		index = ui.Local(root, carouselIndexKey{}, func() int { return 0 })
 	}
-	if len(items) == 0 {
-		return root
-	}
-	*index = max(0, min(*index, len(items)-1))
-
 	size := ui.Local(root, carouselSizeKey{}, func() carouselSizeState { return carouselSizeState{} })
 	drag := ui.Local(root, carouselDragKey{}, func() carouselDragState { return carouselDragState{} })
-	if disabled {
-		drag.active, drag.dragged, drag.suppress = false, false, false
-	}
 	// -1 rather than the initial index: a carousel the caller starts on a
 	// later slide lines that slide up as it first lays out.
 	lastIndex := ui.Local(root, carouselLastKey{}, func() int { return -1 })
 	scrollState := ui.Local(root, carouselScrollKey{}, func() ui.ScrollState { return ui.ScrollState{} })
+
+	if len(items) == 0 {
+		*drag = carouselDragState{}
+		*lastIndex = -1
+		size.probed = false
+		return root
+	}
+	if drag.lastCount != len(items) {
+		drag.active, drag.dragged, drag.suppress = false, false, false
+		drag.needStart, drag.aligning, drag.synced, drag.alignInit = false, false, false, false
+		drag.stable = 0
+		drag.lastCount = len(items)
+		*lastIndex = -1
+	}
+	*index = max(0, min(*index, len(items)-1))
+
+	if disabled {
+		drag.active, drag.dragged, drag.suppress = false, false, false
+	}
 
 	laidW := root.LayoutBounds().W
 	viewW := laidW
@@ -174,9 +188,26 @@ func Carousel(c *ui.Context, items []CarouselItem, opts ...CarouselOptions) ui.E
 	jump := !size.init
 	if laidW > 0 {
 		size.init = true
+		size.probed = true
 	} else {
-		c.Invalidate()
+		size.init = false
+		if !size.probed {
+			// Ask for one post-layout pass when first unlaid, then rely on
+			// DrawOver below once a non-zero width actually paints so a
+			// permanently 0-wide container does not spin Invalidate.
+			size.probed = true
+			c.Invalidate()
+		}
 	}
+	srv := c.Services()
+	root.DrawOver(func(p *ui.Painter, r ui.Rect) {
+		if !root.Valid() || r.W <= 0 || r.H <= 0 {
+			return
+		}
+		if !size.init || absF32(r.W-size.viewW) > 0.5 {
+			srv.Invalidate()
+		}
+	})
 
 	radius := th.Shapes.Radius(tokens.ShapeLarge)
 	base := SurfaceColorForElevation(th, tokens.Level1)
@@ -257,6 +288,10 @@ func Carousel(c *ui.Context, items []CarouselItem, opts ...CarouselOptions) ui.E
 							if ev.Button != 0 {
 								return false
 							}
+							if ev.Canceled {
+								drag.active, drag.dragged, drag.suppress = false, false, false
+								return false
+							}
 							if drag.dragged {
 								drag.suppress = true
 							}
@@ -301,7 +336,7 @@ func Carousel(c *ui.Context, items []CarouselItem, opts ...CarouselOptions) ui.E
 							txt.TextColor(ink)
 						})
 					})
-					attachRippleWithTheme(th, el, StateLayerOptions{Color: ink, Radius: radius, Disabled: disabled})
+					attachRippleWithContext(c, th, el, StateLayerOptions{Color: ink, Radius: radius, Disabled: disabled})
 					if el.Clicked() && !disabled {
 						pressed = i
 					}
@@ -348,62 +383,72 @@ func Carousel(c *ui.Context, items []CarouselItem, opts ...CarouselOptions) ui.E
 	// Follow the caller's writes to Index, and the choice above, by lining the
 	// chosen slide up with the strip's start; its snapping keeps it there as
 	// the widths animate.
-	alignNow := false
-	if *index != *lastIndex {
-		*lastIndex = *index
-		drag.aligning, drag.synced = true, false
-		alignNow = true
-	}
-	alignSlide := func(i int) {
-		if absF32(scrollState.X-drag.lastAlignX) < 0.5 && drag.lastAlignIndex == i {
-			return
+	if laidW > 0 {
+		alignNow := false
+		if *index != *lastIndex {
+			*lastIndex = *index
+			drag.aligning, drag.synced = true, false
+			alignNow = true
 		}
-		drag.lastAlignX, drag.lastAlignIndex = scrollState.X, i
-		opts := ui.ScrollIntoViewOptions{Inline: ui.ScrollStart}
-		if !reduce {
-			anim := th.Animation(motion.DefaultSpatial)
-			opts.Animation = &anim
+		alignSlide := func(i int) {
+			if drag.alignInit && absF32(scrollState.X-drag.lastAlignX) < 0.5 && drag.lastAlignIndex == i {
+				return
+			}
+			drag.alignInit = true
+			drag.lastAlignX, drag.lastAlignIndex = scrollState.X, i
+			var targetX float32
+			for k := 0; k < i; k++ {
+				targetX += carouselItemWidth(o.Layout, i-k, size.viewW) + gap
+			}
+			clamped := clampF32(targetX, 0, scrollState.MaxX)
+			if absF32(scrollState.X-clamped) < 0.5 {
+				return
+			}
+			if reduce {
+				scrollState.X = clamped
+				return
+			}
+			scrollState.ScrollTo(targetX, 0, th.Animation(motion.DefaultSpatial))
 		}
-		itemEls[i].ScrollIntoView(opts)
-	}
-	if alignNow && !disabled {
-		alignSlide(*index)
-	}
+		if alignNow && !disabled {
+			alignSlide(*index)
+		}
 
-	// Watch the scroll position: once it rests, bring the focused slide in step
-	// with whichever slide the strip settled on (a wheel notch or a touchpad
-	// scroll), and line a dragged strip up on its nearest slide. While a
-	// choice is being aligned this wait stays out of the way, so widths
-	// reallocating cannot bounce the focus back.
-	if viewport.Valid() && !disabled {
-		if scrollState.X != drag.lastScroll {
-			drag.lastScroll = scrollState.X
-			drag.stable, drag.synced = 0, false
-			// Keep a frame coming so the next one can tell the strip stopped.
-			c.Invalidate()
-		}
-		if drag.stable < 2 {
-			drag.stable++
-			if drag.stable < 2 {
+		// Watch the scroll position: once it rests, bring the focused slide in step
+		// with whichever slide the strip settled on (a wheel notch or a touchpad
+		// scroll), and line a dragged strip up on its nearest slide. While a
+		// choice is being aligned this wait stays out of the way, so widths
+		// reallocating cannot bounce the focus back.
+		if viewport.Valid() && !disabled {
+			if scrollState.X != drag.lastScroll {
+				drag.lastScroll = scrollState.X
+				drag.stable, drag.synced = 0, false
+				// Keep a frame coming so the next one can tell the strip stopped.
 				c.Invalidate()
 			}
-		}
-		if drag.stable >= 2 && !drag.active && !drag.synced {
-			drag.synced = true
-			if drag.aligning {
-				drag.aligning = false
-			} else {
-				nearest, startDist := carouselNearest(itemEls, viewport.LayoutBounds(), *index, rtl)
-				if nearest != *index {
-					*index = nearest
-					*lastIndex = nearest
-					drag.aligning = true
-					if o.Changed != nil {
-						o.Changed(nearest)
+			if drag.stable < 2 {
+				drag.stable++
+				if drag.stable < 2 {
+					c.Invalidate()
+				}
+			}
+			if drag.stable >= 2 && !drag.active && !drag.synced {
+				drag.synced = true
+				if drag.aligning {
+					drag.aligning = false
+				} else {
+					nearest, startDist := carouselNearest(itemEls, viewport.LayoutBounds(), *index, rtl)
+					if nearest != *index {
+						*index = nearest
+						*lastIndex = nearest
+						drag.aligning = true
+						if o.Changed != nil {
+							o.Changed(nearest)
+						}
+						alignSlide(nearest)
+					} else if startDist > carouselAlignSlack {
+						alignSlide(*index)
 					}
-					alignSlide(nearest)
-				} else if startDist > carouselAlignSlack {
-					alignSlide(*index)
 				}
 			}
 		}
