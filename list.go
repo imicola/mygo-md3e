@@ -83,7 +83,13 @@ type listTrailingKey struct{}
 // text, leading slot (icon, avatar or control), trailing meta and control.
 // Rows with OnClick, or every row of a list with Selected, are interactive
 // ui.ButtonBase rows with a StateLayer and Expressive Ripple; the arrows move
-// the focus among them and Enter or Space chooses.
+// the focus among them and Enter or Space chooses. When an interactive row is
+// chosen, *Selected is updated and OnSelect fires before item.OnClick so click
+// handlers that delete or reorder rows never have *Selected overwritten.
+//
+// List materializes all rows in a ui.Column so it measures naturally inside any
+// layout or outer ui.Scroll container; for virtualized feeds of thousands of
+// rows, compose ui.List directly under ThemeScope.
 //
 // Segmented lists attach their rows as card pieces with md3e's expressive
 // corner rhythm, animating a chosen or pressed row to full large corners while
@@ -124,17 +130,53 @@ func List(c *ui.Context, items []ListItem, opts ...ListOptions) ui.Element {
 		root.FocusGroup(ui.Vertical)
 	}
 
+	style := newListStyle(th, o.Segmented)
 	n := len(items)
 	root.Children(func() {
 		for i := range items {
-			listRow(c, th, &items[i], i, n, o)
+			listRow(c, th, style, &items[i], i, n, o)
 		}
 	})
 	return root
 }
 
+type listStyle struct {
+	large           float32
+	small           float32
+	base            ui.Color
+	selectedBg      ui.Color
+	content         ui.Color
+	supporting      ui.Color
+	selectedContent ui.Color
+	disabledBg      ui.Color
+	disabledContent ui.Color
+}
+
+func newListStyle(th *Theme, segmented bool) listStyle {
+	cs := th.Colors
+	base := cs.Surface
+	if segmented {
+		base = SurfaceColorForElevation(th, tokens.Level1)
+	}
+	selectedBg := cs.SecondaryContainer
+	if selectedBg.A == 0 {
+		selectedBg = cs.PrimaryContainer
+	}
+	return listStyle{
+		large:           th.Shapes.Radius(tokens.ShapeLarge),
+		small:           th.Shapes.Radius(tokens.ShapeSmall),
+		base:            base,
+		selectedBg:      selectedBg,
+		content:         cs.OnSurface,
+		supporting:      cs.OnSurfaceVariant,
+		selectedContent: cs.OnSecondaryContainer,
+		disabledBg:      cs.OnSurface.Alpha(float32(tokens.DisabledContainerOpacity)),
+		disabledContent: cs.OnSurface.Alpha(float32(tokens.DisabledContentOpacity)),
+	}
+}
+
 // listRow builds one row of a List.
-func listRow(c *ui.Context, th *Theme, item *ListItem, i, n int, o ListOptions) {
+func listRow(c *ui.Context, th *Theme, st listStyle, item *ListItem, i, n int, o ListOptions) {
 	selectable := o.Selected != nil
 	interactive := item.OnClick != nil || selectable
 	if item.Key != nil {
@@ -177,17 +219,15 @@ func listRow(c *ui.Context, th *Theme, item *ListItem, i, n int, o ListOptions) 
 
 	var radii [4]float32
 	if o.Segmented || interactive {
-		large := th.Shapes.Radius(tokens.ShapeLarge)
-		small := th.Shapes.Radius(tokens.ShapeSmall)
 		topTarget := float32(0)
 		bottomTarget := float32(0)
 		if o.Segmented {
-			target := segmentedRowRadii(i, n, large, small)
+			target := segmentedRowRadii(i, n, st.large, st.small)
 			topTarget, bottomTarget = target[0], target[2]
 		}
 		pressed := interactive && !disabled && row.Pressed()
 		if selected || pressed {
-			topTarget, bottomTarget = large, large
+			topTarget, bottomTarget = st.large, st.large
 		}
 		topR := animateWithTheme(row, th, listTopRadiusKey{}, topTarget, motion.DefaultSpatial)
 		bottomR := animateWithTheme(row, th, listBottomRadiusKey{}, bottomTarget, motion.DefaultSpatial)
@@ -195,11 +235,6 @@ func listRow(c *ui.Context, th *Theme, item *ListItem, i, n int, o ListOptions) 
 		row.Radius(topR, topR, bottomR, bottomR)
 	}
 
-	cs := th.Colors
-	base := cs.Surface
-	if o.Segmented {
-		base = SurfaceColorForElevation(th, tokens.Level1)
-	}
 	selectedT := float32(0)
 	if selectable {
 		if selected {
@@ -207,24 +242,20 @@ func listRow(c *ui.Context, th *Theme, item *ListItem, i, n int, o ListOptions) 
 		}
 		selectedT = clampF32(animateWithTheme(row, th, listSelectKey{}, selectedT, motion.DefaultEffects), 0, 1)
 	}
-	selectedBg := cs.SecondaryContainer
-	if selectedBg.A == 0 {
-		selectedBg = cs.PrimaryContainer
+	bg := st.base
+	if st.selectedBg.A > 0 && selectedT > 0.001 {
+		bg = st.base.Mix(st.selectedBg, selectedT)
 	}
-	bg := base
-	if selectedBg.A > 0 && selectedT > 0.001 {
-		bg = base.Mix(selectedBg, selectedT)
-	}
-	content := cs.OnSurface
-	supporting := cs.OnSurfaceVariant
+	content := st.content
+	supporting := st.supporting
 	if selected {
-		content = cs.OnSecondaryContainer
-		supporting = cs.OnSecondaryContainer
+		content = st.selectedContent
+		supporting = st.selectedContent
 	}
 	if disabled {
-		bg = cs.OnSurface.Alpha(float32(tokens.DisabledContainerOpacity))
-		content = cs.OnSurface.Alpha(float32(tokens.DisabledContentOpacity))
-		supporting = content
+		bg = st.disabledBg
+		content = st.disabledContent
+		supporting = st.disabledContent
 	}
 	row.Background(bg).TextColor(content)
 	if interactive {
@@ -277,14 +308,14 @@ func listRow(c *ui.Context, th *Theme, item *ListItem, i, n int, o ListOptions) 
 		}
 	})
 	if clicked && !disabled {
-		if item.OnClick != nil {
-			item.OnClick()
-		}
 		if selectable {
 			*o.Selected = i
 			if o.OnSelect != nil {
 				o.OnSelect(i)
 			}
+		}
+		if item.OnClick != nil {
+			item.OnClick()
 		}
 	}
 }

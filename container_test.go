@@ -619,3 +619,60 @@ func TestListLongTextAndInfSanitization(t *testing.T) {
 		t.Fatalf("sanitized divider bounds = %+v (ok=%v)", safeDiv.Bounds, ok)
 	}
 }
+
+// TestListOnClickDeleteResetsSelectionSafely checks *Selected updates and
+// OnSelect fires before item.OnClick, so deleting a row inside OnClick and
+// adjusting *Selected is not overwritten back to the deleted index.
+func TestListOnClickDeleteResetsSelectionSafely(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor, ThemeOptions{ReduceMotion: true})
+	selected := 0
+	var events []string
+	type rowData struct {
+		key  string
+		name string
+	}
+	rows := []rowData{{key: "a", name: "Alpha"}, {key: "b", name: "Beta"}}
+
+	tt := containerCanvas(th, func(c *ui.Context) {
+		items := make([]ListItem, len(rows))
+		for i, r := range rows {
+			idx := i
+			items[i] = ListItem{
+				Key:      r.key,
+				Headline: r.name,
+				OnClick: func() {
+					events = append(events, "click:"+r.key+"@sel="+string(rune('0'+selected)))
+					if r.key == "b" {
+						rows = append(rows[:idx], rows[idx+1:]...)
+						selected = 0
+					}
+				},
+			}
+		}
+		ui.Box(c).Width(320).Children(func() {
+			List(c, items, ListOptions{
+				Selected:  &selected,
+				Segmented: true,
+				Label:     "Items",
+				OnSelect: func(i int) {
+					events = append(events, "select:"+string(rune('0'+i)))
+				},
+			})
+		})
+	})
+
+	beta := listItemInfo(t, tt, "Beta")
+	tt.ClickAt(center(beta.Bounds))
+	tt.Frame()
+
+	if len(rows) != 1 || rows[0].key != "a" {
+		t.Fatalf("rows = %+v, want only Alpha remaining", rows)
+	}
+	if selected != 0 {
+		t.Fatalf("selected = %d after Beta deleted itself in OnClick, want 0", selected)
+	}
+	wantEvents := []string{"select:1", "click:b@sel=1"}
+	if len(events) != len(wantEvents) || events[0] != wantEvents[0] || events[1] != wantEvents[1] {
+		t.Fatalf("callback order = %v, want %v", events, wantEvents)
+	}
+}
