@@ -1,6 +1,8 @@
 package md3e
 
 import (
+	"image"
+	"math"
 	"testing"
 	"time"
 
@@ -661,6 +663,20 @@ func TestTimePickerDialClickAndAutoAdvance(t *testing.T) {
 	if info.Value != "03:30" {
 		t.Fatalf("the dial reads %q, want 03:30", info.Value)
 	}
+	// Clicking the hour already chosen still commits and advances.
+	if err := tt.Click("Hour"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Advance(300 * time.Millisecond)
+	x, y := dialPoint(cx, cy, 90, timeDialOuterR)
+	tt.ClickAt(x, y)
+	tt.Advance(time.Second)
+	if value.Hour() != 3 {
+		t.Fatalf("re-choosing the selected hour changed it to %d", value.Hour())
+	}
+	if info, ok := tt.AccessByRole(ui.RoleTab, "Minute"); !ok || !info.Selected {
+		t.Fatal("clicking the selected hour does not switch the dial to minutes")
+	}
 }
 
 // TestTimePickerDialDrag checks dragging the hand around the dial.
@@ -978,6 +994,313 @@ func TestTimePickerDisableMidDrag(t *testing.T) {
 	}
 	if tt.FramePending() {
 		t.Fatal("the re-enabled picker keeps asking for frames")
+	}
+}
+
+// dialInkNear reports whether any pixel within rad of (x, y) paints the dial's
+// Primary hand.
+func dialInkNear(img *image.RGBA, th *Theme, x, y, rad int) bool {
+	for dy := -rad; dy <= rad; dy++ {
+		for dx := -rad; dx <= rad; dx++ {
+			if colorMatches(img.RGBAAt(x+dx, y+dy), th.Colors.Primary, 60) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// dialHandAngle returns the hand's angle clockwise from the top, measured from
+// the Primary ink between radius 40 and 70, or -1 when no hand shows.
+func dialHandAngle(th *Theme, tt *ui.Tester, b ui.Rect) float32 {
+	cx, cy := center(b)
+	img := tt.Image()
+	var sx, sy float64
+	for y := int(cy) - 72; y <= int(cy)+72; y++ {
+		for x := int(cx) - 72; x <= int(cx)+72; x++ {
+			dx, dy := float64(x)-float64(cx), float64(y)-float64(cy)
+			r := math.Hypot(dx, dy)
+			if r < 40 || r > 70 {
+				continue
+			}
+			if !colorMatches(img.RGBAAt(x, y), th.Colors.Primary, 60) {
+				continue
+			}
+			ang := math.Atan2(dx, -dy)
+			sx += math.Cos(ang)
+			sy += math.Sin(ang)
+		}
+	}
+	if sx == 0 && sy == 0 {
+		return -1
+	}
+	a := math.Atan2(sy, sx) * 180 / math.Pi
+	if a < 0 {
+		a += 360
+	}
+	return float32(a)
+}
+
+// angleDistance returns how far apart two angles are, around the circle.
+func angleDistance(a, b float32) float32 {
+	d := absF32(normalizeDialAngle(a) - normalizeDialAngle(b))
+	return min(d, 360-d)
+}
+
+// TestTimePickerDialHandFollowsAngle checks the hand paints a true diagonal
+// from the center to the chosen minute at 36°, 42°, 330° and 60°, and never a
+// stray vertical line up the 12 o'clock axis.
+func TestTimePickerDialHandFollowsAngle(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor)
+	for _, tc := range []struct {
+		minute int
+		deg    float32
+	}{
+		{6, 36}, {7, 42}, {55, 330}, {10, 60},
+	} {
+		value := time.Date(2026, time.May, 1, 10, tc.minute, 0, 0, time.Local)
+		tt := pickerCanvas(th, func(c *ui.Context) {
+			TimePicker(c, &value, TimePickerOptions{HourCycle: 12})
+		})
+		tt.Advance(300 * time.Millisecond)
+		if err := tt.Click("Minute"); err != nil {
+			t.Fatal(err)
+		}
+		tt.Advance(600 * time.Millisecond)
+		_, cx, cy := dialInfo(t, tt)
+		img := tt.Image()
+		for _, f := range []float32{0.30, 0.45, 0.60, 0.72} {
+			x, y := dialPoint(cx, cy, tc.deg, timeDialOuterR*f)
+			if !dialInkNear(img, th, int(x), int(y), 2) {
+				t.Fatalf("%02d (%.0f°): the hand does not reach r=%.0f at (%.1f,%.1f)",
+					tc.minute, tc.deg, timeDialOuterR*f, x, y)
+			}
+		}
+		for _, f := range []float32{0.3, 0.45, 0.6, 0.72} {
+			x, y := dialPoint(cx, cy, 0, timeDialOuterR*f)
+			if dialInkNear(img, th, int(x), int(y), 1) {
+				t.Fatalf("%02d (%.0f°): a stray vertical hand paints 12 o'clock at r=%.0f",
+					tc.minute, tc.deg, timeDialOuterR*f)
+			}
+		}
+	}
+}
+
+// TestTimePickerSelectionCircleKeepsTickDigits checks that the selection circle
+// at 06 and 07 minutes carries the OnPrimary center dot and repaints the tick
+// digits it covers in OnPrimary rather than swallowing them.
+func TestTimePickerSelectionCircleKeepsTickDigits(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor)
+	onSelected := rgbOf(th.Colors.OnPrimary)
+	for _, minute := range []int{6, 7} {
+		value := time.Date(2026, time.May, 1, 10, minute, 0, 0, time.Local)
+		tt := pickerCanvas(th, func(c *ui.Context) {
+			TimePicker(c, &value, TimePickerOptions{HourCycle: 12})
+		})
+		tt.Advance(300 * time.Millisecond)
+		if err := tt.Click("Minute"); err != nil {
+			t.Fatal(err)
+		}
+		tt.Advance(600 * time.Millisecond)
+		_, cx, cy := dialInfo(t, tt)
+		img := tt.Image()
+		tipX, tipY := dialPoint(cx, cy, float32(minute)*6, timeDialOuterR)
+		if got := img.RGBAAt(int(tipX), int(tipY)); absColorDiff(got, onSelected) > 40 {
+			t.Fatalf("%02d: the selection circle center = %v, want the OnPrimary dot %v", minute, got, onSelected)
+		}
+		// "05" sits at 30°, within or beside the circle; every digit pixel the
+		// circle covers must be OnPrimary.
+		lx, ly := dialPoint(cx, cy, 30, timeDialOuterR)
+		white, ink, darkInside := 0, 0, 0
+		for py := int(ly) - 11; py <= int(ly)+11; py++ {
+			for px := int(lx) - 12; px <= int(lx)+12; px++ {
+				got := img.RGBAAt(px, py)
+				d := math.Hypot(float64(px)-float64(tipX), float64(py)-float64(tipY))
+				if d <= float64(timeDialCircleR)-1 {
+					switch {
+					case absColorDiff(got, onSelected) <= 60:
+						white++
+					case absColorDiff(got, rgbOf(th.Colors.OnSurfaceVariant)) <= 80:
+						darkInside++
+					}
+				} else if absColorDiff(got, rgbOf(th.Colors.OnSurfaceVariant)) <= 80 {
+					ink++
+				}
+			}
+		}
+		if darkInside != 0 {
+			t.Fatalf("%02d: %d pixels of a covered digit stay dark inside the circle", minute, darkInside)
+		}
+		if white+ink < 4 {
+			t.Fatalf("%02d: \"05\" nearly disappeared (%d white, %d ink pixels)", minute, white, ink)
+		}
+		if minute == 6 && white < 4 {
+			t.Fatalf("06: only %d pixels of the covered \"05\" are OnPrimary", white)
+		}
+	}
+}
+
+// TestTimePickerDragReleasedOffDialClearsHeld checks that releasing a drag off
+// the dial ends it, advances to the minutes, and leaves no stuck hand that
+// picks on hover.
+func TestTimePickerDragReleasedOffDialClearsHeld(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor)
+	value := time.Date(2026, time.May, 1, 10, 30, 0, 0, time.Local)
+	tt := pickerCanvas(th, func(c *ui.Context) {
+		TimePicker(c, &value, TimePickerOptions{HourCycle: 12})
+	})
+	tt.Advance(300 * time.Millisecond)
+	_, cx, cy := dialInfo(t, tt)
+
+	// Press three o'clock and drag well off the dial before releasing there.
+	tt.Press(cx+timeDialOuterR, cy)
+	tt.Move(cx+timeDialOuterR+140, cy+90)
+	tt.Release(cx+timeDialOuterR+140, cy+90)
+	tt.Advance(600 * time.Millisecond)
+	if info, ok := tt.AccessByRole(ui.RoleTab, "Minute"); !ok || !info.Selected {
+		t.Fatal("releasing off the dial does not advance to the minutes")
+	}
+	picked := value
+	// Hovering the dial afterwards must not pick anything.
+	tt.Move(cx, cy+timeDialOuterR)
+	tt.Advance(300 * time.Millisecond)
+	if value != picked {
+		t.Fatalf("hovering after an off-dial release picked %v, want %v", value, picked)
+	}
+	if tt.FramePending() {
+		t.Fatal("the released dial keeps asking for frames")
+	}
+	// A fresh gesture works: nine o'clock is minute 45.
+	tt.Press(cx-timeDialOuterR, cy)
+	tt.Release(cx-timeDialOuterR, cy)
+	tt.Advance(600 * time.Millisecond)
+	if value.Minute() != 45 {
+		t.Fatalf("the fresh minute press chose %d, want 45", value.Minute())
+	}
+	if value.Hour() != picked.Hour() {
+		t.Fatalf("the fresh minute press changed the hour to %d", value.Hour())
+	}
+}
+
+// TestTimePickerDragAcrossTwelveTakesShortWay checks that dragging clockwise
+// across 12 and releasing springs back over the short arc instead of spinning
+// the other way around.
+func TestTimePickerDragAcrossTwelveTakesShortWay(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor)
+	value := time.Date(2026, time.May, 1, 10, 0, 0, 0, time.Local)
+	tt := pickerCanvas(th, func(c *ui.Context) {
+		TimePicker(c, &value, TimePickerOptions{HourCycle: 12})
+	})
+	tt.Advance(300 * time.Millisecond)
+	if err := tt.Click("Minute"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Advance(600 * time.Millisecond)
+	info, cx, cy := dialInfo(t, tt)
+
+	tt.Press(dialPoint(cx, cy, 350, timeDialOuterR))
+	tt.Move(dialPoint(cx, cy, 355, timeDialOuterR))
+	tt.Move(dialPoint(cx, cy, 358, timeDialOuterR))
+	tt.Release(dialPoint(cx, cy, 358, timeDialOuterR))
+	tt.Advance(120 * time.Millisecond)
+	if value.Minute() != 0 {
+		t.Fatalf("the drag chose minute %d, want 0", value.Minute())
+	}
+	if got := dialHandAngle(th, tt, info.Bounds); angleDistance(got, 0) > 12 {
+		t.Fatalf("the hand sits at %.0f° right after the drag, want within 12° of 12 o'clock", got)
+	}
+}
+
+// TestTimePickerZeroValueKeepsPeriod checks that a zero value picks with the
+// hour now shows, keeping AM or PM.
+func TestTimePickerZeroValueKeepsPeriod(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor)
+	var value time.Time
+	tt := pickerCanvas(th, func(c *ui.Context) {
+		TimePicker(c, &value, TimePickerOptions{HourCycle: 12})
+	})
+	tt.Advance(300 * time.Millisecond)
+	_, cx, cy := dialInfo(t, tt)
+	pm := tt.Now().Hour() >= 12
+	tt.ClickAt(cx+timeDialOuterR, cy) // three o'clock
+	tt.Advance(600 * time.Millisecond)
+	want := 3
+	if pm {
+		want = 15
+	}
+	if value.Hour() != want {
+		t.Fatalf("a zero value chose %02d:00, want %02d:00 (%s)", value.Hour(), want, map[bool]string{true: "PM", false: "AM"}[pm])
+	}
+	if value.IsZero() {
+		t.Fatal("choosing an hour left the value zero")
+	}
+}
+
+// TestTimePickerInputLayoutAndClearing checks the colon and steppers center on
+// the fields, and that clearing a field with Backspace does not flash an error.
+func TestTimePickerInputLayoutAndClearing(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor)
+	value := time.Date(2026, time.May, 1, 10, 30, 0, 0, time.Local)
+	tt := pickerCanvas(th, func(c *ui.Context) {
+		TimePicker(c, &value, TimePickerOptions{HourCycle: 12})
+	})
+	tt.Advance(300 * time.Millisecond)
+	if err := tt.Click("Switch to input"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Advance(300 * time.Millisecond)
+
+	hour := buttonInfo(t, tt, ui.RoleTextField, "Hour")
+	minute := buttonInfo(t, tt, ui.RoleTextField, "Minute")
+	_, hourY := center(hour.Bounds)
+	// The colon sits between the hour stepper and the minute field; its ink
+	// must center on the fields rather than hang at the row's top.
+	img := tt.Image()
+	// The access bounds are the field's input text, 16 DIP inside its outlined
+	// container; the colon fills the gap just before the minute container.
+	containerLeft := float32(minute.Bounds.X - timePickerPad)
+	x0, x1 := int(containerLeft)-16, int(containerLeft)
+	top := int(hour.Bounds.Y) - (textFieldHeight-int(hour.Bounds.H))/2
+	bottom := top + textFieldHeight
+	inkTop, inkBottom, inkCount := 1<<30, -1, 0
+	for y := top; y < bottom; y++ {
+		for x := x0; x < x1; x++ {
+			if absColorDiff(img.RGBAAt(x, y), rgbOf(canvasRGB)) > 40 {
+				inkCount++
+				inkTop = min(inkTop, y)
+				inkBottom = max(inkBottom, y)
+			}
+		}
+	}
+	if inkCount == 0 {
+		t.Fatalf("the input mode paints no colon in [%d,%d)×[%d,%d)", x0, x1, top, bottom)
+	}
+	colonY := float32(inkTop+inkBottom) / 2
+	if math.Abs(float64(colonY-hourY)) > 3 {
+		t.Fatalf("the colon centers at %.1f, want the fields' %.1f", colonY, hourY)
+	}
+	up := buttonInfo(t, tt, ui.RoleButton, "Increase hour")
+	down := buttonInfo(t, tt, ui.RoleButton, "Decrease hour")
+	stepperY := (up.Bounds.Y + down.Bounds.Y + down.Bounds.H) / 2
+	if math.Abs(float64(stepperY-hourY)) > 3 {
+		t.Fatalf("the steppers center at %.1f, want the fields' %.1f", stepperY, hourY)
+	}
+
+	tt.ClickAt(center(hour.Bounds))
+	tt.Key(ui.Cmd, ui.KeyA)
+	tt.Key(0, ui.KeyBackspace)
+	tt.Advance(100 * time.Millisecond)
+	if info := buttonInfo(t, tt, ui.RoleTextField, "Hour"); info.Invalid {
+		t.Fatal("clearing the hour with Backspace flashed an error")
+	}
+	if value.Hour() != 10 {
+		t.Fatalf("clearing the field changed the hour to %d", value.Hour())
+	}
+	// Leaving the empty field shows the error as a committed edit.
+	tt.ClickAt(center(minute.Bounds))
+	tt.Advance(100 * time.Millisecond)
+	if info := buttonInfo(t, tt, ui.RoleTextField, "Hour"); !info.Invalid {
+		t.Fatal("leaving an empty hour does not show its error")
 	}
 }
 

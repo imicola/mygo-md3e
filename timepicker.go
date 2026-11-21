@@ -49,9 +49,10 @@ const (
 	timePickerWidth = 328
 	timePickerPad   = 16
 	timeDialSize    = 256
-	timeDialOuterR  = 100
-	timeDialInnerR  = 62
-	timeDialCircleR = 18
+	timeDialOuterR  = 102
+	timeDialInnerR  = 64
+	timeDialCircleR = 16
+	timeDialBlindR  = 14
 	timeFieldW      = 88
 	timeStepW       = 26
 	timeStepH       = 24
@@ -275,31 +276,34 @@ func sanitizeTimeMode(m TimePickerMode) TimePickerMode {
 }
 
 // timeTab builds one of the hours and minutes above the dial: a button that
-// chooses the segment, in Primary while active and with a short underline.
+// chooses the segment, filled in Primary with OnPrimary text while active, as
+// MD3E's time picker header has it.
 func timeTab(c *ui.Context, th *Theme, text, name string, active, disabled bool, choose func()) ui.Element {
 	cs := th.Colors
+	radius := float32(th.Shapes.Radius(tokens.ShapeSmall))
 	ink := cs.OnSurfaceVariant
+	container := ui.Color{}
 	if active {
-		ink = cs.Primary
+		ink = cs.OnPrimary
+		container = cs.Primary
 	}
 	if disabled {
 		ink = cs.OnSurface.Alpha(float32(tokens.DisabledContentOpacity))
+		if active {
+			container = cs.OnSurface.Alpha(float32(tokens.DisabledContainerOpacity))
+		}
 	}
 	tab := ui.ButtonBase(c).DimDisabled(false).FocusRing(false).
-		Padding(2, 6).Radius(float32(th.Shapes.Radius(tokens.ShapeSmall))).
+		Padding(2, 8).Radius(radius).
 		Role(ui.RoleTab).Label(name).AccessSelected(active).Disabled(disabled).
 		TextColor(ink)
+	if container.A > 0 {
+		tab.Background(container)
+	}
 	attachRippleWithTheme(th, tab, StateLayerOptions{
 		Color:    ink,
-		Radius:   float32(th.Shapes.Radius(tokens.ShapeSmall)),
+		Radius:   radius,
 		Disabled: disabled,
-	})
-	tab.Draw(func(p *ui.Painter, r ui.Rect) {
-		if !tab.Valid() || !active || r.W <= 0 || r.H <= 0 {
-			return
-		}
-		line := ui.Rect{X: r.X + 4, Y: r.Y + r.H - 2, W: r.W - 8, H: 2}
-		p.Fill(line, ink, 1)
 	})
 	tab.Children(func() {
 		txt := ui.Text(c, text).NoWrap().TextColor(ink)
@@ -332,61 +336,60 @@ func buildTimeDial(c *ui.Context, th *Theme, st *timePickerState, value *time.Ti
 		}
 		switch {
 		case st.segment == timeSegmentMinute:
-			setClock(value.Hour(), v)
+			// Keep the displayed hour, which is now's for a zero value, so a
+			// minute pick does not drop the half of the day.
+			setClock(h, v)
 		case hour12:
-			// Keep the half of the day the value is in: 12 on the dial is 12
-			// AM at midnight and 12 PM at noon.
-			setClock(value.Hour()/12*12+v%12, value.Minute())
+			// Keep the half of the day the shown hour is in: 12 on the dial is
+			// 12 AM at midnight and 12 PM at noon.
+			setClock(h/12*12+v%12, m)
 		default:
-			setClock(v, value.Minute())
+			setClock(v, m)
 		}
 		st.picked = true
 	}
 
-	dial.ObserveInput(func(ev ui.InputEvent) {
+	// HandleInput, not ObserveInput, so the dial keeps the moves and the
+	// release wherever the pointer goes: a drag released off the rim still
+	// ends, clears held, and advances to the minutes.
+	dial.HandleInput(func(ev ui.InputEvent) bool {
 		if disabled {
-			return
+			return false
 		}
 		switch ev.Kind {
 		case ui.InputPointerDown:
 			if ev.Button != 0 {
-				return
+				return false
 			}
 			st.held = true
 			st.picked = false
 			st.pressX, st.pressY = ev.X, ev.Y
 			pickAt(ev.X, ev.Y)
+			return true
 		case ui.InputPointerMove:
 			if !st.held || ev.Button != 0 {
-				return
+				return false
 			}
 			st.pressX, st.pressY = ev.X, ev.Y
 			pickAt(ev.X, ev.Y)
+			return true
 		case ui.InputPointerUp:
 			if !st.held {
-				return
+				return false
 			}
 			st.held = false
 			if ev.Canceled {
-				return
+				return true
 			}
 			st.pressX, st.pressY = ev.X, ev.Y
 			pickAt(ev.X, ev.Y)
 			if st.picked && st.segment == timeSegmentHour {
 				st.releaseAdvance = true
 			}
+			return true
 		}
+		return false
 	})
-
-	// While the pointer holds the dial, follow it: Dragged asks for a frame on
-	// each move and PointerPosition reads where it went, even off the rim.
-	if st.held {
-		if _, _, ok := dial.Dragged(); ok {
-			px, py, _ := dial.PointerPosition()
-			st.pressX, st.pressY = px, py
-			pickAt(px, py)
-		}
-	}
 
 	step := 0
 	switch {
@@ -429,8 +432,20 @@ func buildTimeDial(c *ui.Context, th *Theme, st *timePickerState, value *time.Ti
 		radius = dial.Jump(timeDialRadiusKey{}, targetRadius)
 		st.handPrev = targetAngle
 	case st.held:
-		angle = dial.Jump(timeDialAngleKey{}, dialAngleOf(st.pressX, st.pressY))
-		radius = dial.Jump(timeDialRadiusKey{}, dialDistanceOf(st.pressX, st.pressY))
+		if _, ok := dialPick(st.pressX, st.pressY, st.segment, hour12); ok {
+			// The hand follows the pointer's angle but rides the ring's real
+			// radius, so pulling off the rim never drags it toward the center,
+			// and handPrev moves with it so the release takes the short way.
+			angle = dial.Jump(timeDialAngleKey{}, dialAngleOf(st.pressX, st.pressY))
+			radius = dial.Jump(timeDialRadiusKey{}, dialSnapRadius(st.pressX, st.pressY, st.segment, hour12))
+			st.handPrev = angle
+		} else {
+			// Inside the blind center, hold the chosen value instead of
+			// spinning the hand around a point with no angle.
+			angle = dial.Jump(timeDialAngleKey{}, targetAngle)
+			radius = dial.Jump(timeDialRadiusKey{}, targetRadius)
+			st.handPrev = targetAngle
+		}
 	case reduce:
 		angle = dial.Jump(timeDialAngleKey{}, targetAngle)
 		radius = dial.Jump(timeDialRadiusKey{}, targetRadius)
@@ -486,14 +501,24 @@ func buildTimeDial(c *ui.Context, th *Theme, st *timePickerState, value *time.Ti
 // time applies at once and an invalid one shows its error on the next frame.
 func buildTimeInputs(c *ui.Context, th *Theme, st *timePickerState, value *time.Time, disabled, hour12 bool, h, m int, setClock func(h, m int)) {
 	cs := th.Colors
-	// Hour : Minute keeps its left-to-right order on a right-to-left page.
+	// Hour : Minute keeps its left-to-right order on a right-to-left page. The
+	// fields carry a 10 DIP top band and room for error text below, so the row
+	// starts its children at the top and the colon and steppers take explicit
+	// offsets onto the fields' 56 DIP boxes instead of centering on that
+	// composite height.
+	scale := max(float32(1), th.EffectiveTextScale())
+	fieldH := float32(textFieldHeight) * scale
+	colonStyle := typeStyleOfWithTheme(th, tokens.TitleLarge)
+	colonTop := textFieldOuterTop*scale + (fieldH-colonStyle.LineHeight)/2 - colonStyle.Size*0.18
+	stepTop := textFieldOuterTop*scale + (fieldH-float32(2*timeStepH+2))/2
 	row := ui.Row(c).FillWidth().Direction(ui.LeftToRight).AlignItems(ui.Start).Gap(8)
+	var hourField, minuteField ui.Element
 	row.Children(func() {
 		hourRange := "0–23"
 		if hour12 {
 			hourRange = "1–12"
 		}
-		TextField(c, &st.hourText, TextFieldOptions{
+		hourField = TextField(c, &st.hourText, TextFieldOptions{
 			Variant:      TextFieldOutlined,
 			Label:        "Hour",
 			Placeholder:  hourRange,
@@ -502,7 +527,7 @@ func buildTimeInputs(c *ui.Context, th *Theme, st *timePickerState, value *time.
 			Disabled:     disabled,
 			MaxLength:    2,
 		}).Width(timeFieldW)
-		timeStepColumn(c, th, disabled, "hour", func(delta int) {
+		timeStepColumn(c, th, stepTop, disabled, "hour", func(delta int) {
 			if hour12 {
 				half := h / 12 * 12
 				setClock(half+(h%12+delta+12)%12, m)
@@ -512,7 +537,10 @@ func buildTimeInputs(c *ui.Context, th *Theme, st *timePickerState, value *time.
 		})
 		colon := ui.Text(c, ":").NoWrap().TextColor(cs.OnSurfaceVariant)
 		applyTypeStyleWithTheme(th, colon, tokens.TitleLarge)
-		TextField(c, &st.minuteText, TextFieldOptions{
+		// A colon's ink sits in the lower half of its line box, so its line box
+		// starts that much higher to center the ink on the fields' text.
+		colon.Margin(colonTop, 0, 0, 0)
+		minuteField = TextField(c, &st.minuteText, TextFieldOptions{
 			Variant:      TextFieldOutlined,
 			Label:        "Minute",
 			Placeholder:  "0–59",
@@ -521,7 +549,7 @@ func buildTimeInputs(c *ui.Context, th *Theme, st *timePickerState, value *time.
 			Disabled:     disabled,
 			MaxLength:    2,
 		}).Width(timeFieldW)
-		timeStepColumn(c, th, disabled, "minute", func(delta int) {
+		timeStepColumn(c, th, stepTop, disabled, "minute", func(delta int) {
 			setClock(h, (m+delta+60)%60)
 		})
 	})
@@ -544,20 +572,23 @@ func buildTimeInputs(c *ui.Context, th *Theme, st *timePickerState, value *time.
 		}
 		setClock(hh, mm)
 	}
-	errChanged := st.applyTimeInputs(hour12, applyInput)
+	// FocusWithin reaches the text input inside each field; the field's outer
+	// box does not carry the focus itself.
+	errChanged := st.applyTimeInputs(hour12, hourField.FocusWithin(), minuteField.FocusWithin(), applyInput)
 	if errChanged || value.Hour() != beforeHour || value.Minute() != beforeMinute {
 		c.Invalidate()
 	}
 }
 
-// timeStepColumn builds the two small stepper buttons beside a field.
-func timeStepColumn(c *ui.Context, th *Theme, disabled bool, unit string, step func(delta int)) {
+// timeStepColumn builds the two small stepper buttons beside a field, top DIPs
+// down the row onto the field's box.
+func timeStepColumn(c *ui.Context, th *Theme, top float32, disabled bool, unit string, step func(delta int)) {
 	cs := th.Colors
 	ink := cs.OnSurfaceVariant
 	if disabled {
 		ink = cs.OnSurface.Alpha(float32(tokens.DisabledContentOpacity))
 	}
-	col := ui.Column(c).Width(timeStepW).Gap(2).Margin(10, 0, 0, 0)
+	col := ui.Column(c).Width(timeStepW).Gap(2).Margin(top, 0, 0, 0)
 	col.Children(func() {
 		up := timeStepButton(c, th, "Increase "+unit, mdicon.ChevronUp.Draw, ink, disabled)
 		if up.Clicked() {
@@ -587,8 +618,10 @@ func timeStepButton(c *ui.Context, th *Theme, name string, icon IconDraw, ink ui
 }
 
 // applyTimeInputs parses the two fields and applies a valid pair, reporting
-// whether an error state changed.
-func (st *timePickerState) applyTimeInputs(hour12 bool, setClock func(h, m int)) (errChanged bool) {
+// whether an error state changed. An empty field being edited is not an error
+// yet: clearing it with Backspace must not flash red, while an empty field the
+// user left, or a non-empty invalid one, shows its error at once.
+func (st *timePickerState) applyTimeInputs(hour12, hourFocused, minuteFocused bool, setClock func(h, m int)) (errChanged bool) {
 	hs := strings.TrimSpace(st.hourText)
 	ms := strings.TrimSpace(st.minuteText)
 	hi, herr := parseClockNumber(hs)
@@ -597,11 +630,12 @@ func (st *timePickerState) applyTimeInputs(hour12 bool, setClock func(h, m int))
 	if hour12 {
 		lo, hiTop = 1, 12
 	}
+	hourEmpty, minuteEmpty := hs == "", ms == ""
 	beforeHourErr, beforeMinuteErr := st.hourErr, st.minuteErr
-	st.hourErr = herr != nil || hi < lo || hi > hiTop
-	st.minuteErr = merr != nil || mi < 0 || mi > 59
+	st.hourErr = (!hourEmpty || !hourFocused) && (herr != nil || hi < lo || hi > hiTop)
+	st.minuteErr = (!minuteEmpty || !minuteFocused) && (merr != nil || mi < 0 || mi > 59)
 	errChanged = st.hourErr != beforeHourErr || st.minuteErr != beforeMinuteErr
-	if st.hourErr || st.minuteErr {
+	if st.hourErr || st.minuteErr || hourEmpty || minuteEmpty {
 		return errChanged
 	}
 	setClock(hi, mi)
@@ -650,7 +684,9 @@ type dialPaint struct {
 	disabled   bool
 }
 
-// drawTimeDial paints the dial's plate, hand, tick labels and selected circle.
+// drawTimeDial paints the dial's plate, hand, tick labels and selected circle
+// in three passes, so the circle covers no digit and every digit it does cover
+// is drawn again in its OnPrimary ink.
 func drawTimeDial(p *ui.Painter, r ui.Rect, d dialPaint) {
 	if r.W <= 0 || r.H <= 0 {
 		return
@@ -659,10 +695,6 @@ func drawTimeDial(p *ui.Painter, r ui.Rect, d dialPaint) {
 	cy := r.Y + r.H/2
 	plateR := min(r.W, r.H)/2 - 2
 	p.Fill(ui.Rect{X: cx - plateR, Y: cy - plateR, W: 2 * plateR, H: 2 * plateR}, d.background, plateR)
-
-	tipX, tipY := dialPoint(cx, cy, d.angle, d.radius)
-	p.Line(cx, cy, tipX, tipY, 2, d.handInk)
-	p.Fill(ui.Rect{X: cx - 4, Y: cy - 4, W: 8, H: 8}, d.handInk, 4)
 
 	labels := dialLabels(d.segment, d.hour12)
 	selHour := d.hour
@@ -674,28 +706,46 @@ func drawTimeDial(p *ui.Painter, r ui.Rect, d dialPaint) {
 	}
 	selectedLabel := -1
 	for _, label := range labels {
-		selected := d.segment == timeSegmentHour && label.value == selHour ||
-			d.segment == timeSegmentMinute && label.value == d.minute
-		ink := d.ink
-		if selected {
+		if d.segment == timeSegmentHour && label.value == selHour ||
+			d.segment == timeSegmentMinute && label.value == d.minute {
 			selectedLabel = label.value
-			continue
+			break
 		}
-		x, y := dialPoint(cx, cy, label.angle, label.radius)
-		paintCenteredSpan(p, x, y, ui.Span{Text: label.text, Size: 13, Weight: 500, Color: ink})
 	}
 
+	tipX, tipY := dialPoint(cx, cy, d.angle, d.radius)
+
+	// Pass 1: the plate, every tick in ink, the hand from the center to the
+	// tick, and the center dot. A ui.Path reaches any angle; Painter.Line
+	// would only draw the horizontal and vertical cases.
+	for _, label := range labels {
+		x, y := dialPoint(cx, cy, label.angle, label.radius)
+		paintCenteredSpan(p, x, y, ui.Span{Text: label.text, Size: 13, Weight: 500, Color: d.ink})
+	}
+	var hand ui.Path
+	hand.MoveTo(cx, cy)
+	hand.LineTo(tipX, tipY)
+	hand.Cap(ui.RoundCap)
+	p.StrokePath(&hand, 2, d.handInk)
+	p.Fill(ui.Rect{X: cx - 4, Y: cy - 4, W: 8, H: 8}, d.handInk, 4)
+
+	// Pass 2: the selection circle over the ticks it lands on.
 	circle := float32(timeDialCircleR)
-	p.Fill(ui.Rect{X: tipX - circle, Y: tipY - circle, W: 2 * circle, H: 2 * circle}, d.selectedBg, circle)
-	if selectedLabel >= 0 {
+	circleBox := ui.Rect{X: tipX - circle, Y: tipY - circle, W: 2 * circle, H: 2 * circle}
+	p.Fill(circleBox, d.selectedBg, circle)
+
+	// Pass 3: inside the circle, redraw every covered tick in OnPrimary so a
+	// "05" under the circle of a "06" stays readable, and mark a value that
+	// falls between ticks with a 4 DIP dot.
+	p.Clip(circleBox, circle, func() {
+		if selectedLabel < 0 {
+			p.Fill(ui.Rect{X: tipX - 2, Y: tipY - 2, W: 4, H: 4}, d.onSelected, 2)
+		}
 		for _, label := range labels {
-			if label.value != selectedLabel {
-				continue
-			}
 			x, y := dialPoint(cx, cy, label.angle, label.radius)
 			paintCenteredSpan(p, x, y, ui.Span{Text: label.text, Size: 13, Weight: 500, Color: d.onSelected})
 		}
-	}
+	})
 }
 
 // dialLabel is one number around the dial.
@@ -776,7 +826,7 @@ func dialTarget(h, m int, segment timeSegment, hour12 bool) (angle, radius float
 func dialPick(x, y float32, segment timeSegment, hour12 bool) (int, bool) {
 	angle := dialAngleOf(x, y)
 	dist := dialDistanceOf(x, y)
-	if dist < 14 {
+	if dist < timeDialBlindR {
 		return 0, false
 	}
 	idx := 0
@@ -802,6 +852,19 @@ func dialPick(x, y float32, segment timeSegment, hour12 bool) (int, bool) {
 		return 12, true
 	}
 	return idx, true
+}
+
+// dialSnapRadius returns the radius the hand rides at a point: the outer ring
+// for the minutes and the 12-hour hours, and the picked inner or outer ring
+// for the 24-hour hours.
+func dialSnapRadius(x, y float32, segment timeSegment, hour12 bool) float32 {
+	if segment == timeSegmentMinute || hour12 {
+		return timeDialOuterR
+	}
+	if dialDistanceOf(x, y) >= (timeDialOuterR+timeDialInnerR)/2 {
+		return timeDialOuterR
+	}
+	return timeDialInnerR
 }
 
 // dialAngleOf returns the angle of a point clockwise from the top.
