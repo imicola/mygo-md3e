@@ -174,3 +174,30 @@ MD3E 将动效分为 **Spatial（空间：位移、缩放、尺寸、圆角、�
 8. **Expressive List**：支持分节/独立卡片式列表项，首项顶部大圆角、中间项小圆角、末项底部大圆角，选中或按压时独立向大圆角/高亮色平滑过渡。
 9. **Expressive Slider & RangeSlider**：轨道高约 `16` DIP（或可配轨高），与拇指（竖直胶囊条 `4 × 44` DIP）之间留有明确的 **Track Gap（`6` DIP）**；离散步进显示停靠点（stop dots）；拖拽或聚焦时弹出上方水滴形（Teardrop）值标签；支持 Centered（从中心向两侧填充）与双滑块 RangeSlider。
 10. **Expressive Switch**：轨道 `52 × 32` DIP；未选中拇指 `16` DIP（无图标）或 `24` DIP（带 `×` 图标），选中态弹性放大至 `24` DIP（带 `✓` 图标），按压态瞬间扩大至 `28` DIP，使用 Fast Spatial 弹簧驱动。
+
+---
+
+## 6. 桌面密度系统、表面增强与 Adaptive 断点规格（M9）
+
+### 6.1 三档密度系统（`tokens.Density`）
+`DensityComfortable` 为零值默认档位，必须保持上述 M1–M8 全部像素规格 100% 不变；`DensityDesktop` 与 `DensityCompact` 在桌面生产力与高密度信息面板下按以下基线收敛（非法枚举值统一回退至 `DensityComfortable`）：
+
+| 密度档位 | ControlScale / PaddingScale | `ui.Theme.Spacing` | List（1 / 2 / 3 行） | Tabs 高度 | TextField 高度 | NavRail 默认展开宽 | Button 高度（XS / S / M / L / XL） |
+|---|---|---|---|---|---|---|---|
+| **`DensityComfortable`（默认零值）** | `1.00 / 1.00` | `4` | `56 / 72 / 88` | `48` | `56` | `256` | `32 / 40 / 56 / 96 / 136` |
+| **`DensityDesktop`** | `0.85 / 0.85` | `3.5` | `44 / 56 / 72` | `40` | `44` | `192` | `28 / 34 / 48 / 82 / 116` |
+| **`DensityCompact`** | `0.75 / 0.70` | `3` | `36 / 48 / 60` | `36` | `38` | `180` | `24 / 30 / 42 / 72 / 102` |
+
+### 6.2 `Surface` 与 `Card` 质感扩展
+- **Hairline 微高光描边**：`Hairline: true` 时在未指定 `BorderWidth`（或非 Outlined Card）时绘制 `1` DIP 精致描边；亮色模式默认低透明 `OutlineVariant`（`45%`），暗色模式混入 `15% OnSurface` 后取 `42%` 透明度形成柔和微高光，高对比度模式自动提升为不透明 `Outline` 保证清晰可见；可通过 `HairlineColor` 覆盖。
+- **渐变底色与装饰槽位**：支持 `LinearGradient` 与 `RadialGradient`（复用 `ui.Element` 渐变及多边形 `FillPathGradient`/`ClipPath`），支持 Ghost-Draw 安全的 `Backdrop func(p *ui.Painter, r ui.Rect)`（在形状裁切与有效非零尺寸内执行，严禁请求动画帧或读取元素交互态）。
+- **Card 圆角档位**：`CardOptions.ShapeScale` 支持选择 MD3E 圆角令牌（如 Bento 卡片使用 `ShapeLargeIncreased` / `ShapeExtraLarge`），零值保持 `ShapeMedium`，正有限值 `Radius` 仍优先覆盖。
+
+### 6.3 Adaptive 断点与桌面外壳
+- **WindowSizeClass 断点**：
+  - `WindowCompact`：`width < 600` DIP（含 `<= 0`、`NaN`、`-Inf` 安全回退）
+  - `WindowMedium`：`600 <= width < 840` DIP
+  - `WindowExpanded`：`width >= 840` DIP（含 `+Inf`）
+- **`AdaptiveScaffold`**：随断点自动在底部 `NavigationBar`（Compact）、折叠 `NavigationRail`（Medium）与展开 `NavigationRail`（Expanded）间切换，并保持内容槽位位于稳定父级与固定 `Key` 下，确保局部状态不因窗口缩放丢失。
+- **`ListDetailPane` / `SupportingPane` / `BentoGrid`**：复用上游 `ui.Split`/`ui.SplitPercent` + `.SplitReset(...)` 与 `ui.Grid`，在 `WindowCompact` 下自动退化为单栏堆叠/受控单页视图，完整支持 RTL 镜像。
+- **`WindowTitleBar`**：基于 `c.TitleBar()` 自动预留 macOS 左交通灯与 Windows/Linux 系统按钮物理安全区，支持 `DragWindow()`、`.MaximizeButton()` 与零后端耦合的 `WindowController`（`*mygo.Window` 原生满足该接口）。

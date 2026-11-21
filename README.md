@@ -120,9 +120,9 @@ Key conventions:
 ├── motion/            # Expressive & Standard spring physics (ζ -> c conversion, 12 motion tokens)
 ├── shape/             # RoundedPolygon primitives, 35 built-in MD3E shapes, bijective cubic Bézier Morph
 ├── internal/mdicon/   # Zero-registry 24x24 vector icons used by library chrome
-├── theme.go           # Theme, ThemeFromSeed, DefaultTheme, ThemeScope, CurrentTheme, Preferences bridge
-├── surface.go         # Surface container, tonal elevation, key/ambient shadows
-├── typography.go      # Text, ApplyTypeStyle, TypeStyleOf
+├── theme.go           # Theme (with Density & MonoFont), ThemeFromSeed, DefaultTheme, ThemeScope, CurrentTheme
+├── surface.go         # Surface container, tonal elevation, shadows, Hairline, gradients, Backdrop slot
+├── typography.go      # Text, TextWith, TabularNums, TruncateMode, ApplyTypeStyle, TypeStyleOf
 ├── ripple.go          # AttachStateLayer, AttachRipple (DrawOver state tracking + pointer-origin ripples)
 ├── button.go …        # Actions & bars: Button, IconButton, ButtonGroup, SplitButton, FAB, FABMenu, FloatingToolbar, AppBar
 ├── switch.go …        # Selection & inputs: Switch, Checkbox, Radio, Slider, RangeSlider, Chips, TextField, TextArea
@@ -130,6 +130,8 @@ Key conventions:
 ├── card.go …          # Containers, navigation & overlays: Card, Divider, List, NavBar/Rail/Drawer, Tabs, Carousel, Dialog, Sheet, Menu
 ├── datepicker.go      # DatePicker (Docked / Modal) & DateRangePicker
 ├── timepicker.go      # TimePicker (Dial / Input, 12h / 24h)
+├── shell.go           # Desktop WindowTitleBar & WindowController
+├── adaptive.go        # WindowSizeClass, AdaptiveScaffold, ListDetailPane, SupportingPane, BentoGrid/BentoSpan
 ├── docs/              # Architecture guide & MD3E specification baseline
 └── examples/
     ├── gallery/       # Full interactive showcase application (part of root module)
@@ -149,7 +151,7 @@ Dependencies are strictly acyclic: `tokens` -> `motion` -> `shape` -> root `md3e
 | Color Space & Contrast | `tokens.HCT`, `tokens.HCTFromColor`, `tokens.CAM16`, `tokens.ContrastRatio`, `tokens.ContrastTone` |
 | Tonal & Dynamic Schemes | `tokens.TonalPalette`, `tokens.NewDynamicScheme` (`TonalSpot`, `Expressive`, `Vibrant`, `Neutral`, `Monochrome`, `Fidelity`, `Content`) |
 | Contrast Levels | `tokens.ContrastStandard`, `tokens.ContrastMedium`, `tokens.ContrastHigh` |
-| Shape, Size, Type & Elevation | `tokens.ShapeScale` (`ShapeNone`..`ShapeFull`), `tokens.SizeTier` (`SizeXS`..`SizeXL`), `tokens.TypeRole`, `tokens.NewTypographyScale`, `tokens.ElevationLevel` (`Level0`..`Level5`) |
+| Shape, Size, Density, Type & Elevation | `tokens.ShapeScale` (`ShapeNone`..`ShapeFull`), `tokens.SizeTier` (`SizeXS`..`SizeXL`), `tokens.Density` (`DensityComfortable`, `DensityDesktop`, `DensityCompact`), `tokens.DensitySpec`, `tokens.TypeRole`, `tokens.NewTypographyScale`, `tokens.ElevationLevel` (`Level0`..`Level5`) |
 
 ### Motion & Shapes (`motion`, `shape`)
 
@@ -162,7 +164,7 @@ Dependencies are strictly acyclic: `tokens` -> `motion` -> `shape` -> root `md3e
 
 ### Core Primitives (`md3e`)
 
-`Theme`, `ThemeOptions`, `ThemeFromSeed`, `DefaultTheme`, `ThemeScope`, `CurrentTheme`, `DefaultSeedColor`, `ShapeScale`, `DefaultShapeScale`, `Surface`, `SurfaceColorForElevation`, `ApplyTonalElevation`, `ApplyElevationShadows`, `Text`, `ApplyTypeStyle`, `TypeStyleOf`, `AttachStateLayer`, `AttachRipple`, `IconDraw`.
+`Theme`, `ThemeOptions`, `ThemeFromSeed`, `DefaultTheme`, `ThemeScope`, `CurrentTheme`, `DefaultSeedColor`, `ShapeScale`, `DefaultShapeScale`, `Surface`, `SurfaceOptions`, `SurfaceColorForElevation`, `ApplyTonalElevation`, `ApplyElevationShadows`, `Text`, `TextWith`, `TextOptions`, `TruncateMode`, `TabularNums`, `ApplyTypeStyle`, `TypeStyleOf`, `AttachStateLayer`, `AttachRipple`, `IconDraw`.
 
 ### Actions & Bars
 
@@ -209,6 +211,7 @@ Dependencies are strictly acyclic: `tokens` -> `motion` -> `shape` -> root `md3e
 | Dialogs & BottomSheet | `AlertDialog`, `FullScreenDialog`, `BottomSheet` |
 | Menus | `DropdownMenu`, `MenuButton`, `ContextMenu` |
 | Date & Time Pickers | `DatePicker`, `DateRangePicker`, `TimePicker` |
+| Desktop Shell & Adaptive Layouts | `WindowTitleBar`, `WindowController`, `WindowSizeClass`, `WindowSizeClassForWidth`, `WindowSizeClassOf`, `AdaptiveScaffold`, `ListDetailPane`, `SupportingPane`, `BentoGrid`, `BentoSpan` |
 
 ---
 

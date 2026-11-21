@@ -15,13 +15,15 @@ Go 模块路径：`github.com/imicola/mygo-md3e`（直接依赖上游 `github.co
 ├── doc.go                  # 根包概览与版本声明
 ├── docs/
 │   ├── architecture.md     # 本文件：架构与 API 设计范式
-│   └── md3e-spec.md        # MD3E 精确设计令牌与组件行为规格
+│   ├── md3e-spec.md        # MD3E 精确设计令牌与组件行为规格
+│   └── ROADMAP.md          # Phase 2 演进路线图与里程碑进度
 ├── go.mod / go.sum
-├── tokens/                 # M1: 纯 Go MD3E 设计令牌与 HCT 色彩引擎（无 UI 状态依赖）
+├── tokens/                 # M1/M9: 纯 Go MD3E 设计令牌与 HCT 色彩引擎（无 UI 状态依赖）
 │   ├── hct.go              # sRGB/XYZ/Lab/CAM16/HCT 转换、对比度计算
 │   ├── palette.go          # TonalPalette & CorePalette
 │   ├── scheme.go           # DynamicScheme (TonalSpot/Expressive/Vibrant/...) & 45+ ColorRoles
 │   ├── size.go             # XS..XL 尺寸档位（SizeTier / SizeSpec）
+│   ├── density.go          # M9: Comfortable / Desktop / Compact 三档密度规格与 ButtonSpec
 │   ├── shape.go            # CornerRadius / ShapeScale tokens
 │   ├── type.go             # TypographyScale（含 Emphasized 强调样式）
 │   └── elevation.go        # Elevation Level 0..5 阴影与表面色调混合参数
@@ -34,9 +36,9 @@ Go 模块路径：`github.com/imicola/mygo-md3e`（直接依赖上游 `github.co
 │   └── draw.go             # ui.Painter 辅助绘制/裁切函数
 ├── internal/
 │   └── mdicon/             # M3: 内置无外部依赖矢量路径/图标（Check, Close, Chevron, Search...）
-├── theme.go                # M3: md3e.Theme、ThemeScope、系统偏好桥接、ui.Theme 转换
-├── surface.go              # M3: Surface 容器、Elevation 阴影/Tonal 叠色
-├── typography.go           # M3: Text、ApplyTypeStyle 与 TypeStyleOf 排版辅助
+├── theme.go                # M3/M9: md3e.Theme（含 Density/MonoFont）、ThemeScope、系统偏好桥接、ui.Theme 转换
+├── surface.go              # M3/M9: Surface 容器、Elevation 阴影/Tonal 叠色、Hairline/渐变/Backdrop
+├── typography.go           # M3/M9: Text、TextWith、TabularNums、ApplyTypeStyle 与 TypeStyleOf 排版辅助
 ├── ripple.go               # M3: StateLayer 状态层（Hover/Focus/Pressed/Dragged）与 Expressive Ripple
 ├── button.go               # M4: Expressive Button (Filled/Tonal/Elevated/Outlined/Text × XS-XL)
 ├── iconbutton.go           # M4: IconButton & ToggleIconButton（Round/Square 变形）
@@ -70,6 +72,8 @@ Go 模块路径：`github.com/imicola/mygo-md3e`（直接依赖上游 `github.co
 ├── menu.go                 # M7: Expressive Menu / DropdownMenu / ContextMenu 样式
 ├── datepicker.go           # M8: DatePicker (Docked / Modal) & DateRangePicker
 ├── timepicker.go           # M8: TimePicker (Dial / Input)
+├── shell.go                # M9: WindowTitleBar 与 WindowController（零后端耦合的桌面标题栏外壳）
+├── adaptive.go             # M9: WindowSizeClass、AdaptiveScaffold、ListDetailPane、SupportingPane、BentoGrid
 ├── golden_test.go          # 纯几何 Golden 视觉基线测试（testdata/）
 └── examples/
     ├── m2-demo/            # M2: 独立可运行的令牌/动效/形状预览模块

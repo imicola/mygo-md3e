@@ -120,9 +120,9 @@ func main() {
 ├── motion/            # Expressive / Standard 物理弹簧系统（ζ -> c 换算与 12 档预设）
 ├── shape/             # RoundedPolygon 基元、35 种内置 MD3E 形状与双向 Cubic Bézier Morph
 ├── internal/mdicon/   # 内置零全局注册表的 24×24 矢量图标
-├── theme.go           # Theme / ThemeFromSeed / DefaultTheme / ThemeScope / CurrentTheme / 偏好桥接
-├── surface.go         # Surface 容器、Tonal Elevation、Key/Ambient 阴影
-├── typography.go      # Text / ApplyTypeStyle / TypeStyleOf
+├── theme.go           # Theme（含 Density 与 MonoFont）/ ThemeFromSeed / DefaultTheme / ThemeScope / CurrentTheme
+├── surface.go         # Surface 容器、Tonal Elevation、阴影、Hairline 微高光、渐变与 Backdrop 装饰槽
+├── typography.go      # Text / TextWith / TabularNums / TruncateMode / ApplyTypeStyle / TypeStyleOf
 ├── ripple.go          # AttachStateLayer / AttachRipple（DrawOver 态层与指针起点涟漪）
 ├── button.go …        # 操作与栏：Button、IconButton、ButtonGroup、SplitButton、FAB、FABMenu、FloatingToolbar、AppBar
 ├── switch.go …        # 选择与输入：Switch、Checkbox、Radio、Slider、RangeSlider、Chips、TextField、TextArea
@@ -130,6 +130,8 @@ func main() {
 ├── card.go …          # 容器、导航与浮层：Card、Divider、List、NavBar/Rail/Drawer、Tabs、Carousel、Dialog、Sheet、Menu
 ├── datepicker.go      # DatePicker（Docked / Modal）与 DateRangePicker
 ├── timepicker.go      # TimePicker（Dial / Input，12h / 24h）
+├── shell.go           # 桌面标题栏 WindowTitleBar 与 WindowController
+├── adaptive.go        # WindowSizeClass、AdaptiveScaffold、ListDetailPane、SupportingPane、BentoGrid/BentoSpan
 ├── docs/              # 架构设计规范与 MD3E 技术规格基线
 └── examples/
     ├── gallery/       # 全量交互式展示画廊（属于根模块）
@@ -149,7 +151,7 @@ func main() {
 | HCT / CAM16 色彩空间与对比度 | `tokens.HCT`、`tokens.HCTFromColor`、`tokens.CAM16`、`tokens.ContrastRatio`、`tokens.ContrastTone` |
 | 色调调色板与动态配色 | `tokens.TonalPalette`、`tokens.NewDynamicScheme`（7 种 Variant：`TonalSpot` / `Expressive` / `Vibrant` / `Neutral` / `Monochrome` / `Fidelity` / `Content`） |
 | 对比度等级 | `tokens.ContrastStandard`、`tokens.ContrastMedium`、`tokens.ContrastHigh` |
-| 形状、尺寸、字体与高度 | `tokens.ShapeScale`（`ShapeNone`..`ShapeFull`）、`tokens.SizeTier`（`SizeXS`..`SizeXL`）、`tokens.TypeRole`、`tokens.NewTypographyScale`、`tokens.ElevationLevel`（`Level0`..`Level5`） |
+| 形状、尺寸、密度、字体与高度 | `tokens.ShapeScale`（`ShapeNone`..`ShapeFull`）、`tokens.SizeTier`（`SizeXS`..`SizeXL`）、`tokens.Density`（`DensityComfortable` / `DensityDesktop` / `DensityCompact`）、`tokens.DensitySpec`、`tokens.TypeRole`、`tokens.NewTypographyScale`、`tokens.ElevationLevel`（`Level0`..`Level5`） |
 
 ### 动效与形状（`motion` / `shape`）
 
@@ -162,7 +164,7 @@ func main() {
 
 ### 主题与基础设施（`md3e`）
 
-`Theme`、`ThemeOptions`、`ThemeFromSeed`、`DefaultTheme`、`ThemeScope`、`CurrentTheme`、`DefaultSeedColor`、`ShapeScale`、`DefaultShapeScale`、`Surface`、`SurfaceColorForElevation`、`ApplyTonalElevation`、`ApplyElevationShadows`、`Text`、`ApplyTypeStyle`、`TypeStyleOf`、`AttachStateLayer`、`AttachRipple`、`IconDraw`。
+`Theme`、`ThemeOptions`、`ThemeFromSeed`、`DefaultTheme`、`ThemeScope`、`CurrentTheme`、`DefaultSeedColor`、`ShapeScale`、`DefaultShapeScale`、`Surface`、`SurfaceOptions`、`SurfaceColorForElevation`、`ApplyTonalElevation`、`ApplyElevationShadows`、`Text`、`TextWith`、`TextOptions`、`TruncateMode`、`TabularNums`、`ApplyTypeStyle`、`TypeStyleOf`、`AttachStateLayer`、`AttachRipple`、`IconDraw`。
 
 ### 操作与栏
 
@@ -209,6 +211,7 @@ func main() {
 | 对话框与底部抽屉 | `AlertDialog`、`FullScreenDialog`、`BottomSheet` |
 | 菜单 | `DropdownMenu`、`MenuButton`、`ContextMenu` |
 | 日期与时间选择器 | `DatePicker`、`DateRangePicker`、`TimePicker` |
+| 桌面外壳与 Adaptive 布局 | `WindowTitleBar`、`WindowController`、`WindowSizeClass`、`WindowSizeClassForWidth`、`WindowSizeClassOf`、`AdaptiveScaffold`、`ListDetailPane`、`SupportingPane`、`BentoGrid`、`BentoSpan` |
 
 ---
 
