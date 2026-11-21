@@ -437,6 +437,261 @@ func TestGalleryOverlays(t *testing.T) {
 	}
 }
 
+// realViewports are window sizes that leave the pages to scroll, as a real
+// window does, unlike galleryTester's tall test window.
+var realViewports = []struct {
+	name string
+	w, h int
+}{
+	{"1360x900", 1360, 900},
+	{"960x640", 960, 640},
+}
+
+// realGalleryTester builds the gallery at a real window size and turns reduce
+// motion on so pages and scrolling settle.
+func realGalleryTester(t *testing.T, w, h int) (*app, *ui.Tester) {
+	t.Helper()
+	a := newApp()
+	tt := ui.NewTester(a.view, w, h)
+	tt.Frame()
+	if err := tt.Click("Reduce motion"); err != nil {
+		t.Fatalf("click Reduce motion: %v", err)
+	}
+	tt.Advance(200 * time.Millisecond)
+	return a, tt
+}
+
+// pageScrollPoint is a point in the page's scroll viewport, clear of the rail,
+// the header and the page's own controls, where a wheel reaches the scroll.
+func pageScrollPoint(a *app, w, h int) (float32, float32) {
+	if a.rtl {
+		return 10, float32(h) / 2
+	}
+	return 90, float32(h) / 2
+}
+
+// wheelPage turns the wheel over the page's scroll viewport, dy DIPs down.
+func wheelPage(tt *ui.Tester, a *app, w, h int, dy float32) {
+	x, y := pageScrollPoint(a, w, h)
+	tt.Wheel(x, y, 0, dy)
+	tt.Advance(400 * time.Millisecond)
+}
+
+// pageBottomMarker is the text or control at the bottom of a page, as its
+// accessible name, that scrolling must bring into view.
+func pageBottomMarker(a *app, path string) string {
+	if path == "/shapes" {
+		if n := len(a.shapes.all); n > 0 {
+			return "Morph to " + a.shapes.all[n-1].Name
+		}
+	}
+	markers := map[string]string{
+		"/theme":      "Level 5",
+		"/motion":     "Indeterminate wavy",
+		"/actions":    "Floating toolbar",
+		"/inputs":     "Select: Compact",
+		"/feedback":   "Archive",
+		"/navigation": "Uncontained",
+		// The Time pickers section's own heading can scroll above a narrow
+		// window; its last field is what the page's bottom shows.
+		"/overlays": "Reminder",
+	}
+	if marker := markers[path]; marker != "" {
+		return marker
+	}
+	return ""
+}
+
+// visibleBounds returns the clipped bounds of the first showing accessible
+// element named name.
+func visibleBounds(tt *ui.Tester, name string) (ui.Rect, bool) {
+	for _, info := range tt.AccessAll() {
+		if info.Name != name || info.Offscreen {
+			continue
+		}
+		if info.Bounds.W > 0 && info.Bounds.H > 0 {
+			return info.Bounds, true
+		}
+	}
+	return ui.Rect{}, false
+}
+
+// checkInsideViewport fails when r is not wholly inside the window.
+func checkInsideViewport(t *testing.T, where string, r ui.Rect, w, h int) {
+	t.Helper()
+	if r.X < -0.5 || r.Y < -0.5 || r.X+r.W > float32(w)+0.5 || r.Y+r.H > float32(h)+0.5 {
+		t.Fatalf("%s at %v lies outside the %dx%d window", where, r, w, h)
+	}
+}
+
+// checkHorizontalBounds fails when any accessible element of the page lies
+// outside the window sideways, as the inset divider once did.
+func checkHorizontalBounds(t *testing.T, tt *ui.Tester, where string, w int) {
+	t.Helper()
+	for _, info := range tt.AccessAll() {
+		if info.Offscreen || info.Bounds.W <= 0 || info.Bounds.H <= 0 {
+			continue
+		}
+		b := info.Bounds
+		if b.X < -0.5 || b.X+b.W > float32(w)+0.5 {
+			t.Errorf("%s: %v %q at %v runs past the %d DIP window", where, info.Role, info.Name, b, w)
+		}
+	}
+}
+
+// TestGalleryPagesScrollAtRealViewports checks that each page scrolls at
+// 1360x900 and 960x640, bringing its bottom into view for a click.
+func TestGalleryPagesScrollAtRealViewports(t *testing.T) {
+	for _, vp := range realViewports {
+		t.Run(vp.name, func(t *testing.T) {
+			a, tt := realGalleryTester(t, vp.w, vp.h)
+			for _, route := range galleryRoutes {
+				gotoRoute(t, a, tt, route.path)
+				marker := pageBottomMarker(a, route.path)
+				if marker == "" {
+					t.Fatalf("%s has no bottom marker", route.path)
+				}
+				if _, ok := visibleBounds(tt, marker); ok {
+					t.Fatalf("%s shows its bottom %q before scrolling", route.path, marker)
+				}
+				wheelPage(tt, a, vp.w, vp.h, 20000)
+				bounds, ok := visibleBounds(tt, marker)
+				if !ok {
+					t.Fatalf("%s does not scroll its bottom %q into view", route.path, marker)
+				}
+				checkInsideViewport(t, route.path+" "+marker, bounds, vp.w, vp.h)
+				if err := tt.Click(marker); err != nil {
+					t.Fatalf("click the scrolled %q of %s: %v", marker, route.path, err)
+				}
+				tt.Advance(300 * time.Millisecond)
+				if route.path == "/inputs" {
+					tt.Key(0, ui.KeyEscape)
+					tt.Advance(300 * time.Millisecond)
+				}
+				checkHorizontalBounds(t, tt, route.path+" scrolled", vp.w)
+			}
+		})
+	}
+}
+
+// TestGalleryScrollbarDragsPage checks that dragging the page scroll bar's
+// thumb to its end brings the bottom of a page into view.
+func TestGalleryScrollbarDragsPage(t *testing.T) {
+	for _, vp := range realViewports {
+		t.Run(vp.name, func(t *testing.T) {
+			a, tt := realGalleryTester(t, vp.w, vp.h)
+			gotoRoute(t, a, tt, "/theme")
+			wheelPage(tt, a, vp.w, vp.h, -20000)
+			title, ok := visibleBounds(tt, "Theme, Typography & Color Roles")
+			if !ok {
+				t.Fatal("the theme page is not at its top after scrolling up")
+			}
+			top := title.Y - 24 // the page's top padding
+			x := float32(vp.w) - 6
+			if a.rtl {
+				x = 6
+			}
+			tt.Press(x, top+10)
+			tt.Advance(50 * time.Millisecond)
+			tt.Move(x, float32(vp.h)-4)
+			tt.Advance(50 * time.Millisecond)
+			tt.Release(x, float32(vp.h)-4)
+			tt.Advance(600 * time.Millisecond)
+			bounds, ok := visibleBounds(tt, "Level 5")
+			if !ok {
+				t.Fatal("dragging the scroll bar does not reach the page's bottom")
+			}
+			checkInsideViewport(t, "the dragged page's Level 5", bounds, vp.w, vp.h)
+			if err := tt.Click("Level 5"); err != nil {
+				t.Fatalf("click Level 5 after dragging the scroll bar: %v", err)
+			}
+		})
+	}
+}
+
+// TestGalleryRoutesKeepTheirOwnScroll checks that one page's scroll does not
+// follow the rail to another, and comes back with the first page.
+func TestGalleryRoutesKeepTheirOwnScroll(t *testing.T) {
+	for _, vp := range realViewports {
+		t.Run(vp.name, func(t *testing.T) {
+			a, tt := realGalleryTester(t, vp.w, vp.h)
+			gotoRoute(t, a, tt, "/theme")
+			wheelPage(tt, a, vp.w, vp.h, 20000)
+			if _, ok := visibleBounds(tt, "Level 5"); !ok {
+				t.Fatal("the theme page does not scroll to its bottom")
+			}
+
+			gotoRoute(t, a, tt, "/shapes")
+			top, ok := visibleBounds(tt, "Shapes & Morph Playground")
+			if !ok {
+				t.Fatal("the shapes page does not show its title")
+			}
+			if top.Y > 260 {
+				t.Fatalf("the shapes page starts at %.1f, inheriting the theme page's scroll", top.Y)
+			}
+			if _, ok := visibleBounds(tt, "Level 5"); ok {
+				t.Fatal("the shapes page still shows the theme page's bottom")
+			}
+
+			gotoRoute(t, a, tt, "/theme")
+			if _, ok := visibleBounds(tt, "Level 5"); !ok {
+				t.Fatal("the theme page does not come back scrolled where it was")
+			}
+		})
+	}
+}
+
+// TestGalleryRightToLeftScroll checks the rail moves to the right, pages still
+// scroll, and nothing runs past the window sideways.
+func TestGalleryRightToLeftScroll(t *testing.T) {
+	for _, vp := range realViewports {
+		t.Run(vp.name, func(t *testing.T) {
+			a, tt := realGalleryTester(t, vp.w, vp.h)
+			if err := tt.Click("RTL"); err != nil {
+				t.Fatalf("click RTL: %v", err)
+			}
+			tt.Advance(400 * time.Millisecond)
+			rail, ok := tt.AccessByRole(ui.RoleNavigation, "Gallery pages")
+			if !ok {
+				t.Fatal("the gallery rail is missing right to left")
+			}
+			if rail.Bounds.X < float32(vp.w)/2 {
+				t.Fatalf("right to left puts the rail at %.1f, not at the window's right", rail.Bounds.X)
+			}
+			gotoRoute(t, a, tt, "/theme")
+			wheelPage(tt, a, vp.w, vp.h, 20000)
+			bounds, ok := visibleBounds(tt, "Level 5")
+			if !ok {
+				t.Fatal("right to left pages do not scroll")
+			}
+			checkInsideViewport(t, "right-to-left Level 5", bounds, vp.w, vp.h)
+			if err := tt.Click("Level 5"); err != nil {
+				t.Fatalf("click Level 5 right to left: %v", err)
+			}
+			for _, route := range galleryRoutes {
+				gotoRoute(t, a, tt, route.path)
+				checkHorizontalBounds(t, tt, route.path+" right to left", vp.w)
+			}
+		})
+	}
+}
+
+// TestGalleryPagesStayInBounds checks every page at both real viewports, at
+// its top and its bottom, for controls or text running outside the window.
+func TestGalleryPagesStayInBounds(t *testing.T) {
+	for _, vp := range realViewports {
+		t.Run(vp.name, func(t *testing.T) {
+			a, tt := realGalleryTester(t, vp.w, vp.h)
+			for _, route := range galleryRoutes {
+				gotoRoute(t, a, tt, route.path)
+				checkHorizontalBounds(t, tt, route.path, vp.w)
+				wheelPage(tt, a, vp.w, vp.h, 20000)
+				checkHorizontalBounds(t, tt, route.path+" bottom", vp.w)
+			}
+		})
+	}
+}
+
 // indexOfShape is the catalog index of a shape name.
 func indexOfShape(a *app, name string) int {
 	for i, s := range a.shapes.all {
