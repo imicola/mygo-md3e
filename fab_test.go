@@ -1,6 +1,7 @@
 package md3e
 
 import (
+	"image"
 	"image/color"
 	"math"
 	"testing"
@@ -416,6 +417,68 @@ func TestFABMenuActionsAndDismiss(t *testing.T) {
 	tt.Advance(1200 * time.Millisecond)
 	if !tt.Focused("Create") {
 		t.Fatal("the close button did not return the focus to the trigger")
+	}
+}
+
+// TestFABMenuHidesTriggerUnderCloseButton checks that, while the menu shows,
+// the trigger's rounded square, icon and shadows stop painting around the
+// circular close button, even during its entry pose, and that closing shows the
+// trigger again at once with the keyboard focus back on it.
+func TestFABMenuHidesTriggerUnderCloseButton(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor)
+	opened := false
+	clicks := 0
+	items := fabMenuItems(2, &clicks)
+	tt := ui.NewTester(func(c *ui.Context) {
+		ThemeScope(c, th, func() {
+			ui.Box(c).Size(480, 360).Background(canvasRGB).Padding(24).
+				Justify(ui.End).AlignItems(ui.End).Children(func() {
+				FABMenu(c, items, FABMenuOptions{Open: &opened, Label: "Create"})
+			})
+		})
+	}, 480, 360)
+
+	trigger := buttonInfo(t, tt, ui.RoleButton, "Create")
+	tx, ty := center(trigger.Bounds)
+	tt.ClickAt(tx, ty)
+	if !opened {
+		t.Fatal("trigger click did not open the menu")
+	}
+	closeBtn := buttonInfo(t, tt, ui.RoleButton, "Close menu")
+	// The round close button sits in the trigger's square box; its corners lie
+	// outside both the close circle and the trigger's former rounded square's
+	// own roundings only in the diagonal band a corner probe samples. Nothing
+	// of the trigger may show there while the menu is open.
+	cornerProbe := func(img *image.RGBA) color.RGBA {
+		return img.RGBAAt(int(closeBtn.Bounds.X)+6, int(closeBtn.Bounds.Y)+6)
+	}
+	if px := cornerProbe(tt.Image()); absColorDiff(px, rgbOf(th.Colors.PrimaryContainer)) <= 20 {
+		t.Fatalf("open menu still paints the trigger's container in the close button corner: %v", px)
+	}
+	tt.Advance(1500 * time.Millisecond)
+	if tt.FramePending() {
+		t.Fatal("the open menu keeps asking for frames")
+	}
+	if px := cornerProbe(tt.Image()); absColorDiff(px, rgbOf(th.Colors.PrimaryContainer)) <= 20 {
+		t.Fatalf("the settled close button still shows the trigger's container at its corner: %v", px)
+	}
+
+	cx, cy := center(closeBtn.Bounds)
+	tt.ClickAt(cx, cy)
+	if opened {
+		t.Fatal("the close button did not close the menu")
+	}
+	tt.Frame()
+	if !tt.Focused("Create") {
+		t.Fatal("closing the menu did not return the focus to the trigger")
+	}
+	// The pointer still rests on the trigger, whose hover state layer darkens
+	// its container; move it away to read the plain container color.
+	tt.Move(10, 10)
+	tt.Advance(400 * time.Millisecond)
+	trigger = buttonInfo(t, tt, ui.RoleButton, "Create")
+	if px := fabContainerProbe(t, tt, trigger.Bounds); absColorDiff(px, rgbOf(th.Colors.PrimaryContainer)) > 4 {
+		t.Fatalf("the trigger did not show again at once after closing: %v", px)
 	}
 }
 

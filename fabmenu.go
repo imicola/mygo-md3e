@@ -126,6 +126,13 @@ func FABMenu(c *ui.Context, items []FABMenuItem, opts ...FABMenuOptions) ui.Elem
 	if !*open || disabled {
 		return trigger
 	}
+	// The circular close button covers the trigger while the menu shows. Hide
+	// the trigger's own rounded square, icon and shadows so they do not show
+	// around the circle, even while the close button is still scaling in;
+	// Opacity keeps the trigger's layout, bounds and handle, so closing can
+	// give the keyboard focus back to it. FABOptions.Visible would disable it
+	// instead and lose that focus.
+	trigger.Opacity(0)
 
 	scrim := th.Colors.Scrim
 	if scrim.A == 0 {
