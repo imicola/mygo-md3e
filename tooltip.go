@@ -212,6 +212,14 @@ func RichTooltip(c *ui.Context, anchor ui.Element, opts ...RichTooltipOptions) u
 	st.srv = c.Services()
 	st.delay = delay
 	st.anchorFocus = anchor.FocusVisible()
+	if inExitingOverlay(c) {
+		st.open = false
+		st.panelHovered = false
+		st.panelFocused = false
+		st.hoverSince = time.Time{}
+		st.leaveAt = time.Time{}
+		return anchor
+	}
 
 	// Check focus opening synchronously during build so keyboard Tab brings
 	// the tooltip up immediately on the same frame without waiting a paint pass.

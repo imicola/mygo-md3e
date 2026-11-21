@@ -68,6 +68,7 @@ type bottomSheetDragState struct {
 	needStart bool
 	release   bool
 	startY    float32
+	startH    float32
 	offset    float32
 }
 
@@ -93,6 +94,9 @@ func BottomSheet(c *ui.Context, open *bool, opts ...BottomSheetOptions) ui.Eleme
 	}
 	if open == nil {
 		return ui.Box(c).Size(0, 0)
+	}
+	if inExitingOverlay(c) && *open {
+		*open = false
 	}
 	th := CurrentTheme(c)
 	label := o.Label
@@ -185,11 +189,17 @@ func BottomSheet(c *ui.Context, open *bool, opts ...BottomSheetOptions) ui.Eleme
 			}
 			drag.active, drag.needStart, drag.release = true, true, false
 			drag.offset = 0
+			drag.startH = baseH
 			return true
 		case ui.InputPointerMove:
 			return drag.active
 		case ui.InputPointerUp:
 			if ev.Button != 0 {
+				return false
+			}
+			if ev.Canceled {
+				drag.active, drag.needStart, drag.release = false, false, false
+				drag.offset, drag.startH = 0, 0
 				return false
 			}
 			if drag.active {
@@ -214,6 +224,9 @@ func BottomSheet(c *ui.Context, open *bool, opts ...BottomSheetOptions) ui.Eleme
 		// Read the pointer in the scrim's stable axes before building the
 		// panel, so the sheet moving under the pointer never feeds back.
 		if !exiting && (drag.active || drag.release) {
+			if drag.startH <= 0 {
+				drag.startH = baseH
+			}
 			if _, y, _ := back.PointerPosition(); drag.needStart {
 				drag.startY, drag.offset = y, 0
 				drag.needStart = false
@@ -222,15 +235,20 @@ func BottomSheet(c *ui.Context, open *bool, opts ...BottomSheetOptions) ui.Eleme
 			}
 		} else if exiting {
 			drag.active, drag.needStart, drag.release = false, false, false
-			drag.offset = 0
+			drag.offset, drag.startH = 0, 0
 		}
 
+		startH := baseH
+		if drag.startH > 0 {
+			startH = drag.startH
+		}
 		dismissTriggered := false
 		if !exiting && drag.release {
 			drag.release = false
 			dy := drag.offset
 			drag.offset = 0
-			rawH := baseH - dy
+			drag.startH = 0
+			rawH := startH - dy
 			dismissAt := max(float32(bottomSheetDismissMin), minH*bottomSheetDismissShare)
 			if minH-rawH >= dismissAt {
 				st.exitHeight = minH
@@ -240,7 +258,7 @@ func BottomSheet(c *ui.Context, open *bool, opts ...BottomSheetOptions) ui.Eleme
 				c.Invalidate()
 			} else {
 				best := *detent
-				bestDist := absF32(rawH - baseH)
+				bestDist := absF32(rawH - startH)
 				for i := range detents {
 					if d := absF32(rawH - windowH*detents[i]); d < bestDist {
 						best, bestDist = i, d
@@ -256,45 +274,47 @@ func BottomSheet(c *ui.Context, open *bool, opts ...BottomSheetOptions) ui.Eleme
 			}
 		}
 
-		back.Children(func() {
-			rawH := baseH - drag.offset
-			panelBaseH := baseH
-			if exiting && st.exitHeight > 0 {
-				panelBaseH = st.exitHeight
-			} else if dismissTriggered {
-				panelBaseH = st.exitHeight
-			}
-			panel := bottomSheetPanel(c, th, panelBaseH, label, o, true, handleInput)
-			panel.Opacity(clampF32(show, 0, 1))
+		withExitingOverlay(c, exiting, func() {
+			back.Children(func() {
+				rawH := startH - drag.offset
+				panelBaseH := baseH
+				if exiting && st.exitHeight > 0 {
+					panelBaseH = st.exitHeight
+				} else if dismissTriggered {
+					panelBaseH = st.exitHeight
+				}
+				panel := bottomSheetPanel(c, th, panelBaseH, label, o, true, handleInput)
+				panel.Opacity(clampF32(show, 0, 1))
 
-			var height, slideY float32
-			switch {
-			case exiting || dismissTriggered:
-				height = panel.Jump(bottomSheetHeightKey{}, panelBaseH)
-				slideY = st.exitOffset + (1-clampF32(show, 0, 1))*max(height-st.exitOffset, 0)
-			case drag.active:
-				targetH := clampF32(rawH, minH, maxH)
-				height = panel.Jump(bottomSheetHeightKey{}, targetH)
-				dragTranslate := panel.Jump(bottomSheetDragOffsetKey{}, max(float32(0), minH-rawH))
-				slideY = (1-clampF32(show, 0, 1))*height + dragTranslate
-			default:
-				height = animateValue(panel, bottomSheetHeightKey{}, baseH, th.Animation(motion.DefaultSpatial), reduce)
-				dragTranslate := animateValue(panel, bottomSheetDragOffsetKey{}, 0, th.Animation(motion.FastSpatial), reduce)
-				slideY = (1-clampF32(show, 0, 1))*height + dragTranslate
-			}
-			panel.Height(height)
-			panel.Translate(0, slideY)
-			if !exiting && !dismissTriggered {
-				// The panel's own surface takes presses, so the scrim below never
-				// sees them.
-				panel.Clicked()
-				if back.Clicked() {
-					*open = false
+				var height, slideY float32
+				switch {
+				case exiting || dismissTriggered:
+					height = panel.Jump(bottomSheetHeightKey{}, panelBaseH)
+					slideY = st.exitOffset + (1-clampF32(show, 0, 1))*max(height-st.exitOffset, 0)
+				case drag.active:
+					targetH := clampF32(rawH, minH, maxH)
+					height = panel.Jump(bottomSheetHeightKey{}, targetH)
+					dragTranslate := panel.Jump(bottomSheetDragOffsetKey{}, max(float32(0), minH-rawH))
+					slideY = (1-clampF32(show, 0, 1))*height + dragTranslate
+				default:
+					height = animateValue(panel, bottomSheetHeightKey{}, baseH, th.Animation(motion.DefaultSpatial), reduce)
+					dragTranslate := animateValue(panel, bottomSheetDragOffsetKey{}, 0, th.Animation(motion.FastSpatial), reduce)
+					slideY = (1-clampF32(show, 0, 1))*height + dragTranslate
 				}
-				if back.OverlayShortcut(0, ui.KeyEscape) {
-					*open = false
+				panel.Height(height)
+				panel.Translate(0, slideY)
+				if !exiting && !dismissTriggered {
+					// The panel's own surface takes presses, so the scrim below never
+					// sees them.
+					panel.Clicked()
+					if back.Clicked() {
+						*open = false
+					}
+					if back.OverlayShortcut(0, ui.KeyEscape) {
+						*open = false
+					}
 				}
-			}
+			})
 		})
 	})
 	return anchor

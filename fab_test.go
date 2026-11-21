@@ -601,3 +601,42 @@ func TestFABRapidToggleAndMidAnimationReduceMotion(t *testing.T) {
 		t.Fatalf("ExtendedFAB did not snap collapsed after mid-flight ReduceMotion: collapsed=%v full=%v", collapsedW, fullW)
 	}
 }
+
+// TestFABMenuOverlayIsolation checks clicking a floating SnackbarHost action
+// above an open FABMenu does not dismiss FABMenu while empty scrim clicks do.
+func TestFABMenuOverlayIsolation(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor)
+	open := true
+	snack := &SnackbarState{}
+	snack.Show(SnackbarOptions{
+		Message:     "Draft",
+		ActionLabel: "Retry",
+		Duration:    5 * time.Second,
+	})
+	retried := 0
+	tt := ui.NewTester(func(c *ui.Context) {
+		ThemeScope(c, th, func() {
+			ui.Box(c).Size(480, 320).Background(canvasRGB).AlignItems(ui.End).Justify(ui.End).Padding(24).Children(func() {
+				FABMenu(c, []FABMenuItem{
+					{Label: "Note", Icon: mdicon.Star.Draw},
+					{Label: "Task", Icon: mdicon.Check.Draw},
+				}, FABMenuOptions{Open: &open, Label: "More", Icon: mdicon.Add.Draw, MenuLabel: "More menu"})
+				SnackbarHost(c, snack)
+			})
+		})
+	}, 480, 320)
+
+	tt.Advance(500 * time.Millisecond)
+	retryInfo := buttonInfo(t, tt, ui.RoleButton, "Retry")
+	tt.ClickAt(center(retryInfo.Bounds))
+	tt.Frame()
+	if !open {
+		t.Fatal("clicking Snackbar button dismissed FABMenu via PressedOutside")
+	}
+	_ = retried
+	tt.ClickAt(12, 12)
+	tt.Frame()
+	if open {
+		t.Fatal("clicking FABMenu backdrop scrim did not close FABMenu")
+	}
+}

@@ -1,12 +1,80 @@
 package md3e
 
 import (
+	"sync"
+
 	"github.com/egoist/mygo/ui"
 
 	"github.com/imicola/mygo-md3e/internal/mdicon"
 	"github.com/imicola/mygo-md3e/motion"
 	"github.com/imicola/mygo-md3e/tokens"
 )
+
+type exitingOverlaySlot struct {
+	srv   ui.Services
+	depth int
+}
+
+var (
+	exitingOverlayMu    sync.Mutex
+	exitingOverlaySlots [16]exitingOverlaySlot
+)
+
+func adjustExitingOverlayDepth(srv ui.Services, delta int) {
+	exitingOverlayMu.Lock()
+	defer exitingOverlayMu.Unlock()
+	for i := range exitingOverlaySlots {
+		if exitingOverlaySlots[i].srv == srv {
+			exitingOverlaySlots[i].depth += delta
+			if exitingOverlaySlots[i].depth <= 0 {
+				exitingOverlaySlots[i] = exitingOverlaySlot{}
+			}
+			return
+		}
+	}
+	if delta <= 0 {
+		return
+	}
+	for i := range exitingOverlaySlots {
+		if exitingOverlaySlots[i].srv == (ui.Services{}) {
+			exitingOverlaySlots[i] = exitingOverlaySlot{srv: srv, depth: delta}
+			return
+		}
+	}
+}
+
+func withExitingOverlay(c *ui.Context, exiting bool, fn func()) {
+	if !exiting || c == nil {
+		fn()
+		return
+	}
+	srv := c.Services()
+	if srv == (ui.Services{}) {
+		fn()
+		return
+	}
+	adjustExitingOverlayDepth(srv, 1)
+	defer adjustExitingOverlayDepth(srv, -1)
+	fn()
+}
+
+func inExitingOverlay(c *ui.Context) bool {
+	if c == nil {
+		return false
+	}
+	srv := c.Services()
+	if srv == (ui.Services{}) {
+		return false
+	}
+	exitingOverlayMu.Lock()
+	defer exitingOverlayMu.Unlock()
+	for i := range exitingOverlaySlots {
+		if exitingOverlaySlots[i].srv == srv && exitingOverlaySlots[i].depth > 0 {
+			return true
+		}
+	}
+	return false
+}
 
 // DialogAction is one button of an AlertDialog.
 type DialogAction struct {
@@ -90,6 +158,9 @@ func AlertDialog(c *ui.Context, open *bool, opts ...AlertDialogOptions) ui.Eleme
 	if open == nil {
 		return anchor
 	}
+	if inExitingOverlay(c) && *open {
+		*open = false
+	}
 	th := CurrentTheme(c)
 	cs := th.Colors
 	st := ui.Local(anchor, alertDialogStateKey{}, func() alertDialogState { return alertDialogState{} })
@@ -154,69 +225,71 @@ func AlertDialog(c *ui.Context, open *bool, opts ...AlertDialogOptions) ui.Eleme
 			back.Modal()
 		}
 		back.IgnoreInput(exiting).AccessHidden(exiting)
-		back.Children(func() {
-			panel := ui.Column(c).
-				Width(alertDialogWidth).
-				MaxWidthPercent(92).
-				Padding(alertDialogPadding).
-				Gap(16).
-				Radius(th.Shapes.Radius(tokens.ShapeExtraLarge)).
-				Background(SurfaceColorForElevation(th, tokens.Level3)).
-				TextColor(cs.OnSurface).
-				Role(ui.RoleAlertDialog).
-				Label(labelOr(o.Label, o.Headline)).
-				Opacity(clampF32(show, 0, 1)).
-				Scale(0.9+0.1*clampF32(show, 0, 1), 0.9+0.1*clampF32(show, 0, 1))
-			ApplyElevationShadows(th, panel, tokens.Level3)
-			// A press on the panel's own surface must not reach the scrim.
-			panel.Clicked()
-			if isPositiveFiniteF32(o.Width) {
-				panel.Width(o.Width)
-			}
-			panel.Children(func() {
-				if o.Icon != nil {
-					ui.Row(c).FillWidth().Justify(ui.Center).Children(func() {
-						drawIconBox(c, o.Icon, alertDialogIconSize, cs.Primary)
-					})
+		withExitingOverlay(c, exiting, func() {
+			back.Children(func() {
+				panel := ui.Column(c).
+					Width(alertDialogWidth).
+					MaxWidthPercent(92).
+					Padding(alertDialogPadding).
+					Gap(16).
+					Radius(th.Shapes.Radius(tokens.ShapeExtraLarge)).
+					Background(SurfaceColorForElevation(th, tokens.Level3)).
+					TextColor(cs.OnSurface).
+					Role(ui.RoleAlertDialog).
+					Label(labelOr(o.Label, o.Headline)).
+					Opacity(clampF32(show, 0, 1)).
+					Scale(0.9+0.1*clampF32(show, 0, 1), 0.9+0.1*clampF32(show, 0, 1))
+				ApplyElevationShadows(th, panel, tokens.Level3)
+				// A press on the panel's own surface must not reach the scrim.
+				panel.Clicked()
+				if isPositiveFiniteF32(o.Width) {
+					panel.Width(o.Width)
 				}
-				if o.Headline != "" {
-					title := ui.Text(c, o.Headline)
-					title.TextColor(cs.OnSurface)
-					applyTypeStyleWithTheme(th, title, tokens.HeadlineSmall)
-				}
-				if o.SupportingText != "" {
-					body := ui.Text(c, o.SupportingText)
-					body.TextColor(cs.OnSurfaceVariant)
-					applyTypeStyleWithTheme(th, body, tokens.BodyMedium)
-				}
-				if o.Content != nil {
-					scroll := ui.Scroll(c).MaxHeight(alertDialogContentLimit).Scrollbars(false)
-					scroll.Children(func() {
-						if content := o.Content(); content.Valid() {
-							content.FillWidth()
-						}
-					})
-				}
-				if o.Dismiss != nil || o.Confirm != nil {
-					actions := ui.Row(c).FillWidth().Justify(ui.End).Gap(8)
-					actions.Children(func() {
-						if o.Dismiss != nil && o.Dismiss.Label != "" {
-							dismiss := Button(c, o.Dismiss.Label, ButtonOptions{Variant: ButtonText})
-							if dismiss.Clicked() {
-								closeDialog()
+				panel.Children(func() {
+					if o.Icon != nil {
+						ui.Row(c).FillWidth().Justify(ui.Center).Children(func() {
+							drawIconBox(c, o.Icon, alertDialogIconSize, cs.Primary)
+						})
+					}
+					if o.Headline != "" {
+						title := ui.Text(c, o.Headline)
+						title.TextColor(cs.OnSurface)
+						applyTypeStyleWithTheme(th, title, tokens.HeadlineSmall)
+					}
+					if o.SupportingText != "" {
+						body := ui.Text(c, o.SupportingText)
+						body.TextColor(cs.OnSurfaceVariant)
+						applyTypeStyleWithTheme(th, body, tokens.BodyMedium)
+					}
+					if o.Content != nil {
+						scroll := ui.Scroll(c).MaxHeight(alertDialogContentLimit).Scrollbars(false)
+						scroll.Children(func() {
+							if content := o.Content(); content.Valid() {
+								content.FillWidth()
 							}
-						}
-						if o.Confirm != nil && o.Confirm.Label != "" {
-							confirm := Button(c, o.Confirm.Label, ButtonOptions{Variant: ButtonFilled})
-							if confirm.Clicked() && *open {
-								if o.Confirm.OnClick != nil {
-									o.Confirm.OnClick()
+						})
+					}
+					if o.Dismiss != nil || o.Confirm != nil {
+						actions := ui.Row(c).FillWidth().Justify(ui.End).Gap(8)
+						actions.Children(func() {
+							if o.Dismiss != nil && o.Dismiss.Label != "" {
+								dismiss := Button(c, o.Dismiss.Label, ButtonOptions{Variant: ButtonText})
+								if dismiss.Clicked() {
+									closeDialog()
 								}
-								*open = false
 							}
-						}
-					})
-				}
+							if o.Confirm != nil && o.Confirm.Label != "" {
+								confirm := Button(c, o.Confirm.Label, ButtonOptions{Variant: ButtonFilled})
+								if confirm.Clicked() && *open {
+									if o.Confirm.OnClick != nil {
+										o.Confirm.OnClick()
+									}
+									*open = false
+								}
+							}
+						})
+					}
+				})
 			})
 		})
 		if !exiting {

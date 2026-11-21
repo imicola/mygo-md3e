@@ -87,7 +87,7 @@ func DropdownMenu(c *ui.Context, label string, items []MenuItem, opts ...MenuOpt
 	th := CurrentTheme(c)
 	cs := th.Colors
 	buildTrigger := func(open *bool, grow bool) ui.Element {
-		if o.Disabled && *open {
+		if (o.Disabled || inExitingOverlay(c)) && *open {
 			*open = false
 		}
 		m := ui.MenuBase(c, open)
@@ -95,7 +95,7 @@ func DropdownMenu(c *ui.Context, label string, items []MenuItem, opts ...MenuOpt
 			Height(menuTriggerHeight).PaddingX(16).Gap(8).
 			Radius(menuTriggerRadius).Label(label).Disabled(o.Disabled)
 		disabled := o.Disabled || trigger.IsDisabled()
-		if disabled && *open {
+		if (disabled || inExitingOverlay(c)) && *open {
 			*open = false
 			c.Invalidate()
 		}
@@ -157,7 +157,7 @@ func MenuButton(c *ui.Context, label string, icon IconDraw, items []MenuItem, op
 	th := CurrentTheme(c)
 	cs := th.Colors
 	buildTrigger := func(open *bool) ui.Element {
-		if o.Disabled && *open {
+		if (o.Disabled || inExitingOverlay(c)) && *open {
 			*open = false
 		}
 		m := ui.MenuBase(c, open)
@@ -166,7 +166,7 @@ func MenuButton(c *ui.Context, label string, icon IconDraw, items []MenuItem, op
 			Radius(menuTriggerHeight / 2).
 			Label(label).Disabled(o.Disabled)
 		disabled := o.Disabled || trigger.IsDisabled()
-		if disabled && *open {
+		if (disabled || inExitingOverlay(c)) && *open {
 			*open = false
 			c.Invalidate()
 		}
@@ -226,7 +226,7 @@ func ContextMenu(c *ui.Context, target ui.Element, items []MenuItem, opts ...Men
 	if open == nil {
 		open = ui.Local(target, contextMenuOpenKey{}, func() bool { return false })
 	}
-	if o.Disabled || target.IsDisabled() {
+	if o.Disabled || target.IsDisabled() || inExitingOverlay(c) {
 		*open = false
 		return target
 	}

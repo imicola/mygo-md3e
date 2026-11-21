@@ -229,6 +229,9 @@ func SplitButton(c *ui.Context, label string, opts ...SplitButtonOptions) (group
 	}
 
 	if o.Menu != nil {
+		if inExitingOverlay(c) && *open {
+			*open = false
+		}
 		ui.PopoverBase(c, arrow, open, func(panel ui.Element) {
 			panel.Background(SurfaceColorForElevation(th, tokens.Level2)).
 				Radius(th.Shapes.Radius(tokens.ShapeExtraSmall)).

@@ -123,6 +123,12 @@ func FABMenu(c *ui.Context, items []FABMenuItem, opts ...FABMenuOptions) ui.Elem
 	if trigger.Clicked() && !disabled {
 		*open = !*open
 	}
+	if inExitingOverlay(c) {
+		if *open {
+			*open = false
+		}
+		return trigger
+	}
 	if !*open || disabled {
 		return trigger
 	}
@@ -180,7 +186,11 @@ func FABMenu(c *ui.Context, items []FABMenuItem, opts ...FABMenuOptions) ui.Elem
 				}
 			})
 
-			if closeBtn.Clicked() || panel.PressedOutside() || back.OverlayShortcut(0, ui.KeyEscape) {
+			// Absorb clicks on gaps within the menu column and dismiss via back.Clicked()
+			// rather than PressedOutside() so concurrent overlays (e.g. SnackbarHost)
+			// rendered above the FAB menu are unaffected.
+			panel.Clicked()
+			if closeBtn.Clicked() || back.Clicked() || back.OverlayShortcut(0, ui.KeyEscape) {
 				*open = false
 				handle.Focus(c)
 			}
@@ -205,7 +215,7 @@ func fabMenuCloseButton(c *ui.Context, th *Theme, trigger ui.Element, label stri
 		TextColor(th.Colors.OnPrimary).
 		Radius(fabMenuCloseSide / 2)
 	ApplyElevationShadows(th, btn, tokens.Level3)
-	attachRippleWithTheme(th, btn, StateLayerOptions{Color: th.Colors.OnPrimary, Radius: fabMenuCloseSide / 2})
+	attachRippleWithContext(c, th, btn, StateLayerOptions{Color: th.Colors.OnPrimary, Radius: fabMenuCloseSide / 2})
 	btn.AttachTo(trigger, ui.AnchorCenter, ui.AnchorCenter)
 
 	entered := ui.Local(btn, fabMenuPoseKey{}, func() bool { return false })
@@ -269,7 +279,7 @@ func fabMenuItem(c *ui.Context, th *Theme, item *FABMenuItem, i int, reduceMotio
 	}
 	btn.AnimatePose(pose, fabMenuEntryAnimation(th, delay))
 
-	attachRippleWithTheme(th, btn, StateLayerOptions{
+	attachRippleWithContext(c, th, btn, StateLayerOptions{
 		Color:    pal.content,
 		Radius:   fabMenuItemSide / 2,
 		Disabled: disabled,

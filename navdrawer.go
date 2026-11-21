@@ -233,8 +233,10 @@ func modalNavigationDrawer(c *ui.Context, th *Theme, items []NavigationDrawerIte
 				}
 			}
 
-			panel.Children(func() {
-				navDrawerContent(c, th, items, o, drag, exiting)
+			withExitingOverlay(c, exiting, func() {
+				panel.Children(func() {
+					navDrawerContent(c, th, items, o, drag, exiting)
+				})
 			})
 
 			var liveOffset float32
@@ -319,8 +321,10 @@ func inlineNavigationDrawer(c *ui.Context, th *Theme, items []NavigationDrawerIt
 	// closed, so no empty strip shows; make closing content inert and hidden
 	// immediately so it leaves focus order and the access tree as it shuts.
 	if *open || openWidth > 0.5 {
-		root.Children(func() {
-			navDrawerContent(c, th, items, o, nil, exiting)
+		withExitingOverlay(c, exiting, func() {
+			root.Children(func() {
+				navDrawerContent(c, th, items, o, nil, exiting)
+			})
 		})
 	}
 	return root

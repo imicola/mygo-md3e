@@ -814,3 +814,69 @@ func TestFullScreenSaveAndInfSanitization(t *testing.T) {
 		t.Fatalf("sanitized AlertDialog bounds invalid: %+v (ok=%v)", dlg.Bounds, ok)
 	}
 }
+
+// TestBottomSheetCancelDragAndExitingChildOverlayIsolation checks pointer
+// cancel during sheet drag reverts cleanly without dismissing or switching
+// detents, and closing a BottomSheet or AlertDialog immediately closes child
+// overlays inside its content so they cannot accept clicks mid-exit.
+func TestBottomSheetCancelDragAndExitingChildOverlayIsolation(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor)
+	open := true
+	detent := 1 // 100% height
+	menuOpen := false
+	itemClicks := 0
+	tt := containerCanvas(th, func(c *ui.Context) {
+		BottomSheet(c, &open, BottomSheetOptions{
+			Modal:   true,
+			Detents: []float32{0.5, 1},
+			Detent:  &detent,
+			Label:   "Sheet",
+			Content: func() ui.Element {
+				return ui.Column(c).Gap(8).Children(func() {
+					DropdownMenu(c, "Actions", []MenuItem{
+						{Label: "Delete Item", OnClick: func() { itemClicks++ }},
+					}, MenuOptions{Open: &menuOpen, Label: "SheetMenu"})
+				})
+			},
+		})
+	})
+	tt.Advance(500 * time.Millisecond)
+
+	// Start dragging the handle down past dismiss threshold, then cancel press.
+	dlg, ok := tt.AccessByRole(ui.RoleDialog, "Sheet")
+	if !ok {
+		t.Fatal("BottomSheet missing")
+	}
+	hx := dlg.Bounds.X + dlg.Bounds.W/2
+	hy := dlg.Bounds.Y + 12
+	tt.Press(hx, hy)
+	tt.Move(hx, hy+220)
+	tt.CancelPress()
+	tt.Advance(400 * time.Millisecond)
+	if !open || detent != 1 {
+		t.Fatalf("canceled BottomSheet drag mutated open=%v detent=%d, want true, 1", open, detent)
+	}
+
+	// Open child DropdownMenu, close parent BottomSheet, and verify child menu
+	// vanishes at once mid-exit and clicking its old coordinates does not fire.
+	tt.Click("Actions")
+	tt.Advance(300 * time.Millisecond)
+	if _, ok := tt.AccessByRole(ui.RoleMenu, "SheetMenu"); !ok {
+		t.Fatal("child DropdownMenu inside BottomSheet did not open")
+	}
+	delInfo := buttonInfo(t, tt, ui.RoleMenuItem, "Delete Item")
+	open = false
+	tt.Frame()
+	tt.Advance(16 * time.Millisecond) // mid-exit of BottomSheet
+	if _, ok := tt.AccessByRole(ui.RoleMenu, "SheetMenu"); ok {
+		t.Fatal("child DropdownMenu remained visible while parent BottomSheet was exiting")
+	}
+	tt.ClickAt(center(delInfo.Bounds))
+	tt.Advance(500 * time.Millisecond)
+	if itemClicks != 0 {
+		t.Fatalf("child menu inside exiting BottomSheet fired %d times, want 0", itemClicks)
+	}
+	if tt.FramePending() {
+		t.Fatal("exited BottomSheet with closed child overlay left pending frames")
+	}
+}

@@ -215,6 +215,15 @@ func buildDatePicker(c *ui.Context, m datePickerModel, opts []DatePickerOptions)
 		o.Disabled = true
 	}
 
+	if inExitingOverlay(c) {
+		if *o.Open {
+			*o.Open = false
+		}
+		st.wasOpen = false
+		st.opener = nil
+		return anchor
+	}
+
 	if !*o.Open {
 		if st.wasOpen {
 			st.wasOpen = false
