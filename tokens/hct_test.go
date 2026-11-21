@@ -2,6 +2,7 @@ package tokens
 
 import (
 	"math"
+	"sync"
 	"testing"
 
 	"github.com/egoist/mygo/ui"
@@ -325,4 +326,71 @@ func absInt(v int) int {
 		return -v
 	}
 	return v
+}
+
+// TestTonalPaletteZeroAndNilSafe checks zero-value and nil TonalPalette values
+// safely compute and cache tones without nil-map or nil-receiver panics.
+func TestTonalPaletteZeroAndNilSafe(t *testing.T) {
+	var zero TonalPalette
+	const workers = 8
+	var wg sync.WaitGroup
+	wg.Add(workers)
+	got := make([]ui.Color, workers)
+	for i := range workers {
+		go func(idx int) {
+			defer wg.Done()
+			got[idx] = zero.Tone(50)
+		}(i)
+	}
+	wg.Wait()
+	want := grayColor(50)
+	for i, c := range got {
+		if c != want {
+			t.Fatalf("worker %d zero palette tone(50) = %v, want %v", i, c, want)
+		}
+	}
+
+	var nilPal *TonalPalette
+	if nilPal.Hue() != 0 || nilPal.Chroma() != 0 || nilPal.HCT(40) != (HCT{Tone: 40}) {
+		t.Fatalf("nil TonalPalette accessors returned unexpected values")
+	}
+	if c := nilPal.Tone(40); c != grayColor(40) {
+		t.Fatalf("nil TonalPalette.Tone(40) = %v, want %v", c, grayColor(40))
+	}
+}
+
+// TestHCTAndColorFromCAM16NonFiniteSafe checks NaN and ±Inf inputs produce
+// well-defined clamped/black/gray colors instead of propagating NaNs.
+func TestHCTAndColorFromCAM16NonFiniteSafe(t *testing.T) {
+	bad := []float64{math.NaN(), math.Inf(1), math.Inf(-1)}
+	for _, v := range bad {
+		_ = HCT{Hue: v, Chroma: 50, Tone: 50}.ToColor()
+		if c := (HCT{Hue: 120, Chroma: v, Tone: 50}).ToColor(); c != grayColor(50) {
+			t.Fatalf("HCT non-finite chroma(%v) = %v, want gray(50) %v", v, c, grayColor(50))
+		}
+		cTone := HCT{Hue: 120, Chroma: 40, Tone: v}.ToColor()
+		if v == math.Inf(1) {
+			if cTone != ui.RGB(255, 255, 255) {
+				t.Fatalf("HCT(+Inf tone) = %v, want white", cTone)
+			}
+		} else if cTone != ui.RGB(0, 0, 0) {
+			t.Fatalf("HCT(%v tone) = %v, want black", v, cTone)
+		}
+		if got := ColorFromCAM16(v, 40, v); got != ui.RGB(0, 0, 0) {
+			t.Fatalf("ColorFromCAM16(%v, 40, %v) = %v, want black", v, v, got)
+		}
+		if got := ColorFromCAM16(50, v, 200); got.A != 255 {
+			t.Fatalf("ColorFromCAM16(50, %v, 200) alpha = %d, want 255", v, got.A)
+		}
+		if got := ColorFromXYZ([3]float64{v, 50, 50}); got != ui.RGB(0, 0, 0) {
+			t.Fatalf("ColorFromXYZ(%v) = %v, want black", v, got)
+		}
+		if r := ContrastRatioOfTones(v, 50); math.IsNaN(r) || math.IsInf(r, 0) {
+			t.Fatalf("ContrastRatioOfTones(%v, 50) = %v, want finite", v, r)
+		}
+		ct := ContrastTone(v, v)
+		if ct != 0 && ct != 100 {
+			t.Fatalf("ContrastTone(%v, %v) = %v, want 0 or 100", v, v, ct)
+		}
+	}
 }

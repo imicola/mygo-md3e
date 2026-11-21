@@ -286,3 +286,26 @@ func TestResolveFlags(t *testing.T) {
 		}
 	}
 }
+
+// TestSpecSanitizesNegativeAndNonFiniteParameters verifies Spec.Damping and
+// Spec.SpringOptions sanitize negative, NaN, and ±Inf parameters safely.
+func TestSpecSanitizesNegativeAndNonFiniteParameters(t *testing.T) {
+	bad := []float64{-5, math.NaN(), math.Inf(1), math.Inf(-1)}
+	for _, r := range bad {
+		for _, k := range bad {
+			s := motion.Spec{DampingRatio: r, Stiffness: k}
+			d := s.Damping()
+			opts := s.SpringOptions()
+			if math.IsNaN(d) || math.IsInf(d, 0) || d != 0 {
+				t.Fatalf("Spec(%v, %v).Damping() = %v, want 0", r, k, d)
+			}
+			if math.IsNaN(opts.Stiffness) || math.IsNaN(opts.Damping) || opts.Stiffness != 0 || opts.Damping != 0 {
+				t.Fatalf("Spec(%v, %v).SpringOptions() = %+v, want finite zeros", r, k, opts)
+			}
+		}
+	}
+	s := motion.Spec{DampingRatio: 0.8, Stiffness: math.NaN()}
+	if d := s.Damping(); d != 0 {
+		t.Fatalf("NaN stiffness Damping() = %v, want 0", d)
+	}
+}

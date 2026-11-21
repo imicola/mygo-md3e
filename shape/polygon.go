@@ -24,6 +24,25 @@ import (
 // epsilon is the distance below which points are the same point.
 const epsilon = 1e-9
 
+func finiteFloat(v float64) bool {
+	return !math.IsNaN(v) && !math.IsInf(v, 0)
+}
+
+func finitePositive(v float64) bool {
+	return finiteFloat(v) && v > 0
+}
+
+func finitePoint(p Point) bool {
+	return finiteFloat(p.X) && finiteFloat(p.Y)
+}
+
+func finiteRect(r ui.Rect) bool {
+	return !math.IsNaN(float64(r.X)) && !math.IsInf(float64(r.X), 0) &&
+		!math.IsNaN(float64(r.Y)) && !math.IsInf(float64(r.Y), 0) &&
+		!math.IsNaN(float64(r.W)) && !math.IsInf(float64(r.W), 0) &&
+		!math.IsNaN(float64(r.H)) && !math.IsInf(float64(r.H), 0)
+}
+
 // Point is a position in a shape's coordinates.
 type Point struct{ X, Y float64 }
 
@@ -246,14 +265,27 @@ type RoundedPolygon struct {
 
 // Cubics returns the polygon's closed chain of cubics. The slice is the
 // polygon's own and must not be modified.
-func (p *RoundedPolygon) Cubics() []Cubic { return p.cubics }
+func (p *RoundedPolygon) Cubics() []Cubic {
+	if p == nil {
+		return nil
+	}
+	return p.cubics
+}
 
 // Center returns the point the polygon was built around: the centroid of its
 // vertices, which shape morphing rotates and aligns features around.
-func (p *RoundedPolygon) Center() Point { return p.center }
+func (p *RoundedPolygon) Center() Point {
+	if p == nil {
+		return Point{}
+	}
+	return p.center
+}
 
 // Bounds returns the smallest box holding the polygon.
 func (p *RoundedPolygon) Bounds() Box {
+	if p == nil || len(p.cubics) == 0 {
+		return Box{}
+	}
 	b := p.cubics[0].Bounds()
 	for _, c := range p.cubics[1:] {
 		b = b.Union(c.Bounds())
@@ -263,6 +295,9 @@ func (p *RoundedPolygon) Bounds() Box {
 
 // Transformed returns the polygon moved by t.
 func (p *RoundedPolygon) Transformed(t Transform) *RoundedPolygon {
+	if p == nil || len(p.cubics) == 0 {
+		return nil
+	}
 	cubics := make([]Cubic, len(p.cubics))
 	for i, c := range p.cubics {
 		cubics[i] = Cubic{t.Apply(c.P0), t.Apply(c.P1), t.Apply(c.P2), t.Apply(c.P3)}
@@ -275,9 +310,12 @@ func (p *RoundedPolygon) Transformed(t Transform) *RoundedPolygon {
 // aspect ratio kept: a wide shape keeps its shape and leaves the square's
 // height partly empty.
 func (p *RoundedPolygon) Normalized() *RoundedPolygon {
+	if p == nil || len(p.cubics) == 0 {
+		panic("shape: a polygon without extent cannot be normalized")
+	}
 	b := p.Bounds()
 	size := math.Max(b.Width(), b.Height())
-	if size <= epsilon {
+	if !finiteFloat(size) || size <= epsilon {
 		panic("shape: a polygon without extent cannot be normalized")
 	}
 	scale := 1 / size
@@ -288,9 +326,13 @@ func (p *RoundedPolygon) Normalized() *RoundedPolygon {
 
 // ToPath converts the polygon to a ui.Path, mapping the unit square [0,1]×
 // [0,1] that Normalized produces onto r. It suits normalized polygons; on
-// others, call Normalized first.
+// others, call Normalized first. Returns an empty path for nil/empty polygons
+// or non-positive/non-finite rects.
 func (p *RoundedPolygon) ToPath(r ui.Rect) *ui.Path {
 	path := &ui.Path{}
+	if p == nil || len(p.cubics) == 0 || !finiteRect(r) || r.W <= 0 || r.H <= 0 {
+		return path
+	}
 	first := p.cubics[0].P0
 	path.MoveTo(r.X+float32(first.X)*r.W, r.Y+float32(first.Y)*r.H)
 	for _, c := range p.cubics {
@@ -307,10 +349,15 @@ func (p *RoundedPolygon) ToPath(r ui.Rect) *ui.Path {
 // rounding of each vertex, as roundings[i] rounds vertices[i]. A nil
 // roundings rounds none. A clockwise list is reversed to the
 // counter-clockwise winding every MD3E shape uses. It panics for fewer than
-// three vertices or roundings of another length.
+// three vertices, non-finite coordinates, or roundings of another length.
 func NewPolygon(vertices []Point, roundings []CornerRounding) *RoundedPolygon {
 	if len(vertices) < 3 {
 		panic("shape: a polygon needs at least three vertices")
+	}
+	for _, v := range vertices {
+		if !finitePoint(v) {
+			panic("shape: polygon vertices must be finite")
+		}
 	}
 	if roundings == nil {
 		roundings = make([]CornerRounding, len(vertices))
@@ -352,7 +399,7 @@ func RegularPolygon(vertices int, radius float64, rounding CornerRounding) *Roun
 	if vertices < 3 {
 		panic("shape: a regular polygon needs at least three vertices")
 	}
-	if radius <= 0 {
+	if !finitePositive(radius) {
 		panic("shape: a polygon's radius must be positive")
 	}
 	points := make([]Point, vertices)
@@ -372,7 +419,7 @@ func Star(points int, radius, innerRadius float64, rounding, innerRounding Corne
 	if points < 2 {
 		panic("shape: a star needs at least two points")
 	}
-	if radius <= 0 || innerRadius <= 0 || innerRadius >= radius {
+	if !finitePositive(radius) || !finitePositive(innerRadius) || innerRadius >= radius {
 		panic("shape: a star's inner radius must be within its outer radius")
 	}
 	vertices := make([]Point, 2*points)
@@ -393,7 +440,7 @@ func Star(points int, radius, innerRadius float64, rounding, innerRounding Corne
 // NewRectangle returns a rectangle of the given size centered at the
 // origin, its corners rounded by rounding.
 func NewRectangle(width, height float64, rounding CornerRounding) *RoundedPolygon {
-	if width <= 0 || height <= 0 {
+	if !finitePositive(width) || !finitePositive(height) {
 		panic("shape: a rectangle's size must be positive")
 	}
 	hw, hh := width/2, height/2
@@ -405,7 +452,7 @@ func NewRectangle(width, height float64, rounding CornerRounding) *RoundedPolygo
 // NewCircle returns a circle of radius centered at the origin, in four
 // cubics as ui.Path.Circle draws it.
 func NewCircle(radius float64) *RoundedPolygon {
-	if radius <= 0 {
+	if !finitePositive(radius) {
 		panic("shape: a circle's radius must be positive")
 	}
 	const kappa = 0.5522847498
@@ -435,7 +482,7 @@ type corner struct {
 func roundCorner(prev, curr, next Point, rounding CornerRounding) corner {
 	sharp := corner{start: curr, end: curr, c1: curr, c2: curr, sharp: true}
 	prevLen, nextLen := prev.Distance(curr), next.Distance(curr)
-	if rounding.Radius <= 0 || prevLen <= epsilon || nextLen <= epsilon {
+	if !finitePositive(rounding.Radius) || prevLen <= epsilon || nextLen <= epsilon {
 		return sharp
 	}
 	u0 := prev.Sub(curr).Normalized() // toward the previous vertex
@@ -459,7 +506,10 @@ func roundCorner(prev, curr, next Point, rounding CornerRounding) corner {
 	k := 4.0 / 3.0 * math.Tan((math.Pi-beta)/4) * radius
 	// Smoothing moves the controls toward the vertex itself, which fills the
 	// corner out while keeping the tangents along the edges.
-	smoothing := math.Max(0, math.Min(1, rounding.Smoothing))
+	smoothing := 0.0
+	if finiteFloat(rounding.Smoothing) {
+		smoothing = math.Max(0, math.Min(1, rounding.Smoothing))
+	}
 	k = k*(1-smoothing) + t*smoothing
 	// The outline runs prev → start → end → next, so it leaves start along
 	// -u0 and reaches end along u1 whichever way the corner bends: both

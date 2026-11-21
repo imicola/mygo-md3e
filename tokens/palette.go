@@ -53,19 +53,36 @@ func PaletteFromColor(c ui.Color) *TonalPalette {
 }
 
 // Hue returns the palette's hue in degrees.
-func (p *TonalPalette) Hue() float64 { return p.hue }
+func (p *TonalPalette) Hue() float64 {
+	if p == nil {
+		return 0
+	}
+	return p.hue
+}
 
 // Chroma returns the palette's chroma.
-func (p *TonalPalette) Chroma() float64 { return p.chroma }
+func (p *TonalPalette) Chroma() float64 {
+	if p == nil {
+		return 0
+	}
+	return p.chroma
+}
 
 // HCT returns the palette's color at tone.
 func (p *TonalPalette) HCT(tone float64) HCT {
-	return HCT{Hue: p.hue, Chroma: p.chroma, Tone: sanitizeTone(tone)}
+	tone = sanitizeTone(tone)
+	if p == nil {
+		return HCT{Tone: tone}
+	}
+	return HCT{Hue: p.hue, Chroma: p.chroma, Tone: tone}
 }
 
 // Tone returns the palette's opaque color at tone, caching what it computes.
 func (p *TonalPalette) Tone(tone float64) ui.Color {
 	tone = sanitizeTone(tone)
+	if p == nil {
+		return HCT{Tone: tone}.ToColor()
+	}
 	p.mu.RLock()
 	c, ok := p.tones[tone]
 	p.mu.RUnlock()
@@ -74,6 +91,9 @@ func (p *TonalPalette) Tone(tone float64) ui.Color {
 	}
 	c = p.HCT(tone).ToColor()
 	p.mu.Lock()
+	if p.tones == nil {
+		p.tones = make(map[float64]ui.Color)
+	}
 	p.tones[tone] = c
 	p.mu.Unlock()
 	return c

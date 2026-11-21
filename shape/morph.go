@@ -179,12 +179,31 @@ func missingFraction(longer, shorter []float64) float64 {
 	return 0.5
 }
 
+func sanitizeMorphProgress(progress float32) float64 {
+	f := float64(progress)
+	switch {
+	case math.IsNaN(f), math.IsInf(f, -1), f <= 0:
+		return 0
+	case math.IsInf(f, 1), f >= 1:
+		return 1
+	default:
+		return f
+	}
+}
+
 // AsPath returns the morph at progress, from 0 (from) to 1 (to), in dst. The
-// path is the Morph's own, reused and valid until the next call.
+// path is the Morph's own, reused and valid until the next call. Nil morphs,
+// non-finite progress values, and empty/non-finite rects degrade safely.
 func (m *Morph) AsPath(progress float32, dst ui.Rect) *ui.Path {
-	t := float64(max(0, min(1, progress)))
+	if m == nil || len(m.a) == 0 || len(m.b) != len(m.a) {
+		return &ui.Path{}
+	}
 	p := &m.path
 	p.Reset()
+	if !finiteRect(dst) || dst.W <= 0 || dst.H <= 0 {
+		return p
+	}
+	t := sanitizeMorphProgress(progress)
 	first := dstPoint(m.a[0].P0.Lerp(m.b[0].P0, t), dst)
 	p.MoveTo(first.X, first.Y)
 	for i := range m.a {
@@ -201,7 +220,10 @@ func (m *Morph) AsPath(progress float32, dst ui.Rect) *ui.Path {
 // 1 (to), for callers that measure or draw the outline themselves; AsPath
 // reuses a path instead. The slice is newly allocated.
 func (m *Morph) CubicsAt(progress float32) []Cubic {
-	t := float64(max(0, min(1, progress)))
+	if m == nil || len(m.a) == 0 || len(m.b) != len(m.a) {
+		return nil
+	}
+	t := sanitizeMorphProgress(progress)
 	out := make([]Cubic, len(m.a))
 	for i := range m.a {
 		out[i] = m.cubicAt(i, t)

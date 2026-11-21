@@ -56,14 +56,22 @@ func HCTFromColor(c ui.Color) HCT {
 	return HCT{Hue: cam.hue, Chroma: cam.chroma, Tone: LstarFromY(xyz[1])}
 }
 
+func sanitizeChroma(c float64) float64 {
+	if math.IsNaN(c) || math.IsInf(c, 0) || c <= 0 {
+		return 0
+	}
+	return c
+}
+
 // ToColor returns the sRGB color with the HCT coordinates h. A hue outside
 // 0..360 wraps around, and a tone outside 0..100 clamps to black or white.
 // A chroma greater than the sRGB gamut holds at h's tone is reduced to the
-// largest chroma that fits, as Material's HCT solver does.
+// largest chroma that fits, as Material's HCT solver does. Non-finite inputs
+// sanitize safely to zero.
 func (h HCT) ToColor() ui.Color {
 	hue := SanitizeDegrees(h.Hue)
-	chroma := math.Max(0, h.Chroma)
-	tone := min(max(h.Tone, 0), 100)
+	chroma := sanitizeChroma(h.Chroma)
+	tone := sanitizeTone(h.Tone)
 
 	switch {
 	case tone <= 0:
@@ -105,13 +113,16 @@ func CAM16FromColor(c ui.Color) CAM16 {
 }
 
 // ColorFromCAM16 returns the sRGB color with the CAM16 lightness j, chroma
-// and hue. A negative lightness or chroma clamps to zero, and a color outside
-// the sRGB gamut clamps per channel.
+// and hue. A negative or non-finite lightness or chroma clamps to zero, and a
+// color outside the sRGB gamut clamps per channel.
 func ColorFromCAM16(j, chroma, hue float64) ui.Color {
+	if math.IsNaN(j) || math.IsInf(j, 0) || j <= 0 {
+		return ui.RGB(0, 0, 0)
+	}
 	return ColorFromXYZ(xyzFromCAM16(cam16{
-		j:      math.Max(0, j),
-		chroma: math.Max(0, chroma),
-		hue:    hue,
+		j:      j,
+		chroma: sanitizeChroma(chroma),
+		hue:    SanitizeDegrees(hue),
 	}))
 }
 
@@ -160,8 +171,13 @@ func XYZFromColor(c ui.Color) [3]float64 {
 }
 
 // ColorFromXYZ converts CIE XYZ under D65 (Y in 0..100) to sRGB, clamping
-// each channel into the gamut.
+// each channel into the gamut. Non-finite XYZ inputs return black.
 func ColorFromXYZ(xyz [3]float64) ui.Color {
+	for _, v := range xyz {
+		if math.IsNaN(v) || math.IsInf(v, 0) {
+			return ui.RGB(0, 0, 0)
+		}
+	}
 	return colorFromLinear(linearRGBFromXYZ(xyz))
 }
 
@@ -224,8 +240,8 @@ func ContrastRatio(a, b ui.Color) float64 {
 // ContrastRatioOfTones returns the contrast ratio between two tones, as if
 // they were gray. Tones outside 0..100 clamp.
 func ContrastRatioOfTones(tone1, tone2 float64) float64 {
-	tone1 = min(max(tone1, 0), 100)
-	tone2 = min(max(tone2, 0), 100)
+	tone1 = sanitizeTone(tone1)
+	tone2 = sanitizeTone(tone2)
 	la := YFromLstar(tone1)
 	lb := YFromLstar(tone2)
 	if la < lb {
@@ -239,6 +255,10 @@ func ContrastRatioOfTones(tone1, tone2 float64) float64 {
 // greater contrast. When neither reaches it, it returns the one with the
 // greater contrast.
 func ContrastTone(backgroundTone, ratio float64) float64 {
+	backgroundTone = sanitizeTone(backgroundTone)
+	if math.IsNaN(ratio) || math.IsInf(ratio, -1) {
+		ratio = 0
+	}
 	light := ContrastRatioOfTones(backgroundTone, 100)
 	dark := ContrastRatioOfTones(backgroundTone, 0)
 	switch {

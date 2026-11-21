@@ -106,17 +106,28 @@ type Spec struct {
 	Stiffness    float64
 }
 
+func sanitizeNonNegativeFinite(v float64) float64 {
+	if math.IsNaN(v) || math.IsInf(v, 0) || v <= 0 {
+		return 0
+	}
+	return v
+}
+
 // Damping returns the viscous damping coefficient c = 2ζ√(k·m) of the spec,
-// for the unit mass ui springs use.
+// for the unit mass ui springs use. Negative or non-finite inputs sanitize to 0.
 func (s Spec) Damping() float64 {
-	return 2 * s.DampingRatio * math.Sqrt(s.Stiffness)
+	ratio := sanitizeNonNegativeFinite(s.DampingRatio)
+	stiffness := sanitizeNonNegativeFinite(s.Stiffness)
+	return 2 * ratio * math.Sqrt(stiffness)
 }
 
 // SpringOptions converts the spec to the physical options of a ui spring:
 // {Mass: 1, Stiffness: k, Damping: 2ζ√k}. Never pass DampingRatio straight
-// to ui.SpringOptions.Damping.
+// to ui.SpringOptions.Damping. Negative or non-finite parameters clamp safely to 0.
 func (s Spec) SpringOptions() ui.SpringOptions {
-	return ui.SpringOptions{Mass: 1, Stiffness: s.Stiffness, Damping: s.Damping()}
+	stiffness := sanitizeNonNegativeFinite(s.Stiffness)
+	damping := 2 * sanitizeNonNegativeFinite(s.DampingRatio) * math.Sqrt(stiffness)
+	return ui.SpringOptions{Mass: 1, Stiffness: stiffness, Damping: damping}
 }
 
 // SettleTime returns how long the spec's spring takes to come to rest.

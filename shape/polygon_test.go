@@ -233,3 +233,71 @@ func isRed(img *image.RGBA, x, y int) bool {
 	c := img.RGBAAt(x, y)
 	return c.R > 200 && c.G < 100 && c.B < 100 && c.A > 200
 }
+
+// TestPolygonEdgeGuardsAndNonFiniteInputs checks polygon constructors reject
+// non-finite sizes/vertices, CornerRounding sanitizes NaNs, and nil/empty/NaN
+// runtime ToPath/ClipShape calls degrade cleanly without panicking.
+func TestPolygonEdgeGuardsAndNonFiniteInputs(t *testing.T) {
+	mustPanic := func(name string, fn func()) {
+		t.Helper()
+		defer func() {
+			if recover() == nil {
+				t.Errorf("%s did not panic", name)
+			}
+		}()
+		fn()
+	}
+
+	mustPanic("NewPolygon NaN vertex", func() {
+		shape.NewPolygon([]shape.Point{{math.NaN(), 0}, {1, 0}, {0, 1}}, nil)
+	})
+	mustPanic("RegularPolygon NaN radius", func() {
+		shape.RegularPolygon(4, math.NaN(), shape.CornerRounding{})
+	})
+	mustPanic("RegularPolygon +Inf radius", func() {
+		shape.RegularPolygon(4, math.Inf(1), shape.CornerRounding{})
+	})
+	mustPanic("Star NaN innerRadius", func() {
+		shape.Star(5, 1, math.NaN(), shape.CornerRounding{}, shape.CornerRounding{})
+	})
+	mustPanic("NewRectangle NaN size", func() {
+		shape.NewRectangle(math.NaN(), 10, shape.CornerRounding{})
+	})
+	mustPanic("NewCircle NaN radius", func() {
+		shape.NewCircle(math.NaN())
+	})
+
+	// Non-finite CornerRounding degrades to sharp/unsmoothed without NaNs.
+	poly := shape.NewRectangle(2, 2, shape.CornerRounding{Radius: math.NaN(), Smoothing: math.NaN()})
+	for i, c := range poly.Cubics() {
+		for _, pt := range []shape.Point{c.P0, c.P1, c.P2, c.P3} {
+			if math.IsNaN(pt.X) || math.IsNaN(pt.Y) {
+				t.Fatalf("cubic %d contains NaN point: %+v", i, c)
+			}
+		}
+	}
+
+	var nilPoly *shape.RoundedPolygon
+	if nilPoly.Center() != (shape.Point{}) || nilPoly.Cubics() != nil || nilPoly.Bounds() != (shape.Box{}) || nilPoly.Transformed(shape.Translate(0, 0)) != nil {
+		t.Fatal("nil RoundedPolygon method returned unexpected value")
+	}
+	if p := nilPoly.ToPath(ui.Rect{W: 32, H: 32}); p == nil {
+		t.Fatal("nil RoundedPolygon.ToPath returned nil path")
+	}
+
+	circ := shape.Circle()
+	for _, r := range []ui.Rect{
+		{},
+		{W: -10, H: 10},
+		{W: float32(math.NaN()), H: 10},
+	} {
+		_ = circ.ToPath(r)
+	}
+	ui.Render(func(c *ui.Context) {
+		ui.Box(c).Draw(func(p *ui.Painter, r ui.Rect) {
+			shape.ClipShape(p, nilPoly, ui.Rect{W: 32, H: 32}, func() {})
+			shape.ClipShape(p, circ, ui.Rect{W: 0, H: 32}, func() {})
+			shape.ClipShape(p, circ, ui.Rect{W: float32(math.NaN()), H: 32}, func() {})
+		})
+	}, 32, 32, 1)
+}

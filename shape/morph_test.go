@@ -289,3 +289,49 @@ func isDark(img *image.RGBA, x, y int) bool {
 	c := img.RGBAAt(x, y)
 	return c.R < 128 && c.G < 128 && c.B < 128 && c.A > 200
 }
+
+// TestMorphNilProgressAndEmptyRectSafe verifies nil Morph receivers, non-finite
+// progress values, and empty/non-finite rects stay panic-free and finite.
+func TestMorphNilProgressAndEmptyRectSafe(t *testing.T) {
+	var nilMorph *Morph
+	if p := nilMorph.AsPath(0.5, ui.Rect{W: 20, H: 20}); p == nil {
+		t.Fatal("nil Morph.AsPath returned nil")
+	}
+	if cubics := nilMorph.CubicsAt(0.5); cubics != nil {
+		t.Fatalf("nil Morph.CubicsAt = %v, want nil", cubics)
+	}
+
+	m := morphShapes(t, "Circle", "Heart")
+	for _, prog := range []float32{
+		float32(math.NaN()),
+		float32(math.Inf(-1)),
+		float32(math.Inf(1)),
+		-0.5,
+		1.5,
+	} {
+		cubics := m.CubicsAt(prog)
+		if len(cubics) == 0 {
+			t.Fatalf("CubicsAt(%v) empty", prog)
+		}
+		for j, c := range cubics {
+			for _, pt := range []Point{c.P0, c.P1, c.P2, c.P3} {
+				if math.IsNaN(pt.X) || math.IsNaN(pt.Y) || math.IsInf(pt.X, 0) || math.IsInf(pt.Y, 0) {
+					t.Fatalf("CubicsAt(%v)[%d] non-finite: %+v", prog, j, c)
+				}
+			}
+		}
+		path := m.AsPath(prog, ui.Rect{X: 2, Y: 2, W: 28, H: 28})
+		if b := path.Bounds(); b.W <= 0 || b.H <= 0 {
+			t.Fatalf("AsPath(%v) produced empty bounds %+v", prog, b)
+		}
+	}
+
+	ui.Render(func(c *ui.Context) {
+		ui.Box(c).Draw(func(p *ui.Painter, r ui.Rect) {
+			DrawMorph(p, nilMorph, 0.5, ui.Rect{W: 32, H: 32}, ui.RGB(0, 0, 0))
+			DrawMorph(p, m, float32(math.NaN()), ui.Rect{W: 0, H: 32}, ui.RGB(0, 0, 0))
+			DrawMorph(p, m, 0.5, ui.Rect{W: float32(math.NaN()), H: 32}, ui.RGB(0, 0, 0))
+			DrawMorph(p, m, float32(math.NaN()), ui.Rect{W: 32, H: 32}, ui.RGB(0, 0, 0))
+		})
+	}, 32, 32, 1)
+}
