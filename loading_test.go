@@ -3,6 +3,7 @@ package md3e
 import (
 	"image"
 	"math"
+	"sync"
 	"testing"
 	"time"
 
@@ -355,5 +356,42 @@ func TestLoadingExpressiveVsStandardSpringAndPolyCache(t *testing.T) {
 	}
 	if diff := indicatorBoxDiff(exprMid, stdMid, exprInfo.Bounds); diff < 30 {
 		t.Fatalf("Expressive vs Standard LoadingIndicator rendered nearly identically at 140ms (diff=%d)", diff)
+	}
+}
+
+// TestDefaultLoadingPolygonsConcurrentAndIsolated checks lazy initialization is
+// safe under concurrent callers and returned slices are isolated copies.
+func TestDefaultLoadingPolygonsConcurrentAndIsolated(t *testing.T) {
+	const workers = 8
+	results := make([][]*shape.RoundedPolygon, workers)
+	var wg sync.WaitGroup
+	wg.Add(workers)
+	for i := range workers {
+		go func(idx int) {
+			defer wg.Done()
+			results[idx] = DefaultLoadingPolygons()
+		}(i)
+	}
+	wg.Wait()
+
+	base := results[0]
+	if len(base) != 7 {
+		t.Fatalf("DefaultLoadingPolygons len = %d, want 7", len(base))
+	}
+	for i := 1; i < workers; i++ {
+		if len(results[i]) != len(base) {
+			t.Fatalf("worker %d len = %d, want %d", i, len(results[i]), len(base))
+		}
+		for j := range base {
+			if results[i][j] != base[j] {
+				t.Fatalf("worker %d[%d] pointer mismatch", i, j)
+			}
+		}
+	}
+	// Mutating caller's copy must not affect future DefaultLoadingPolygons calls.
+	results[0][0] = nil
+	fresh := DefaultLoadingPolygons()
+	if fresh[0] == nil {
+		t.Fatal("mutating DefaultLoadingPolygons return slice corrupted cached slice")
 	}
 }

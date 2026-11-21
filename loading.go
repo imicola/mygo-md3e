@@ -54,24 +54,33 @@ const (
 	loadingStepDegrees    = 90
 )
 
-// loadingDefaultShapes builds the MD3E sequence once, on first use, so an app
-// that never shows a LoadingIndicator links none of it.
-var loadingDefaultShapes = sync.OnceValue(func() []*shape.RoundedPolygon {
-	return []*shape.RoundedPolygon{
-		shape.SoftBurst(),
-		shape.Cookie9Sided(),
-		shape.Pentagon(),
-		shape.Pill(),
-		shape.Sunny(),
-		shape.Cookie4Sided(),
-		shape.Oval(),
-	}
-})
+// defaultLoadingShapes builds the MD3E sequence on first use without init-time
+// closure state so binaries that omit LoadingIndicator link none of the 7
+// catalog polygons or morph tables.
+var (
+	loadingDefaultOnce sync.Once
+	loadingDefaultList []*shape.RoundedPolygon
+)
+
+func defaultLoadingShapes() []*shape.RoundedPolygon {
+	loadingDefaultOnce.Do(func() {
+		loadingDefaultList = []*shape.RoundedPolygon{
+			shape.SoftBurst(),
+			shape.Cookie9Sided(),
+			shape.Pentagon(),
+			shape.Pill(),
+			shape.Sunny(),
+			shape.Cookie4Sided(),
+			shape.Oval(),
+		}
+	})
+	return loadingDefaultList
+}
 
 // DefaultLoadingPolygons returns the seven-shape MD3E loading sequence:
 // SoftBurst, Cookie9Sided, Pentagon, Pill, Sunny, Cookie4Sided and Oval.
 func DefaultLoadingPolygons() []*shape.RoundedPolygon {
-	return slices.Clone(loadingDefaultShapes())
+	return slices.Clone(defaultLoadingShapes())
 }
 
 // loadingStateKey is the Local holding an indicator's prebuilt morphs.
@@ -165,11 +174,11 @@ func LoadingIndicator(c *ui.Context, opts ...LoadingOptions) ui.Element {
 	size := sanitizePositiveF32(o.Size, loadingDefaultSize)
 	polys := o.Polygons
 	if len(polys) == 0 {
-		polys = loadingDefaultShapes()
+		polys = defaultLoadingShapes()
 	}
 	polys = sanitizeLoadingPolys(polys)
 	if len(polys) == 0 {
-		polys = loadingDefaultShapes()
+		polys = defaultLoadingShapes()
 	}
 
 	th := CurrentTheme(c)
