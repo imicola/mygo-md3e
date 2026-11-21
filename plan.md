@@ -352,7 +352,7 @@
 
 ## M8：高级选择器、全量演示画廊与质量总验收
 
-- [ ] **T8.1：实现 DatePicker 与 TimePicker**
+- [x] **T8.1：实现 DatePicker 与 TimePicker**
   - **交付物**：`datepicker.go`、`timepicker.go`、`picker_test.go`
   - **核心能力**：
     - `DatePicker`（Modal 弹窗与 Docked 内联两种形态）：月历网格、今天圆圈标识、选中日期胶囊高亮、支持单选与日期范围选（RangeHighlight）、切换月份/年份视图及切换文本输入模式；
