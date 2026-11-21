@@ -7,14 +7,20 @@ import (
 	"github.com/imicola/mygo-md3e/tokens"
 )
 
-// TabItem is one tab of PrimaryTabs or SecondaryTabs.
+// TabItem is one tab of PrimaryTabs, SecondaryTabs, PillTabs, or SegmentedTabs.
 type TabItem struct {
 	// Key optionally identifies the tab across dynamic reordering or edits.
 	Key any
 	// Label is the visible text and the accessible name.
 	Label string
-	// Icon draws an optional 24 DIP leading icon.
+	// Icon draws an optional leading icon.
 	Icon IconDraw
+	// Badge optionally displays a compact count or short text badge beside the
+	// label (rendered by PillTabs and SegmentedTabs).
+	Badge string
+	// BadgeDot optionally shows a 6 DIP indicator dot when Badge is empty
+	// (rendered by PillTabs and SegmentedTabs).
+	BadgeDot bool
 	// Disabled disables this tab alone: the pointer and the arrows, Home and
 	// End pass over it.
 	Disabled bool
