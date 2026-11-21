@@ -99,17 +99,25 @@ func NavigationRail(c *ui.Context, destinations []NavigationDestination, opts ..
 				o.Header()
 			})
 		}
-		items := ui.Column(c).Grow(1).PaddingX(12).Gap(8).Justify(o.Align)
-		items.Children(func() {
-			for i := range destinations {
-				navRailDestination(c, th, cs, &destinations[i], i, o, open)
-			}
+		// The destinations scroll when the rail is shorter than its list, as
+		// in a short window or a phone's landscape rail; at full height the
+		// scroll takes the list's own height and Align still places it.
+		ui.Column(c).Grow(1).FillWidth().Justify(o.Align).Children(func() {
+			ui.Scroll(c.Key(navRailScrollKey{})).FillWidth().Children(func() {
+				ui.Column(c).FillWidth().PaddingX(12).Gap(8).Children(func() {
+					for i := range destinations {
+						navRailDestination(c, th, cs, &destinations[i], i, o, open)
+					}
+				})
+			})
 		})
 	})
 	return root
 }
 
 type navRailExpandedKey struct{}
+
+type navRailScrollKey struct{}
 
 // navRailDestination builds one destination of a NavigationRail.
 func navRailDestination(c *ui.Context, th *Theme, cs tokens.ColorScheme, dest *NavigationDestination, i int, o NavigationRailOptions, expanded bool) {

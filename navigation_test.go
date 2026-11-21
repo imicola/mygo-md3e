@@ -304,6 +304,54 @@ func TestNavigationRailExpandAndCollapse(t *testing.T) {
 	}
 }
 
+// TestNavigationRailScrollsShortViewport checks that a rail shorter than its
+// list scrolls to its last destination, which then shows and chooses.
+func TestNavigationRailScrollsShortViewport(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor)
+	selected := 0
+	destinations := []NavigationDestination{
+		{Label: "Home", Icon: mdicon.Add.Draw},
+		{Label: "Search", Icon: mdicon.Search.Draw},
+		{Label: "Saved", Icon: mdicon.Star.Draw},
+		{Label: "Library", Icon: mdicon.Check.Draw},
+		{Label: "Inbox", Icon: mdicon.MoreHoriz.Draw},
+		{Label: "Help", Icon: mdicon.Edit.Draw},
+	}
+	tt := navigationCanvas(th, 320, 240, func(c *ui.Context) {
+		ui.Row(c).FillHeight().Children(func() {
+			NavigationRail(c, destinations, NavigationRailOptions{Selected: &selected, Label: "Rail"})
+		})
+	})
+	tt.Advance(time.Second)
+	rail, ok := tt.AccessByRole(ui.RoleNavigation, "Rail")
+	if !ok {
+		t.Fatal("the rail is not a named navigation landmark")
+	}
+	if info := tabInfo(t, tt, "Help"); !info.Offscreen && info.Bounds.H > 0 {
+		t.Fatalf("the last destination shows before scrolling: %+v", info.Bounds)
+	}
+	if err := tt.Click("Help"); err == nil {
+		t.Fatal("the clipped last destination takes a click before scrolling")
+	}
+
+	tt.Wheel(rail.Bounds.X+rail.Bounds.W/2, rail.Bounds.Y+rail.Bounds.H/2, 0, 300)
+	tt.Advance(600 * time.Millisecond)
+	info := tabInfo(t, tt, "Help")
+	if info.Offscreen || info.Bounds.H <= 0 {
+		t.Fatalf("scrolling the rail does not show its last destination: %+v", info)
+	}
+	if info.Bounds.Y < rail.Bounds.Y-0.5 || info.Bounds.Y+info.Bounds.H > rail.Bounds.Y+rail.Bounds.H+0.5 {
+		t.Fatalf("the last destination at %v lies outside the rail %v", info.Bounds, rail.Bounds)
+	}
+	if err := tt.Click("Help"); err != nil {
+		t.Fatalf("click the scrolled last destination: %v", err)
+	}
+	tt.Advance(300 * time.Millisecond)
+	if selected != len(destinations)-1 {
+		t.Fatalf("the scrolled destination chose %d, want %d", selected, len(destinations)-1)
+	}
+}
+
 // TestNavigationRailReduceMotion checks the width jumps between states with no
 // animation frames under reduced motion.
 func TestNavigationRailReduceMotion(t *testing.T) {
