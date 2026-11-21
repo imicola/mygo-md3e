@@ -30,6 +30,10 @@ type StateLayerOptions struct {
 	Clip func(r ui.Rect) (box ui.Rect, radii [4]float32)
 	// Shape optionally clips the state layer and ripple to a custom polygon.
 	Shape *shape.RoundedPolygon
+	// ClipPath optionally returns a dynamic *ui.Path (such as a live shape.Morph
+	// outline) in window coordinates for clipping the state layer and ripple.
+	// When set, ClipPath takes precedence over Shape and Radii.
+	ClipPath func(r ui.Rect) *ui.Path
 	// BorderInset shrinks the clip box inward by BorderInset DIPs (e.g., stroke width).
 	BorderInset float32
 	// Dragged activates the MD3E Dragged state layer opacity (0.16).
@@ -495,6 +499,14 @@ func attachOverlayFeedbackWithTheme(c *ui.Context, th *Theme, el ui.Element, wit
 			}
 		}
 
+		if opt.ClipPath != nil {
+			if path := opt.ClipPath(clipRect); path != nil {
+				p.ClipPath(path, func() {
+					paintBody(path)
+				})
+			}
+			return
+		}
 		if opt.Shape != nil {
 			if path := opt.Shape.ToPath(clipRect); path != nil {
 				p.ClipPath(path, func() {
