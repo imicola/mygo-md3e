@@ -421,10 +421,11 @@ func buildTextField(c *ui.Context, value *string, multiline bool, o TextFieldOpt
 				notchStart = max(notchStart, r.X+textFieldRadius)
 				notchEnd = min(notchEnd, r.X+r.W-textFieldRadius)
 				if notchEnd > notchStart {
-					if path := outlinedFieldPath(r, textFieldRadius, notchStart, notchEnd); path != nil {
-						p.StrokePath(path, outlinedWidth(isErr, focused), borderInk)
+					strokeW := outlinedWidth(isErr, focused)
+					if path := outlinedFieldPath(r, textFieldRadius, strokeW, notchStart, notchEnd); path != nil {
+						p.StrokePath(path, strokeW, borderInk)
 					} else {
-						p.Stroke(r, borderInk, textFieldRadius, outlinedWidth(isErr, focused))
+						p.Stroke(r, borderInk, textFieldRadius, strokeW)
 					}
 				} else {
 					p.Stroke(r, borderInk, textFieldRadius, outlinedWidth(isErr, focused))
@@ -613,14 +614,17 @@ func disabledContent(disabled bool, c ui.Color) ui.Color {
 
 // outlinedFieldPath returns the open path of an outlined field's border with a
 // gap in the top edge from notchStart to notchEnd, or nil when the notch
-// leaves no drawable border.
-func outlinedFieldPath(r ui.Rect, radius, notchStart, notchEnd float32) *ui.Path {
-	if r.W <= 2*radius || r.H <= 2*radius || notchEnd <= notchStart {
+// leaves no drawable border. The centerline is inset by half the stroke width
+// so p.StrokePath aligns flush inside r like p.Stroke.
+func outlinedFieldPath(r ui.Rect, radius, strokeW, notchStart, notchEnd float32) *ui.Path {
+	hw := strokeW * 0.5
+	x0, x1 := r.X+hw, r.X+r.W-hw
+	y0, y1 := r.Y+hw, r.Y+r.H-hw
+	innerR := max(float32(0), radius-hw)
+	if x1-x0 <= 2*innerR || y1-y0 <= 2*innerR || notchEnd <= notchStart {
 		return nil
 	}
-	x0, x1 := r.X, r.X+r.W
-	y0, y1 := r.Y, r.Y+r.H
-	lo, hi := x0+radius, x1-radius
+	lo, hi := x0+innerR, x1-innerR
 	if notchStart < lo {
 		notchStart = lo
 	}
@@ -630,17 +634,17 @@ func outlinedFieldPath(r ui.Rect, radius, notchStart, notchEnd float32) *ui.Path
 	if notchEnd <= notchStart {
 		return nil
 	}
-	k := radius * 0.5522847498
+	k := innerR * 0.5522847498
 	var p ui.Path
 	p.MoveTo(notchEnd, y0)
-	p.LineTo(x1-radius, y0)
-	p.CubeTo(x1-radius+k, y0, x1, y0+radius-k, x1, y0+radius)
-	p.LineTo(x1, y1-radius)
-	p.CubeTo(x1, y1-radius+k, x1-radius+k, y1, x1-radius, y1)
-	p.LineTo(x0+radius, y1)
-	p.CubeTo(x0+radius-k, y1, x0, y1-radius+k, x0, y1-radius)
-	p.LineTo(x0, y0+radius)
-	p.CubeTo(x0, y0+radius-k, x0+radius-k, y0, x0+radius, y0)
+	p.LineTo(x1-innerR, y0)
+	p.CubeTo(x1-innerR+k, y0, x1, y0+innerR-k, x1, y0+innerR)
+	p.LineTo(x1, y1-innerR)
+	p.CubeTo(x1, y1-innerR+k, x1-innerR+k, y1, x1-innerR, y1)
+	p.LineTo(x0+innerR, y1)
+	p.CubeTo(x0+innerR-k, y1, x0, y1-innerR+k, x0, y1-innerR)
+	p.LineTo(x0, y0+innerR)
+	p.CubeTo(x0, y0+innerR-k, x0+innerR-k, y0, x0+innerR, y0)
 	p.LineTo(notchStart, y0)
 	return &p
 }
