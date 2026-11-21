@@ -2,6 +2,7 @@ package md3e
 
 import (
 	"math"
+	"strings"
 	"testing"
 	"time"
 
@@ -607,5 +608,125 @@ func TestEmptyBadgePlainTooltipAndReduceMotionSnackbar(t *testing.T) {
 	}
 	if tt.FramePending() {
 		t.Fatal("ReduceMotion snackbar kept requesting frames after exit")
+	}
+}
+
+// TestRichTooltipGhostExitAndLeaveGrace checks unmounting an anchor during an
+// exit transition does not panic or leave lingering frames, and hover leave
+// grace closes cleanly with zero pending frames.
+func TestRichTooltipGhostExitAndLeaveGrace(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor)
+	exitTr := ui.ElementTransition{
+		Duration: 200 * time.Millisecond,
+		Exit:     &ui.Motion{Opacity: 0},
+	}
+	showAnchor := true
+	tt := feedbackCanvas(th, func(c *ui.Context) {
+		ui.Column(c).Gap(12).Children(func() {
+			if Button(c, "Toggle").Clicked() {
+				showAnchor = !showAnchor
+			}
+			if showAnchor {
+				// Use a plain clickable Box without Ripple so RichTooltip owns anchor.DrawOver.
+				plain := ui.Box(c).Key("plain").Padding(8, 12).Radius(8).
+					Role(ui.RoleButton).Label("PlainAnchor").
+					Transition(exitTr)
+				plain.Children(func() {
+					ui.Text(c, "PlainAnchor")
+				})
+				RichTooltip(c, plain, RichTooltipOptions{
+					Title: "Plain tip",
+					Body:  "Plain body",
+				})
+				// Also test Ripple-backed Button inside an exiting block.
+				wrap := ui.Box(c).Key("wrap").Transition(exitTr)
+				wrap.Children(func() {
+					RichTooltip(c, Button(c.Key("btn-anchor"), "ButtonAnchor"), RichTooltipOptions{
+						Title: "Btn tip",
+						Body:  "Button body",
+					})
+				})
+			}
+		})
+	})
+
+	plainInfo := buttonInfo(t, tt, ui.RoleButton, "PlainAnchor")
+	px, py := center(plainInfo.Bounds)
+	tt.Move(px, py)
+	tt.Advance(700 * time.Millisecond)
+	if !tt.HasText("Plain body") {
+		t.Fatal("rich tooltip did not open before leave/unmount")
+	}
+
+	// Move pointer away and verify leave grace closes cleanly with no pending frames.
+	tt.Move(5, 5)
+	tt.Advance(300 * time.Millisecond)
+	if tt.HasText("Plain body") {
+		t.Fatal("rich tooltip stayed open after leave grace elapsed")
+	}
+	if tt.FramePending() {
+		t.Fatal("rich tooltip leave timer left pending frames")
+	}
+
+	// Re-open on PlainAnchor, then unmount during exit transition so ghost DrawOver runs.
+	tt.Move(px, py)
+	tt.Advance(700 * time.Millisecond)
+	if !tt.HasText("Plain body") {
+		t.Fatal("rich tooltip did not reopen")
+	}
+	tt.Click("Toggle")
+	tt.Advance(400 * time.Millisecond)
+	if tt.FramePending() {
+		t.Fatal("exiting rich tooltip anchor left pending frames")
+	}
+}
+
+// TestRichTooltipClampsToViewport checks the rich tooltip clamps its width
+// and height within a compact viewport while keeping Title and Action visible.
+func TestRichTooltipClampsToViewport(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor, ThemeOptions{ReduceMotion: true})
+	var longBody strings.Builder
+	for range 20 {
+		longBody.WriteString("Long tooltip line of supporting explanation text.\n")
+	}
+	clicked := 0
+	tt := ui.NewTester(func(c *ui.Context) {
+		ThemeScope(c, th, func() {
+			ui.Box(c).Size(240, 180).Background(canvasRGB).
+				Padding(12).AlignItems(ui.Start).Children(func() {
+				RichTooltip(c, Button(c, "More"), RichTooltipOptions{
+					Title: "Compact Tip",
+					Body:  longBody.String(),
+					Action: &RichTooltipAction{
+						Label:   "Got it",
+						OnClick: func() { clicked++ },
+					},
+				})
+			})
+		})
+	}, 240, 180)
+
+	info := buttonInfo(t, tt, ui.RoleButton, "More")
+	tt.Move(center(info.Bounds))
+	tt.Advance(700 * time.Millisecond)
+
+	panel, ok := tt.AccessByRole(ui.RoleGroup, "Compact Tip")
+	if !ok {
+		t.Fatal("rich tooltip group missing in compact viewport")
+	}
+	if panel.Bounds.X < 0 || panel.Bounds.X+panel.Bounds.W > 240.5 {
+		t.Fatalf("rich tooltip escaped viewport horizontally: %+v", panel.Bounds)
+	}
+	if panel.Bounds.Y < 0 || panel.Bounds.Y+panel.Bounds.H > 180.5 {
+		t.Fatalf("rich tooltip escaped viewport vertically: %+v", panel.Bounds)
+	}
+	act := buttonInfo(t, tt, ui.RoleButton, "Got it")
+	if act.Bounds.Y+act.Bounds.H > panel.Bounds.Y+panel.Bounds.H+0.5 {
+		t.Fatalf("rich tooltip action clipped below panel: action=%+v panel=%+v", act.Bounds, panel.Bounds)
+	}
+	tt.ClickAt(center(act.Bounds))
+	tt.Frame()
+	if clicked != 1 {
+		t.Fatalf("action clicked %d times, want 1", clicked)
 	}
 }
