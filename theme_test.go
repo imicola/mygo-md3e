@@ -605,3 +605,139 @@ func TestNaNPreferencesDoNotBloatThemeCaches(t *testing.T) {
 		t.Fatalf("O(1) cleanup left stale spec entries: count=%d baseline=%d", gotSpec, baseSpec)
 	}
 }
+
+func TestThemeDensityAndMonoFontPropagation(t *testing.T) {
+	// Zero options remain Comfortable with empty MonoFont and Spacing == 4.
+	def := ThemeFromSeed(DefaultSeedColor)
+	if def.Density != tokens.DensityComfortable || def.MonoFont != "" {
+		t.Fatalf("default Density/MonoFont = (%v, %q), want (Comfortable, empty)", def.Density, def.MonoFont)
+	}
+	if got := def.ToUITheme().Spacing; got != 4 {
+		t.Fatalf("default ui.Theme.Spacing = %v, want 4", got)
+	}
+
+	// Out-of-range Density in ThemeOptions falls back safely to Comfortable.
+	invalid := ThemeFromSeed(DefaultSeedColor, ThemeOptions{Density: tokens.Density(99)})
+	if invalid.Density != tokens.DensityComfortable {
+		t.Fatalf("out-of-range Density = %v, want DensityComfortable", invalid.Density)
+	}
+
+	// Desktop/Compact Density and MonoFont survive WithPreferences, manual edits,
+	// and nested ThemeScope + Overlay inheritance.
+	desk := ThemeFromSeed(ui.Hex("#2e7d32"), ThemeOptions{
+		Density:  tokens.DensityDesktop,
+		MonoFont: "JetBrains Mono",
+	})
+	if desk.Density != tokens.DensityDesktop || desk.MonoFont != "JetBrains Mono" {
+		t.Fatalf("desk Density/MonoFont = (%v, %q)", desk.Density, desk.MonoFont)
+	}
+	if got := desk.ToUITheme().Spacing; got != float32(tokens.DensityDesktop.SpacingUnit()) {
+		t.Fatalf("desk ui.Theme.Spacing = %v, want %v", got, tokens.DensityDesktop.SpacingUnit())
+	}
+
+	high := desk.WithPreferences(ui.Preferences{HighContrast: true, TextScale: 1.25})
+	if high.Density != tokens.DensityDesktop || high.MonoFont != "JetBrains Mono" {
+		t.Fatalf("WithPreferences dropped Density/MonoFont: (%v, %q)", high.Density, high.MonoFont)
+	}
+	edited := high.Clone()
+	edited.Density = tokens.DensityCompact
+	edited.MonoFont = "Cascadia Code"
+	restored := edited.WithPreferences(ui.Preferences{TextScale: 1})
+	if restored.Density != tokens.DensityCompact || restored.MonoFont != "Cascadia Code" {
+		t.Fatalf("caller edits to Density/MonoFont lost on restore: (%v, %q)", restored.Density, restored.MonoFont)
+	}
+
+	var outerGot, innerGot, overlayGot *Theme
+	ui.NewTester(func(c *ui.Context) {
+		ThemeScope(c, desk, func() {
+			outerGot = CurrentTheme(c)
+			ThemeScope(c, restored, func() {
+				innerGot = CurrentTheme(c)
+				ui.Overlay(c, func() {
+					overlayGot = CurrentTheme(c)
+					ui.Box(c).Size(10, 10)
+				})
+			})
+		})
+	}, 200, 160)
+
+	if outerGot == nil || outerGot.Density != tokens.DensityDesktop || outerGot.MonoFont != "JetBrains Mono" {
+		t.Fatalf("outer ThemeScope Density/MonoFont = %+v", outerGot)
+	}
+	if innerGot == nil || innerGot.Density != tokens.DensityCompact || innerGot.MonoFont != "Cascadia Code" {
+		t.Fatalf("inner ThemeScope Density/MonoFont = %+v", innerGot)
+	}
+	if overlayGot == nil || overlayGot.Density != tokens.DensityCompact || overlayGot.MonoFont != "Cascadia Code" {
+		t.Fatalf("overlay ThemeScope Density/MonoFont = %+v", overlayGot)
+	}
+}
+
+func TestTextWithAndTabularNums(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor, ThemeOptions{MonoFont: "Fira Code"})
+	var defR, singleR, middleR, startR, tabR ui.Rect
+
+	tt := ui.NewTester(func(c *ui.Context) {
+		ThemeScope(c, th, func() {
+			ui.Column(c).Width(120).Gap(4).Children(func() {
+				TextWith(c, "Default body text").DrawOver(func(_ *ui.Painter, r ui.Rect) { defR = r })
+				TextWith(c, "A very long file path /usr/local/share/mygo-md3e/typography.go", TextOptions{
+					Role:     tokens.BodySmall,
+					MaxLines: 1,
+					Truncate: TruncateEnd,
+				}).DrawOver(func(_ *ui.Painter, r ui.Rect) { singleR = r })
+				TextWith(c, "A very long file path /usr/local/share/mygo-md3e/typography.go", TextOptions{
+					Role:     tokens.BodySmall,
+					Truncate: TruncateMiddle,
+					Mono:     true,
+				}).DrawOver(func(_ *ui.Painter, r ui.Rect) { middleR = r })
+				TextWith(c, "A very long file path /usr/local/share/mygo-md3e/typography.go", TextOptions{
+					Role:     tokens.BodySmall,
+					MaxLines: 1,
+					Truncate: TruncateStart,
+					Color:    th.Colors.Primary,
+				}).DrawOver(func(_ *ui.Painter, r ui.Rect) { startR = r })
+				TabularNums(TextWith(c, "123,456.78 ms", TextOptions{
+					Role:        tokens.LabelLarge,
+					Emphasized:  true,
+					TabularNums: true,
+				})).DrawOver(func(_ *ui.Painter, r ui.Rect) { tabR = r })
+				// Out-of-range Role falls back safely to BodyMedium (non-zero height).
+				TextWith(c, "Fallback role", TextOptions{Role: tokens.TypeRole(99)})
+			})
+		})
+	}, 240, 220)
+
+	for name, r := range map[string]ui.Rect{
+		"default": defR,
+		"single":  singleR,
+		"middle":  middleR,
+		"start":   startR,
+		"tabular": tabR,
+	} {
+		if r.W <= 0 || r.H <= 0 {
+			t.Fatalf("TextWith(%s) laid out with empty rect %+v", name, r)
+		}
+	}
+	if middleR.W > 120.5 || startR.W > 120.5 || singleR.W > 120.5 {
+		t.Fatalf("truncated texts overflowed 120 DIP container: single=%v middle=%v start=%v",
+			singleR.W, middleR.W, startR.W)
+	}
+	// Single-line BodySmall should not wrap taller than one line (~16 DIP).
+	if middleR.H > 22 || singleR.H > 22 || startR.H > 22 {
+		t.Fatalf("single-line truncated text wrapped unexpectedly: single=%v middle=%v start=%v",
+			singleR.H, middleR.H, startR.H)
+	}
+	if tt.FramePending() {
+		t.Fatal("static TextWith should not leave frames pending")
+	}
+
+	// Passing more than one TextOptions must panic.
+	defer func() {
+		if recover() == nil {
+			t.Fatal("expected TextWith with 2 options to panic")
+		}
+	}()
+	ui.NewTester(func(c *ui.Context) {
+		TextWith(c, "panic", TextOptions{}, TextOptions{})
+	}, 100, 50)
+}

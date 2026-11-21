@@ -186,3 +186,89 @@ func TestElevationLevels(t *testing.T) {
 		t.Errorf("unknown level = %+v, want the zero spec", got)
 	}
 }
+
+func TestDensityScaleAndFallback(t *testing.T) {
+	if DensityComfortable != 0 {
+		t.Fatalf("DensityComfortable = %d, want zero value 0", DensityComfortable)
+	}
+
+	comf := DensityComfortable.Spec()
+	desk := DensityDesktop.Spec()
+	comp := DensityCompact.Spec()
+
+	if comf.ControlScale != 1.0 || comf.PaddingScale != 1.0 || comf.SpacingUnit != 4 {
+		t.Fatalf("comfortable baseline scales mutated: %+v", comf)
+	}
+	if comf.ListOneLineHeight != 56 || comf.ListTwoLineHeight != 72 || comf.ListThreeLineHeight != 88 {
+		t.Fatalf("comfortable list heights mutated: %+v", comf)
+	}
+	if comf.TabHeight != 48 || comf.TextFieldHeight != 56 || comf.NavRailExpandedWidth != 256 {
+		t.Fatalf("comfortable component metrics mutated: %+v", comf)
+	}
+
+	// Strictly monotonic tightening from Comfortable -> Desktop -> Compact.
+	if !(comf.ControlScale > desk.ControlScale && desk.ControlScale > comp.ControlScale && comp.ControlScale > 0) {
+		t.Errorf("control scale not strictly tightening: %v -> %v -> %v", comf.ControlScale, desk.ControlScale, comp.ControlScale)
+	}
+	if !(comf.PaddingScale > desk.PaddingScale && desk.PaddingScale > comp.PaddingScale && comp.PaddingScale > 0) {
+		t.Errorf("padding scale not strictly tightening: %v -> %v -> %v", comf.PaddingScale, desk.PaddingScale, comp.PaddingScale)
+	}
+	if !(comf.SpacingUnit > desk.SpacingUnit && desk.SpacingUnit > comp.SpacingUnit && comp.SpacingUnit > 0) {
+		t.Errorf("spacing unit not strictly tightening: %v -> %v -> %v", comf.SpacingUnit, desk.SpacingUnit, comp.SpacingUnit)
+	}
+	if !(comf.ListOneLineHeight > desk.ListOneLineHeight && desk.ListOneLineHeight > comp.ListOneLineHeight) {
+		t.Errorf("one-line list height not tightening: %v -> %v -> %v", comf.ListOneLineHeight, desk.ListOneLineHeight, comp.ListOneLineHeight)
+	}
+	if !(comf.TabHeight > desk.TabHeight && desk.TabHeight > comp.TabHeight) {
+		t.Errorf("tab height not tightening: %v -> %v -> %v", comf.TabHeight, desk.TabHeight, comp.TabHeight)
+	}
+	if !(comf.TextFieldHeight > desk.TextFieldHeight && desk.TextFieldHeight > comp.TextFieldHeight) {
+		t.Errorf("text field height not tightening: %v -> %v -> %v", comf.TextFieldHeight, desk.TextFieldHeight, comp.TextFieldHeight)
+	}
+	if desk.NavRailExpandedWidth != 192 || comp.NavRailExpandedWidth != 180 {
+		t.Errorf("nav rail widths = (%v, %v), want (192, 180)", desk.NavRailExpandedWidth, comp.NavRailExpandedWidth)
+	}
+
+	// Convenience helpers match Spec fields.
+	one, two, three := DensityDesktop.ListHeights()
+	if one != desk.ListOneLineHeight || two != desk.ListTwoLineHeight || three != desk.ListThreeLineHeight {
+		t.Errorf("ListHeights mismatch: (%v,%v,%v) vs %+v", one, two, three, desk)
+	}
+	if DensityCompact.ControlScale() != comp.ControlScale ||
+		DensityCompact.PaddingScale() != comp.PaddingScale ||
+		DensityCompact.SpacingUnit() != comp.SpacingUnit ||
+		DensityCompact.TabHeight() != comp.TabHeight ||
+		DensityCompact.TextFieldHeight() != comp.TextFieldHeight ||
+		DensityCompact.NavRailExpandedWidth() != comp.NavRailExpandedWidth {
+		t.Errorf("helper methods diverged from Spec()")
+	}
+
+	// Out-of-range densities fall back safely to DensityComfortable.
+	for _, invalid := range []Density{-1, Density(99), Density(-42)} {
+		if invalid.Normalize() != DensityComfortable {
+			t.Errorf("Density(%d).Normalize() = %v, want DensityComfortable", invalid, invalid.Normalize())
+		}
+		if invalid.Spec() != comf {
+			t.Errorf("Density(%d).Spec() = %+v, want comfortable spec", invalid, invalid.Spec())
+		}
+	}
+
+	// ButtonSpec preserves standard tiers under DensityComfortable and scales
+	// smoothly under Desktop / Compact without exceeding half-height radii.
+	for tier := SizeXS; tier <= SizeXL; tier++ {
+		if got := DensityComfortable.ButtonSpec(tier); got != tier.Spec() {
+			t.Errorf("comfortable ButtonSpec(%d) = %+v, want exact %+v", tier, got, tier.Spec())
+		}
+		ds := DensityDesktop.ButtonSpec(tier)
+		cs := DensityCompact.ButtonSpec(tier)
+		if !(tier.Spec().Height > ds.Height && ds.Height > cs.Height && cs.Height > 0) {
+			t.Errorf("tier %d height not tightening: %v -> %v -> %v", tier, tier.Spec().Height, ds.Height, cs.Height)
+		}
+		if ds.PressedRadius > ds.Height/2 || cs.PressedRadius > cs.Height/2 {
+			t.Errorf("tier %d pressed radius exceeds half-height: desktop=%+v compact=%+v", tier, ds, cs)
+		}
+	}
+	if got := DensityDesktop.ButtonSpec(SizeTier(99)); got != (SizeSpec{}) {
+		t.Errorf("invalid tier ButtonSpec = %+v, want zero", got)
+	}
+}

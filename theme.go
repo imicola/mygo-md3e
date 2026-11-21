@@ -94,7 +94,9 @@ type ThemeOptions struct {
 	Variant      tokens.Variant
 	Contrast     tokens.Contrast
 	Motion       motion.Scheme
+	Density      tokens.Density
 	Font         string
+	MonoFont     string
 	TextScale    float32
 	ReduceMotion bool
 	Shapes       *ShapeScale
@@ -107,12 +109,14 @@ type Theme struct {
 	Dark         bool
 	Colors       tokens.ColorScheme
 	Motion       motion.Scheme
+	Density      tokens.Density
 	Typography   tokens.TypographyScale
 	Shapes       ShapeScale
 	Contrast     tokens.Contrast
 	TextScale    float32
 	ReduceMotion bool
 	Font         string
+	MonoFont     string
 
 	// Extended semantic status roles used by banners, badges, and ui.Theme bridging.
 	Warning            ui.Color
@@ -181,12 +185,14 @@ func ThemeFromSeed(seed ui.Color, opts ...ThemeOptions) *Theme {
 		Dark:         o.Dark,
 		Colors:       colors,
 		Motion:       o.Motion,
+		Density:      o.Density.Normalize(),
 		Typography:   typo,
 		Shapes:       shapes,
 		Contrast:     contrast,
 		TextScale:    scale,
 		ReduceMotion: o.ReduceMotion,
 		Font:         o.Font,
+		MonoFont:     o.MonoFont,
 		seed:         seed,
 		hasSeed:      true,
 		variant:      o.Variant,
@@ -452,6 +458,7 @@ func sanitizeTypographyScale(ts tokens.TypographyScale) tokens.TypographyScale {
 // with followed cleared so it can safely serve as a map key.
 func sanitizeTheme(t Theme) Theme {
 	t.followed = nil
+	t.Density = t.Density.Normalize()
 	t.Typography = sanitizeTypographyScale(t.Typography)
 	t.Shapes = sanitizeShapeScale(t.Shapes)
 	t.Contrast = sanitizeContrast(t.Contrast)
@@ -484,6 +491,9 @@ func (t *Theme) rebaseFromFollowed() Theme {
 	if cur.Motion != to.Motion {
 		base.Motion = cur.Motion
 	}
+	if cur.Density != to.Density {
+		base.Density = cur.Density
+	}
 	if cur.Typography != to.Typography {
 		base.Typography = cur.Typography
 	}
@@ -501,6 +511,9 @@ func (t *Theme) rebaseFromFollowed() Theme {
 	}
 	if cur.Font != to.Font {
 		base.Font = cur.Font
+	}
+	if cur.MonoFont != to.MonoFont {
+		base.MonoFont = cur.MonoFont
 	}
 	if cur.Warning != to.Warning {
 		base.Warning = cur.Warning
@@ -664,7 +677,7 @@ func (t *Theme) buildUITheme() ui.Theme {
 		Scrollbar:       cs.OnSurfaceVariant.Alpha(scrollAlpha),
 		ScrollbarWidth:  6,
 		Radius:          radius,
-		Spacing:         4,
+		Spacing:         float32(t.Density.SpacingUnit()),
 		FontSize:        14 * t.EffectiveTextScale(),
 		Font:            t.Font,
 	}
