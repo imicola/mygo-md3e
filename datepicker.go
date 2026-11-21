@@ -179,61 +179,73 @@ func buildDatePicker(c *ui.Context, m datePickerModel, opts []DatePickerOptions)
 
 	th := CurrentTheme(c)
 	reduce := th.ReduceMotion
-	anchor := ui.Box(c).Size(0, 0)
-	st := ui.Local(anchor, datePickerStateKey{}, func() datePickerState { return datePickerState{view: dateViewCalendar} })
 
 	now := c.Now()
 	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 
+	if !modal {
+		// A docked picker keeps its state on the panel itself, so it adds no
+		// zero-width sibling that would take the caller's key or a layout gap.
+		panel := newDatePickerPanel(c, m, o)
+		st := ui.Local(panel, datePickerStateKey{}, func() datePickerState {
+			return datePickerState{view: dateViewCalendar}
+		})
+		st.syncSelection(m, now)
+		fillDatePickerPanel(c, th, panel, st, m, o, today)
+		return panel
+	}
+
+	// A modal keeps its state on a zero-width anchor in the caller's tree: the
+	// dialog itself lives in the window's overlay.
+	anchor := ui.Box(c).Size(0, 0)
+	st := ui.Local(anchor, datePickerStateKey{}, func() datePickerState { return datePickerState{view: dateViewCalendar} })
+	// An ancestor that disables the trigger disables the dialog too, though the
+	// dialog is no child of it.
+	if anchor.IsDisabled() {
+		o.Disabled = true
+	}
+
 	st.syncSelection(m, now)
 
-	if modal {
-		if !*o.Open && !st.shown {
-			return anchor
-		}
-		if *o.Open && !st.shown {
-			// Every opening starts from the calendar, on the chosen month, with
-			// no stale text buffer from an earlier visit.
-			st.view = dateViewCalendar
-			st.cursor = st.selectionAnchor(m, now)
-			st.syncInputsFromSelection(m)
-		}
+	if !*o.Open && !st.shown {
+		return anchor
+	}
+	if *o.Open && !st.shown {
+		// Every opening starts from the calendar, on the chosen month, with
+		// no stale text buffer from an earlier visit.
+		st.view = dateViewCalendar
+		st.cursor = st.selectionAnchor(m, now)
+		st.syncInputsFromSelection(m)
 	}
 
 	show := float32(1)
 	exiting := false
-	if modal {
-		switch {
-		case *o.Open && !st.appeared:
-			st.appeared = true
-			st.shown = true
-			if reduce {
-				show = anchor.Jump(datePickerShowKey{}, 1)
-			} else {
-				anchor.Jump(datePickerShowKey{}, 0)
-				show = 0
-				c.Invalidate()
-			}
-		case !*o.Open && reduce:
+	switch {
+	case *o.Open && !st.appeared:
+		st.appeared = true
+		st.shown = true
+		if reduce {
+			show = anchor.Jump(datePickerShowKey{}, 1)
+		} else {
+			anchor.Jump(datePickerShowKey{}, 0)
+			show = 0
+			c.Invalidate()
+		}
+	case !*o.Open && reduce:
+		st.shown, st.appeared = false, false
+		c.Invalidate()
+		return anchor
+	case !*o.Open:
+		exiting = true
+		show = animateValue(anchor, datePickerShowKey{}, 0, th.Animation(motion.FastSpatial), false)
+		if anchor.Arrived(datePickerShowKey{}) || (anchor.Settled(datePickerShowKey{}) && show <= 0.001) {
 			st.shown, st.appeared = false, false
 			c.Invalidate()
 			return anchor
-		case !*o.Open:
-			exiting = true
-			show = animateValue(anchor, datePickerShowKey{}, 0, th.Animation(motion.FastSpatial), false)
-			if anchor.Arrived(datePickerShowKey{}) || (anchor.Settled(datePickerShowKey{}) && show <= 0.001) {
-				st.shown, st.appeared = false, false
-				c.Invalidate()
-				return anchor
-			}
-		default:
-			st.shown = true
-			show = animateValue(anchor, datePickerShowKey{}, 1, th.Animation(motion.FastSpatial), false)
 		}
-	}
-
-	if !modal {
-		return buildDatePickerPanel(c, th, st, m, o, today, show)
+	default:
+		st.shown = true
+		show = animateValue(anchor, datePickerShowKey{}, 1, th.Animation(motion.FastSpatial), false)
 	}
 
 	cs := th.Colors
@@ -255,7 +267,10 @@ func buildDatePicker(c *ui.Context, m datePickerModel, opts []DatePickerOptions)
 		}
 		back.IgnoreInput(exiting).AccessHidden(exiting)
 		back.Children(func() {
-			panel := buildDatePickerPanel(c, th, st, m, o, today, show)
+			panel := newDatePickerPanel(c, m, o)
+			panel.Opacity(clampF32(show, 0, 1))
+			panel.Scale(0.9+0.1*clampF32(show, 0, 1), 0.9+0.1*clampF32(show, 0, 1))
+			fillDatePickerPanel(c, th, panel, st, m, o, today)
 			// A press on the panel must not reach the scrim.
 			panel.Clicked()
 		})
@@ -341,11 +356,9 @@ func (st *datePickerState) syncInputsFromSelection(m datePickerModel) {
 	st.inputErr = false
 }
 
-// buildDatePickerPanel builds the card or dialog panel: a header, a divider,
-// the calendar, year grid or text fields, and a modal's actions.
-func buildDatePickerPanel(c *ui.Context, th *Theme, st *datePickerState, m datePickerModel, o DatePickerOptions, today time.Time, show float32) ui.Element {
-	rtl := c.Direction() == ui.RightToLeft
-
+// newDatePickerPanel builds the empty Surface card or dialog panel, before its
+// state is bound or its content built.
+func newDatePickerPanel(c *ui.Context, m datePickerModel, o DatePickerOptions) ui.Element {
 	name := o.Label
 	if name == "" {
 		if m.rangeMode() {
@@ -354,7 +367,6 @@ func buildDatePickerPanel(c *ui.Context, th *Theme, st *datePickerState, m dateP
 			name = datePickerLabel
 		}
 	}
-
 	panel := Surface(c, SurfaceOptions{
 		Elevation:  tokens.Level2,
 		ShapeScale: tokens.ShapeExtraLarge,
@@ -365,10 +377,13 @@ func buildDatePickerPanel(c *ui.Context, th *Theme, st *datePickerState, m dateP
 		panel.Role(ui.RoleGroup)
 	}
 	panel.Label(name)
-	panel.Opacity(clampF32(show, 0, 1))
-	if o.Mode == DatePickerModal {
-		panel.Scale(0.9+0.1*clampF32(show, 0, 1), 0.9+0.1*clampF32(show, 0, 1))
-	}
+	return panel
+}
+
+// fillDatePickerPanel adds the header, the calendar, year grid or text fields,
+// and a modal's actions to the panel.
+func fillDatePickerPanel(c *ui.Context, th *Theme, panel ui.Element, st *datePickerState, m datePickerModel, o DatePickerOptions, today time.Time) {
+	rtl := c.Direction() == ui.RightToLeft
 	disabled := o.Disabled || panel.IsDisabled()
 
 	panel.Children(func() {
@@ -386,7 +401,6 @@ func buildDatePickerPanel(c *ui.Context, th *Theme, st *datePickerState, m dateP
 			buildDatePickerActions(c, o)
 		}
 	})
-	return panel
 }
 
 // buildDatePickerHeader builds the month paging row with the title that opens
@@ -593,6 +607,10 @@ func buildDateCalendar(c *ui.Context, th *Theme, st *datePickerState, m datePick
 				return
 			}
 			col := days % 7
+			if rtl {
+				// The rows mirror, so the week's first column sits at the right.
+				col = 6 - col
+			}
 			rowIdx := days / 7
 			x := r.X + float32(col*dateCellWidth)
 			y := r.Y + dateWeekdayH + dateWeekGap + float32(rowIdx*(dateCellHeight+dateWeekGap))

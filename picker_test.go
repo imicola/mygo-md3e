@@ -405,6 +405,190 @@ func TestDatePickerRTLLayout(t *testing.T) {
 	}
 }
 
+// pickerRinged reports whether a 2-pixel Primary focus ring outlines b, at the
+// middle of its four edges.
+func pickerRinged(tt *ui.Tester, b ui.Rect, col ui.Color) bool {
+	img := tt.Image()
+	midY := int(b.Y + b.H/2)
+	midX := int(b.X + b.W/2)
+	return colorMatches(img.RGBAAt(int(b.X)+1, midY), col, 60) &&
+		colorMatches(img.RGBAAt(int(b.X+b.W)-2, midY), col, 60) &&
+		colorMatches(img.RGBAAt(midX, int(b.Y)+1), col, 60) &&
+		colorMatches(img.RGBAAt(midX, int(b.Y+b.H)-2), col, 60)
+}
+
+// TestDatePickerRTLFocusRing checks the keyboard focus ring follows the cursor
+// to the mirrored column, not the column at the same index from the left.
+func TestDatePickerRTLFocusRing(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor)
+	cs := th.Colors
+	value := pickerDay(2026, time.November, 15)
+	tt := pickerCanvas(th, func(c *ui.Context) {
+		DatePicker(c, &value, DatePickerOptions{Label: "Due date"})
+	})
+	tt.SetDirection(ui.RightToLeft)
+	tt.Advance(300 * time.Millisecond)
+
+	// Tab past the header's four controls to the grid, which shows its keyboard
+	// focus ring.
+	for range 5 {
+		tt.Key(0, ui.KeyTab)
+	}
+	// Right to left, Left moves on to the next day, one column left.
+	tt.Key(0, ui.KeyLeft)
+	tt.Advance(300 * time.Millisecond)
+	next := cellInfo(t, tt, pickerDayLabel(pickerDay(2026, time.November, 16)))
+	prev := cellInfo(t, tt, pickerDayLabel(pickerDay(2026, time.November, 15)))
+	if next.Bounds.X >= prev.Bounds.X {
+		t.Fatalf("the next day sits at %.1f, not left of %.1f", next.Bounds.X, prev.Bounds.X)
+	}
+	if !next.Focused {
+		t.Fatal("the arrow keys did not move the cursor to the next day")
+	}
+	if !pickerRinged(tt, next.Bounds, cs.Primary) {
+		t.Fatalf("no focus ring around the cursor at %v", next.Bounds)
+	}
+	// The column at the same index from the left belongs to another day: the
+	// ring must not paint there.
+	if wrong := cellInfo(t, tt, pickerDayLabel(pickerDay(2026, time.November, 20))); pickerRinged(tt, wrong.Bounds, cs.Primary) {
+		t.Fatalf("the focus ring paints the unmirrored column at %v", wrong.Bounds)
+	}
+	if tt.FramePending() {
+		t.Fatal("the focused right-to-left picker keeps asking for frames")
+	}
+}
+
+// TestDatePickerDockedKeyAndLayout checks a docked picker adds no zero-width
+// sibling: with two of them in a gapped column, the panels sit at the column's
+// top and one gap apart, and their keys keep their states apart when they swap.
+func TestDatePickerDockedKeyAndLayout(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor)
+	first := pickerDay(2026, time.November, 15)
+	second := pickerDay(2027, time.January, 10)
+	swap := false
+	tt := ui.NewTester(func(c *ui.Context) {
+		ThemeScope(c, th, func() {
+			ui.Box(c).Size(480, 900).Background(canvasRGB).Padding(16).AlignItems(ui.Start).Children(func() {
+				ui.Column(c).Gap(24).AlignItems(ui.Start).Children(func() {
+					buildFirst := func() {
+						DatePicker(c.Key("first"), &first, DatePickerOptions{Label: "First"})
+					}
+					buildSecond := func() {
+						DatePicker(c.Key("second"), &second, DatePickerOptions{Label: "Second"})
+					}
+					if swap {
+						buildSecond()
+						buildFirst()
+						return
+					}
+					buildFirst()
+					buildSecond()
+				})
+			})
+		})
+	}, 480, 900)
+	tt.Frame()
+
+	firstInfo, ok := tt.AccessByRole(ui.RoleGroup, "First")
+	if !ok {
+		t.Fatal("the first picker is not a named group")
+	}
+	secondInfo, ok := tt.AccessByRole(ui.RoleGroup, "Second")
+	if !ok {
+		t.Fatal("the second picker is not a named group")
+	}
+	if firstInfo.Bounds.Y != 16 {
+		t.Fatalf("the first picker starts at %.1f, not at the column top 16: a zero-width sibling takes a gap", firstInfo.Bounds.Y)
+	}
+	if got, want := secondInfo.Bounds.Y, firstInfo.Bounds.Y+firstInfo.Bounds.H+24; got != want {
+		t.Fatalf("the second picker starts at %.1f, want %.1f: the gap does not match the column's", got, want)
+	}
+	if firstInfo.Bounds.X != secondInfo.Bounds.X {
+		t.Fatalf("the pickers start at different x: %.1f and %.1f", firstInfo.Bounds.X, secondInfo.Bounds.X)
+	}
+
+	// Page the first picker's month on.
+	for _, a := range tt.AccessAll() {
+		if a.Role == ui.RoleButton && a.Name == "Next month" && a.Bounds.Y < secondInfo.Bounds.Y {
+			tt.ClickAt(center(a.Bounds))
+			break
+		}
+	}
+	tt.Advance(300 * time.Millisecond)
+	if _, ok := tt.AccessByRole(ui.RoleGrid, "December 2026"); !ok {
+		t.Fatal("paging the first picker did not show December 2026")
+	}
+	if _, ok := tt.AccessByRole(ui.RoleGrid, "January 2027"); !ok {
+		t.Fatal("paging the first picker also changed the second")
+	}
+
+	// Switch the second picker to its text entry view.
+	for _, a := range tt.AccessAll() {
+		if a.Role == ui.RoleButton && a.Name == "Type date" && a.Bounds.Y > secondInfo.Bounds.Y {
+			tt.ClickAt(center(a.Bounds))
+			break
+		}
+	}
+	tt.Advance(300 * time.Millisecond)
+	if _, ok := tt.AccessByRole(ui.RoleButton, "Show calendar"); !ok {
+		t.Fatal("the second picker did not switch to its date field")
+	}
+	if _, ok := tt.AccessByRole(ui.RoleGrid, "December 2026"); !ok {
+		t.Fatal("switching the second picker changed the first")
+	}
+
+	// Swapping the two keyed pickers keeps each state with its own key: the
+	// first still shows its paged month, the second its text entry view.
+	swap = true
+	tt.Frame()
+	firstInfo, _ = tt.AccessByRole(ui.RoleGroup, "First")
+	secondInfo, _ = tt.AccessByRole(ui.RoleGroup, "Second")
+	if field := buttonInfo(t, tt, ui.RoleTextField, "Date"); field.Bounds.Y < secondInfo.Bounds.Y ||
+		field.Bounds.Y > secondInfo.Bounds.Y+secondInfo.Bounds.H {
+		t.Fatalf("the date field at %.1f is outside the Second panel at %v: the keyed state did not follow its key",
+			field.Bounds.Y, secondInfo.Bounds)
+	}
+	grid, ok := tt.AccessByRole(ui.RoleGrid, "December 2026")
+	if !ok {
+		t.Fatal("the first picker lost its paged month when the pickers swapped")
+	}
+	if grid.Bounds.Y < firstInfo.Bounds.Y || grid.Bounds.Y > firstInfo.Bounds.Y+firstInfo.Bounds.H {
+		t.Fatalf("the December 2026 grid at %.1f is outside the First panel at %v", grid.Bounds.Y, firstInfo.Bounds)
+	}
+	if tt.FramePending() {
+		t.Fatal("the docked pickers keep asking for frames")
+	}
+}
+
+// TestDatePickerModalAncestorDisabled checks a disabled ancestor disables an
+// open modal picker that was not given Disabled itself.
+func TestDatePickerModalAncestorDisabled(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor)
+	open := true
+	value := pickerDay(2026, time.November, 12)
+	tt := pickerCanvas(th, func(c *ui.Context) {
+		ui.Box(c).Disabled(true).Children(func() {
+			DatePicker(c, &value, DatePickerOptions{Mode: DatePickerModal, Open: &open, Label: "Due date"})
+		})
+	})
+	tt.Advance(600 * time.Millisecond)
+	if _, ok := tt.AccessByRole(ui.RoleDialog, "Due date"); !ok {
+		t.Fatal("the disabled ancestor's modal is not a dialog named Due date")
+	}
+	cell := cellInfo(t, tt, pickerDayLabel(pickerDay(2026, time.November, 20)))
+	if !cell.Disabled {
+		t.Fatal("a day of the disabled ancestor's modal does not read as disabled")
+	}
+	tt.ClickAt(center(cell.Bounds))
+	tt.Advance(300 * time.Millisecond)
+	if value.Day() != 12 {
+		t.Fatalf("the disabled ancestor's modal chose day %d", value.Day())
+	}
+	if tt.FramePending() {
+		t.Fatal("the disabled modal keeps asking for frames")
+	}
+}
+
 // TestDatePickerReduceMotion checks a reduced-motion picker settles without
 // animation frames and still chooses days.
 func TestDatePickerReduceMotion(t *testing.T) {
@@ -716,6 +900,84 @@ func TestTimePickerReduceMotionAndDisabled(t *testing.T) {
 	}
 	if dis.FramePending() {
 		t.Fatal("the disabled picker keeps asking for frames")
+	}
+}
+
+// TestTimePickerRTLLayout checks the hours stay left of the minutes, and the
+// input fields with them, on a right-to-left page.
+func TestTimePickerRTLLayout(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor)
+	value := time.Date(2026, time.May, 1, 10, 30, 0, 0, time.Local)
+	tt := pickerCanvas(th, func(c *ui.Context) {
+		TimePicker(c, &value, TimePickerOptions{HourCycle: 12})
+	})
+	tt.SetDirection(ui.RightToLeft)
+	tt.Advance(300 * time.Millisecond)
+
+	hour, ok := tt.AccessByRole(ui.RoleTab, "Hour")
+	if !ok {
+		t.Fatal("the hours are not a named tab")
+	}
+	minute, _ := tt.AccessByRole(ui.RoleTab, "Minute")
+	if hour.Bounds.X >= minute.Bounds.X {
+		t.Fatalf("right to left puts the hours at %.1f and the minutes at %.1f", hour.Bounds.X, minute.Bounds.X)
+	}
+
+	tt.Click("Switch to input")
+	tt.Advance(300 * time.Millisecond)
+	hourField := buttonInfo(t, tt, ui.RoleTextField, "Hour")
+	minuteField := buttonInfo(t, tt, ui.RoleTextField, "Minute")
+	if hourField.Bounds.X >= minuteField.Bounds.X {
+		t.Fatalf("right to left puts the hour field at %.1f and the minute field at %.1f",
+			hourField.Bounds.X, minuteField.Bounds.X)
+	}
+	if tt.FramePending() {
+		t.Fatal("the right-to-left picker keeps asking for frames")
+	}
+}
+
+// TestTimePickerDisableMidDrag checks disabling a picker while the pointer
+// holds the dial ends the drag, so enabling it again does not pick on hover.
+func TestTimePickerDisableMidDrag(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor)
+	value := time.Date(2026, time.May, 1, 10, 30, 0, 0, time.Local)
+	disabled := false
+	tt := pickerCanvas(th, func(c *ui.Context) {
+		TimePicker(c, &value, TimePickerOptions{HourCycle: 12, Disabled: disabled})
+	})
+	tt.Advance(time.Second)
+	_, cx, cy := dialInfo(t, tt)
+
+	tt.Press(cx+timeDialOuterR, cy)
+	if value.Hour() != 3 {
+		t.Fatalf("the press chose hour %d, want 3", value.Hour())
+	}
+	disabled = true
+	tt.Frame()
+	disabled = false
+	tt.Frame()
+
+	held := value
+	tt.Move(cx-timeDialOuterR, cy)
+	tt.Advance(300 * time.Millisecond)
+	tt.Release(cx-timeDialOuterR, cy)
+	tt.Advance(300 * time.Millisecond)
+	if value != held {
+		t.Fatalf("re-enabling picked %v on hover, want %v", value, held)
+	}
+
+	// A fresh press still picks, and releasing an hour springs to the minutes.
+	tt.Press(cx, cy+timeDialOuterR)
+	tt.Release(cx, cy+timeDialOuterR)
+	tt.Advance(time.Second)
+	if value.Hour() != 6 {
+		t.Fatalf("the press after re-enabling chose hour %d, want 6", value.Hour())
+	}
+	if info, ok := tt.AccessByRole(ui.RoleTab, "Minute"); !ok || !info.Selected {
+		t.Fatal("releasing an hour after re-enabling does not switch to the minutes")
+	}
+	if tt.FramePending() {
+		t.Fatal("the re-enabled picker keeps asking for frames")
 	}
 }
 

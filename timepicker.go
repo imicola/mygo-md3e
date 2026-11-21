@@ -132,6 +132,11 @@ func TimePicker(c *ui.Context, value *time.Time, opts ...TimePickerOptions) ui.E
 		return timePickerState{mode: o.Mode, segment: timeSegmentHour}
 	})
 	disabled := o.Disabled || outer.IsDisabled()
+	if disabled {
+		// A disable in the middle of a drag must not leave the dial stuck as if
+		// the pointer were still held down.
+		st.held, st.picked, st.releaseAdvance = false, false, false
+	}
 
 	h, m := value.Hour(), value.Minute()
 	if value.IsZero() {
@@ -195,7 +200,9 @@ func TimePicker(c *ui.Context, value *time.Time, opts ...TimePickerOptions) ui.E
 		// The hours and minutes shown as tabs, with the half of the day.
 		display := ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(6)
 		display.Children(func() {
-			tabs := ui.Row(c).Role(ui.RoleTabList).AlignItems(ui.Center).Gap(0)
+			// The hours and minutes read left to right as Hour : Minute even on a
+			// right-to-left page, as ui.TimeInput does.
+			tabs := ui.Row(c).Role(ui.RoleTabList).Direction(ui.LeftToRight).AlignItems(ui.Center).Gap(0)
 			tabs.Children(func() {
 				timeTab(c, th, formatHour(h, hour12), "Hour", st.segment == timeSegmentHour, disabled, func() {
 					st.segment = timeSegmentHour
@@ -479,7 +486,8 @@ func buildTimeDial(c *ui.Context, th *Theme, st *timePickerState, value *time.Ti
 // time applies at once and an invalid one shows its error on the next frame.
 func buildTimeInputs(c *ui.Context, th *Theme, st *timePickerState, value *time.Time, disabled, hour12 bool, h, m int, setClock func(h, m int)) {
 	cs := th.Colors
-	row := ui.Row(c).FillWidth().AlignItems(ui.Start).Gap(8)
+	// Hour : Minute keeps its left-to-right order on a right-to-left page.
+	row := ui.Row(c).FillWidth().Direction(ui.LeftToRight).AlignItems(ui.Start).Gap(8)
 	row.Children(func() {
 		hourRange := "0–23"
 		if hour12 {
