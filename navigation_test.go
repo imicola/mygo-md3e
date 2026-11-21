@@ -1147,3 +1147,286 @@ func TestNavigationRailDensityAndExpandedWidth(t *testing.T) {
 		})
 	}
 }
+
+// verticalColorSpan returns the vertical [minY, maxY] extent of pixels matching
+// want within tolerance tol inside the column strip [x0, x1) x [y0, y1).
+func verticalColorSpan(img *image.RGBA, x0, x1, y0, y1 int, want ui.Color, tol int) (minY, maxY int, count int) {
+	minY, maxY = -1, -1
+	b := img.Bounds()
+	x0, x1 = max(x0, b.Min.X), min(x1, b.Max.X)
+	y0, y1 = max(y0, b.Min.Y), min(y1, b.Max.Y)
+	for y := y0; y < y1; y++ {
+		for x := x0; x < x1; x++ {
+			if colorMatches(img.RGBAAt(x, y), want, tol) {
+				if minY < 0 {
+					minY = y
+				}
+				maxY = y
+				count++
+			}
+		}
+	}
+	return minY, maxY, count
+}
+
+// TestNavigationRailSlidingIndicatorAndAccentBar checks that switching
+// NavigationRail selection smoothly slides the shared indicator vertically
+// between destinations (never snapping/fading in place), tracks both collapsed
+// and expanded states, paints and mirrors the optional leading accent bar in
+// LTR/RTL, follows scroll offsets, and snaps immediately under ReduceMotion.
+func TestNavigationRailSlidingIndicatorAndAccentBar(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor)
+	cs := th.Colors
+	destinations := []NavigationDestination{
+		{Label: "Home", Icon: mdicon.Add.Draw},
+		{Label: "Search", Icon: mdicon.Search.Draw},
+		{Label: "Saved", Icon: mdicon.Star.Draw},
+		{Label: "Settings", Icon: mdicon.Edit.Draw},
+	}
+
+	// 1. Collapsed rail: first frame lands on item 0 without flying from 0;
+	// switching 0 -> 3 produces intermediate Y coordinates strictly between
+	// item 0 and item 3 before settling with FramePending() == false.
+	sel := 0
+	tt := navigationCanvas(th, 320, 360, func(c *ui.Context) {
+		ui.Row(c).FillHeight().Children(func() {
+			NavigationRail(c, destinations, NavigationRailOptions{
+				Selected: &sel,
+				Label:    "SlidingRail",
+			})
+		})
+	})
+	if tt.FramePending() {
+		t.Fatal("initial NavigationRail frame should land immediately without pending frames")
+	}
+	home := tabInfo(t, tt, "Home")
+	settings := tabInfo(t, tt, "Settings")
+	probeX0, probeX1 := int(home.Bounds.X+4), int(home.Bounds.X+12)
+	y0Min, y0Max, c0 := verticalColorSpan(tt.Image(), probeX0, probeX1, 0, 360, cs.SecondaryContainer, 14)
+	if c0 == 0 {
+		t.Fatal("initial collapsed rail pill did not paint on item 0")
+	}
+	startCenterY := float32(y0Min+y0Max) / 2
+
+	sel = 3
+	tt.Frame()
+	if !tt.FramePending() {
+		t.Fatal("switching NavigationRail destination did not schedule sliding animation frames")
+	}
+	tt.Advance(48 * time.Millisecond)
+	midMin, midMax, midCount := verticalColorSpan(tt.Image(), probeX0, probeX1, 0, 360, cs.SecondaryContainer, 14)
+	if midCount == 0 {
+		t.Fatal("mid-flight collapsed rail sliding pill disappeared")
+	}
+	midCenterY := float32(midMin+midMax) / 2
+	targetPillCenterY := settings.Bounds.Y + navRailIconTop + float32(navRailIndicatorHigh)/2
+	if !(midCenterY > startCenterY+10 && midCenterY < targetPillCenterY-10) {
+		t.Fatalf("collapsed pill mid-flight center Y = %.1f, want strictly between start %.1f and target %.1f",
+			midCenterY, startCenterY, targetPillCenterY)
+	}
+
+	tt.Advance(time.Second)
+	if tt.FramePending() {
+		t.Fatal("collapsed NavigationRail kept requesting frames after sliding settled")
+	}
+	endMin, endMax, endCount := verticalColorSpan(tt.Image(), probeX0, probeX1, 0, 360, cs.SecondaryContainer, 14)
+	if endCount == 0 {
+		t.Fatal("settled collapsed rail pill missing on item 3")
+	}
+	endCenterY := float32(endMin+endMax) / 2
+	if absF32(endCenterY-targetPillCenterY) > 2.5 {
+		t.Fatalf("settled collapsed pill center Y = %.1f, want %.1f", endCenterY, targetPillCenterY)
+	}
+	if _, _, leftover := verticalColorSpan(tt.Image(), probeX0, probeX1, int(home.Bounds.Y), int(home.Bounds.Y+home.Bounds.H), cs.SecondaryContainer, 14); leftover != 0 {
+		t.Fatalf("old item 0 still painted %d pill pixels after settling on item 3", leftover)
+	}
+
+	// 2. Expanded rail with NavigationRailIndicatorPillWithBar: both pill and
+	// leading Primary accent bar glide together, and the bar mirrors to the
+	// right edge in RTL.
+	expSel := 0
+	expanded := true
+	barTT := navigationCanvas(th, 360, 360, func(c *ui.Context) {
+		ui.Row(c).FillHeight().Children(func() {
+			NavigationRail(c, destinations, NavigationRailOptions{
+				Selected:       &expSel,
+				Expanded:       &expanded,
+				IndicatorStyle: NavigationRailIndicatorPillWithBar,
+				Label:          "BarRail",
+			})
+		})
+	})
+	if barTT.FramePending() {
+		t.Fatal("initial expanded NavigationRail should start settled")
+	}
+	railInfo, _ := barTT.AccessByRole(ui.RoleNavigation, "BarRail")
+	leftStripX0, leftStripX1 := int(railInfo.Bounds.X+3), int(railInfo.Bounds.X+9)
+	rightStripX0, rightStripX1 := int(railInfo.Bounds.X+railInfo.Bounds.W-9), int(railInfo.Bounds.X+railInfo.Bounds.W-3)
+
+	b0Min, b0Max, b0Count := verticalColorSpan(barTT.Image(), leftStripX0, leftStripX1, 0, 360, cs.Primary, 16)
+	if b0Count == 0 {
+		t.Fatal("LTR NavigationRailIndicatorPillWithBar did not paint leading Primary accent bar")
+	}
+	if _, _, rightCount := verticalColorSpan(barTT.Image(), rightStripX0, rightStripX1, 0, 360, cs.Primary, 16); rightCount != 0 {
+		t.Fatalf("LTR accent bar leaked %d pixels onto right edge", rightCount)
+	}
+	barStartY := float32(b0Min+b0Max) / 2
+	expSettings := tabInfo(t, barTT, "Settings")
+	barTargetY := expSettings.Bounds.Y + expSettings.Bounds.H/2
+
+	expSel = 3
+	barTT.Frame()
+	barTT.Advance(48 * time.Millisecond)
+	bMidMin, bMidMax, bMidCount := verticalColorSpan(barTT.Image(), leftStripX0, leftStripX1, 0, 360, cs.Primary, 16)
+	if bMidCount == 0 {
+		t.Fatal("mid-flight leading accent bar missing during vertical slide")
+	}
+	barMidY := float32(bMidMin+bMidMax) / 2
+	if !(barMidY > barStartY+10 && barMidY < barTargetY-10) {
+		t.Fatalf("accent bar mid-flight center Y = %.1f, want strictly between %.1f and %.1f", barMidY, barStartY, barTargetY)
+	}
+	barTT.Advance(time.Second)
+	if barTT.FramePending() {
+		t.Fatal("expanded NavigationRail with accent bar kept requesting frames after settle")
+	}
+	bEndMin, bEndMax, bEndCount := verticalColorSpan(barTT.Image(), leftStripX0, leftStripX1, 0, 360, cs.Primary, 16)
+	if bEndCount == 0 || absF32(float32(bEndMin+bEndMax)/2-barTargetY) > 2.5 {
+		t.Fatalf("settled LTR accent bar center Y = %.1f (count=%d), want %.1f", float32(bEndMin+bEndMax)/2, bEndCount, barTargetY)
+	}
+
+	// Switch to RTL: accent bar must mirror to the right edge and slide back cleanly.
+	barTT.SetDirection(ui.RightToLeft)
+	barTT.Advance(100 * time.Millisecond)
+	rtlRail, _ := barTT.AccessByRole(ui.RoleNavigation, "BarRail")
+	rtlLeftX0, rtlLeftX1 := int(rtlRail.Bounds.X+3), int(rtlRail.Bounds.X+9)
+	rtlRightX0, rtlRightX1 := int(rtlRail.Bounds.X+rtlRail.Bounds.W-9), int(rtlRail.Bounds.X+rtlRail.Bounds.W-3)
+	if _, _, rc := verticalColorSpan(barTT.Image(), rtlRightX0, rtlRightX1, int(expSettings.Bounds.Y), int(expSettings.Bounds.Y+expSettings.Bounds.H), cs.Primary, 16); rc == 0 {
+		t.Fatal("RTL NavigationRailIndicatorPillWithBar did not mirror accent bar to the right edge")
+	}
+	if _, _, lc := verticalColorSpan(barTT.Image(), rtlLeftX0, rtlLeftX1, 0, 360, cs.Primary, 16); lc != 0 {
+		t.Fatalf("RTL accent bar still painted %d pixels on the left edge", lc)
+	}
+	expSel = 0
+	barTT.Frame()
+	barTT.Advance(48 * time.Millisecond)
+	rbMin, rbMax, rbCount := verticalColorSpan(barTT.Image(), rtlRightX0, rtlRightX1, 0, 360, cs.Primary, 16)
+	if rbCount == 0 || !(float32(rbMin+rbMax)/2 > barStartY+10 && float32(rbMin+rbMax)/2 < barTargetY-10) {
+		t.Fatalf("RTL accent bar did not slide smoothly back toward item 0: span=[%d,%d] count=%d", rbMin, rbMax, rbCount)
+	}
+	barTT.Advance(time.Second)
+	if barTT.FramePending() {
+		t.Fatal("RTL NavigationRail kept requesting frames after sliding back")
+	}
+
+	// 3. ReduceMotion: switching selection, deselecting (-1), and reselecting
+	// snap immediately with zero pending frames.
+	rmTheme := ThemeFromSeed(DefaultSeedColor, ThemeOptions{ReduceMotion: true})
+	rmSel := 0
+	rmExp := true
+	rmTT := navigationCanvas(rmTheme, 360, 360, func(c *ui.Context) {
+		ui.Row(c).FillHeight().Children(func() {
+			NavigationRail(c, destinations, NavigationRailOptions{
+				Selected:       &rmSel,
+				Expanded:       &rmExp,
+				IndicatorStyle: NavigationRailIndicatorPillWithBar,
+				Label:          "RMRail",
+			})
+		})
+	})
+	if rmTT.FramePending() {
+		t.Fatal("ReduceMotion rail requested frames on initial mount")
+	}
+	rmSettings := tabInfo(t, rmTT, "Settings")
+	rmSel = 3
+	rmTT.Frame()
+	if rmTT.FramePending() {
+		t.Fatal("ReduceMotion rail selection switch left frames pending")
+	}
+	if _, _, cnt := verticalColorSpan(rmTT.Image(), 3, 9, int(rmSettings.Bounds.Y), int(rmSettings.Bounds.Y+rmSettings.Bounds.H), rmTheme.Colors.Primary, 16); cnt == 0 {
+		t.Fatal("ReduceMotion rail accent bar did not snap immediately to item 3")
+	}
+	rmSel = -1
+	rmTT.Frame()
+	if rmTT.FramePending() {
+		t.Fatal("ReduceMotion rail deselection left frames pending")
+	}
+	if _, _, cnt := verticalColorSpan(rmTT.Image(), 3, 9, 0, 360, rmTheme.Colors.Primary, 16); cnt != 0 {
+		t.Fatalf("deselected rail still painted %d accent bar pixels", cnt)
+	}
+	rmSel = 2
+	rmTT.Frame()
+	if rmTT.FramePending() {
+		t.Fatal("ReduceMotion rail reselection left frames pending")
+	}
+	rmSaved := tabInfo(t, rmTT, "Saved")
+	if _, _, cnt := verticalColorSpan(rmTT.Image(), 3, 9, int(rmSaved.Bounds.Y), int(rmSaved.Bounds.Y+rmSaved.Bounds.H), rmTheme.Colors.Primary, 16); cnt == 0 {
+		t.Fatal("ReduceMotion rail accent bar did not snap immediately on reselect")
+	}
+
+	// 4. Scrolled viewport: indicator and accent bar follow scroll offsets cleanly.
+	scrollDests := []NavigationDestination{
+		{Label: "Home", Icon: mdicon.Add.Draw},
+		{Label: "Search", Icon: mdicon.Search.Draw},
+		{Label: "Saved", Icon: mdicon.Star.Draw},
+		{Label: "Library", Icon: mdicon.Check.Draw},
+		{Label: "Inbox", Icon: mdicon.MoreHoriz.Draw},
+		{Label: "Help", Icon: mdicon.Edit.Draw},
+	}
+	scrollSel := 0
+	scrollExp := true
+	scrollTT := navigationCanvas(th, 320, 220, func(c *ui.Context) {
+		ui.Row(c).FillHeight().Children(func() {
+			NavigationRail(c, scrollDests, NavigationRailOptions{
+				Selected:       &scrollSel,
+				Expanded:       &scrollExp,
+				IndicatorStyle: NavigationRailIndicatorPillWithBar,
+				Label:          "ScrollRail",
+			})
+		})
+	})
+	scrollRail, _ := scrollTT.AccessByRole(ui.RoleNavigation, "ScrollRail")
+	scrollTT.Wheel(scrollRail.Bounds.X+scrollRail.Bounds.W/2, scrollRail.Bounds.Y+scrollRail.Bounds.H/2, 0, 300)
+	scrollTT.Advance(400 * time.Millisecond)
+	if err := scrollTT.Click("Help"); err != nil {
+		t.Fatalf("clicking scrolled Help destination: %v", err)
+	}
+	scrollTT.Advance(time.Second)
+	if scrollSel != len(scrollDests)-1 {
+		t.Fatalf("scrolled rail selected %d, want %d", scrollSel, len(scrollDests)-1)
+	}
+	if scrollTT.FramePending() {
+		t.Fatal("scrolled rail kept requesting frames after settle")
+	}
+	helpInfo := tabInfo(t, scrollTT, "Help")
+	if _, _, cnt := verticalColorSpan(scrollTT.Image(), int(scrollRail.Bounds.X+3), int(scrollRail.Bounds.X+9), int(helpInfo.Bounds.Y), int(helpInfo.Bounds.Y+helpInfo.Bounds.H), cs.Primary, 16); cnt == 0 {
+		t.Fatalf("scrolled rail accent bar missed Help bounds %+v", helpInfo.Bounds)
+	}
+
+	// 5. Exit ghost safety: mounting NavigationRail inside an ElementTransition
+	// that exits must keep drawing its frozen snapshot cleanly and settle.
+	showRail := true
+	ghostSel := 1
+	ghostTT := navigationCanvas(th, 320, 260, func(c *ui.Context) {
+		ui.Box(c).Fill().Children(func() {
+			if showRail {
+				NavigationRail(c.Key("ghost-rail"), destinations, NavigationRailOptions{
+					Selected:       &ghostSel,
+					IndicatorStyle: NavigationRailIndicatorPillWithBar,
+					Label:          "GhostRail",
+				}).Transition(ui.ElementTransition{
+					Duration: 150 * time.Millisecond,
+					Exit:     &ui.Motion{Opacity: 0},
+				})
+			}
+		})
+	})
+	showRail = false
+	ghostTT.Frame()
+	for range 5 {
+		ghostTT.Advance(30 * time.Millisecond)
+	}
+	ghostTT.Advance(300 * time.Millisecond)
+	if ghostTT.FramePending() {
+		t.Fatal("exiting NavigationRail ghost kept requesting frames after settle")
+	}
+}

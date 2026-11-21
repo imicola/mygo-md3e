@@ -222,7 +222,8 @@ func main() {
 | Card 与 Divider | `ElevatedCard`、`FilledCard`、`OutlinedCard`、`Card`、`Divider` |
 | 卡片式快捷开关与操作行 | `SwitchCard`、`ActionTile` |
 | Expressive 分段列表 | `List`、`ListItem` |
-| 导航组件 | `NavigationBar`、`NavigationRail`、`NavigationDrawer` |
+| 导航组件 | `NavigationBar`、`NavigationRail`（`NavigationRailIndicatorStyle`）、`NavigationDrawer` |
+| 页面切换过渡容器 | `PageTransition`、`AnimatedContent`（`TransitionFadeThrough` / `TransitionSharedAxisY` / `TransitionSharedAxisX` / `TransitionNone`） |
 | 滑动指示器与胶囊分段 Tabs | `PrimaryTabs`、`SecondaryTabs`、`PillTabs`、`SegmentedTabs` |
 | Carousel（Hero / MultiBrowse / Uncontained） | `Carousel` |
 | 对话框与底部抽屉 | `AlertDialog`、`FullScreenDialog`、`BottomSheet` |

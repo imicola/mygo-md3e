@@ -72,7 +72,8 @@ Go 模块路径：`github.com/imicola/mygo-md3e`（直接依赖上游 `github.co
 ├── divider.go              # M7: Horizontal / Vertical Divider
 ├── list.go                 # M7: Expressive List & ListItem（分段圆角、前/尾槽位）
 ├── navbar.go               # M7: NavigationBar
-├── navrail.go              # M7: NavigationRail（支持折叠/展开）
+├── navrail.go              # M7: NavigationRail（支持折叠/展开、FastSpatial 纵向滑移指示器与可选引导竖条）
+├── transition.go           # 页面切换过渡容器（PageTransition / AnimatedContent：FadeThrough / SharedAxisY / SharedAxisX / None）
 ├── navdrawer.go            # M7: ModalNavigationDrawer & DismissibleNavigationDrawer
 ├── tabs.go                 # M7: PrimaryTabs & SecondaryTabs
 ├── carousel.go             # M7: Carousel（Hero / MultiBrowse / Uncontained）

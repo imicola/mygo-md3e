@@ -222,7 +222,8 @@ Dependencies are strictly acyclic: `tokens` -> `motion` -> `shape` -> root `md3e
 | Cards & Divider | `ElevatedCard`, `FilledCard`, `OutlinedCard`, `Card`, `Divider` |
 | Quick Toggle & Action Tiles | `SwitchCard`, `ActionTile` |
 | Expressive Segmented List | `List`, `ListItem` |
-| Navigation Bar / Rail / Drawer | `NavigationBar`, `NavigationRail`, `NavigationDrawer` |
+| Navigation Bar / Rail / Drawer | `NavigationBar`, `NavigationRail` (`NavigationRailIndicatorStyle`), `NavigationDrawer` |
+| Page Transition Container | `PageTransition`, `AnimatedContent` (`TransitionFadeThrough` / `TransitionSharedAxisY` / `TransitionSharedAxisX` / `TransitionNone`) |
 | Sliding-Indicator & Pill Tabs | `PrimaryTabs`, `SecondaryTabs`, `PillTabs`, `SegmentedTabs` |
 | Carousel (Hero / MultiBrowse / Uncontained) | `Carousel` |
 | Dialogs & BottomSheet | `AlertDialog`, `FullScreenDialog`, `BottomSheet` |
