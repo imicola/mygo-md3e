@@ -87,7 +87,7 @@ MD3E 将动效分为 **Spatial（空间：位移、缩放、尺寸、圆角、�
 | **L (Large)** | `96` | Full / `28` | `16` | `24` (HeadlineSmall) | `32` | `48` |
 | **XL (ExtraLarge)** | `136` | Full / `28` | `16` | `32` (HeadlineLarge) | `40` | `64` |
 
-*(注：IconButton 与 SplitButton 依据此尺寸档位按对应宽度、间距与连接内侧圆角微调，详见各组件任务点。)*
+*(注：IconButton 与 SplitButton 依据此尺寸档位按对应宽度、间距与连接内侧圆角微调，详见 `iconbutton.go`、`splitbutton.go` 实现与 GoDoc 说明。)*
 
 ### 3.3 35 种 MD3E 几何形状与双射 Morph
 `shape` 包须实现完整 35 种内置形状构造器（与 Google `MaterialShapes` 一致）：

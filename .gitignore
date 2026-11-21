@@ -1,5 +1,8 @@
-# Upstream MyGo checkout (read-only local reference/replace target)
+# Optional local upstream MyGo checkout (read-only reference)
 mygo/
+
+# Local ad-hoc screenshots
+.screenshots/
 
 # MyGo / Go build & test outputs
 /build/

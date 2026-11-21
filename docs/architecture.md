@@ -10,7 +10,7 @@ Go 模块路径：`github.com/imicola/mygo-md3e`（直接依赖上游 `github.co
 
 ```text
 .
-├── RULE.md                 # Agent 提交与四重门禁铁律
+├── RULE.md                 # Agent 提交规范与门禁铁律
 ├── AGENTS.md               # MyGo 技术约束与避坑指南
 ├── doc.go                  # 根包概览与版本声明
 ├── docs/
@@ -35,7 +35,8 @@ Go 模块路径：`github.com/imicola/mygo-md3e`（直接依赖上游 `github.co
 ├── internal/
 │   └── mdicon/             # M3: 内置无外部依赖矢量路径/图标（Check, Close, Chevron, Search...）
 ├── theme.go                # M3: md3e.Theme、ThemeScope、系统偏好桥接、ui.Theme 转换
-├── surface.go              # M3: Surface 容器、Elevation 阴影/Tonal 叠色、Typography 文本辅助
+├── surface.go              # M3: Surface 容器、Elevation 阴影/Tonal 叠色
+├── typography.go           # M3: Text、ApplyTypeStyle 与 TypeStyleOf 排版辅助
 ├── ripple.go               # M3: StateLayer 状态层（Hover/Focus/Pressed/Dragged）与 Expressive Ripple
 ├── button.go               # M4: Expressive Button (Filled/Tonal/Elevated/Outlined/Text × XS-XL)
 ├── iconbutton.go           # M4: IconButton & ToggleIconButton（Round/Square 变形）
@@ -116,5 +117,5 @@ MyGo 的 `ui.Context` 本身携带有 `*ui.Theme`（通过 `c.Theme()` 读取、
    - 正确做法：外层通过 `c.Key(k)` 传递给组合组件最外层根元素；内部每个固定子槽位使用自身稳定位置或子级明确 key（如 `c.Key("arrow")`），绝不在外层未消费 key 时抢先创建辅助兄弟节点偷走 `c.Key(...)`。
 4. **通用视觉基础设施复用**：
    - 所有容器背景、圆角、阴影及 tonal elevation 通过 `surface.go` 的统一原语绘制，禁止在各组件中硬编码阴影参数或散落写死色值。
-   - 所有交互组件的 Hover / Focus / Pressed 状态层叠加及 Ripple 波纹通过 `ripple.go` 的统一附加器（如 `attachStateLayer` / `attachRipple`）处理。
+   - 所有交互组件的 Hover / Focus / Pressed 状态层叠加及 Ripple 波纹通过 `ripple.go` 的统一附加器（`AttachStateLayer` / `AttachRipple`）处理。
    - 所有内置小图标从 `internal/mdicon` 统一提取，避免多个组件各自复制同一 SVG 路径字符串。
