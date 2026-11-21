@@ -82,7 +82,7 @@ Go 模块路径：`github.com/imicola/mygo-md3e`（直接依赖上游 `github.co
 ├── datepicker.go           # M8: DatePicker (Docked / Modal) & DateRangePicker
 ├── timepicker.go           # M8: TimePicker (Dial / Input)
 ├── shell.go                # M9: WindowTitleBar 与 WindowController（零后端耦合的桌面标题栏外壳）
-├── adaptive.go             # M9: WindowSizeClass、AdaptiveScaffold、ListDetailPane、SupportingPane、BentoGrid
+├── adaptive.go             # M9: WindowSizeClass、ContentSizeClassOf、AdaptiveScaffold、ListDetailPane、SupportingPane、BentoGrid
 ├── shapebutton.go          # M10: ShapeButton、MorphIconButton（双向 Morph + 图标交叉过渡）与 IconBadge
 ├── pilltabs.go             # M10: PillTabs 与 SegmentedTabs（胶囊滑动指示器 + 徽章）
 ├── status.go               # M10: SemanticTone、Tag、StatusPill（离屏零帧呼吸点）与 Avatar（异形/图片/状态点）

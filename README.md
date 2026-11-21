@@ -228,7 +228,7 @@ Dependencies are strictly acyclic: `tokens` -> `motion` -> `shape` -> root `md3e
 | Dialogs & BottomSheet | `AlertDialog`, `FullScreenDialog`, `BottomSheet` |
 | Menus | `DropdownMenu`, `MenuButton`, `ContextMenu` |
 | Date & Time Pickers | `DatePicker`, `DateRangePicker`, `TimePicker` |
-| Desktop Shell & Adaptive Layouts | `WindowTitleBar`, `WindowController`, `WindowSizeClass`, `WindowSizeClassForWidth`, `WindowSizeClassOf`, `AdaptiveScaffold`, `ListDetailPane`, `SupportingPane`, `BentoGrid`, `BentoSpan` |
+| Desktop Shell & Adaptive Layouts | `WindowTitleBar`, `WindowController`, `WindowSizeClass`, `WindowSizeClassForWidth`, `WindowSizeClassOf`, `ContentSizeClassOf`, `AdaptiveScaffold`, `ListDetailPane`, `SupportingPane`, `BentoGrid`, `BentoSpan` |
 | Zero-Bloat Vector Symbols (`symbols`) | 252 rounded 24×24 icons (`symbols.Home`, `symbols.PlayArrow`, `symbols.Pause`, `symbols.Settings`, `symbols.Terminal`, …), `symbols.Custom`, `symbols.CustomEvenOdd` |
 
 ### Using Zero-Bloat `symbols` & Expressive Shape Controls

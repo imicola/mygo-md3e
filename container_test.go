@@ -501,6 +501,55 @@ func TestInteractiveCardStacksChildrenVertically(t *testing.T) {
 	}
 }
 
+// TestCardClipsWideRowInsideNarrowColumn checks plain and clickable cards use
+// the same constrained container: both stay the narrow column's width, stretch
+// their row to it, and clip a fixed trailing block that cannot fit, so neither
+// paints past the card border.
+func TestCardClipsWideRowInsideNarrowColumn(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor)
+	var plainR, clickR ui.Rect
+
+	wideRow := func(c *ui.Context) {
+		ui.Row(c).Gap(8).Children(func() {
+			ui.Box(c).Grow(1).MinWidth(0).Height(24)
+			ui.Box(c).Width(240).Height(24).Background(ui.RGB(255, 0, 0))
+		})
+	}
+	tt := ui.NewTester(func(c *ui.Context) {
+		ThemeScope(c, th, func() {
+			ui.Column(c).Fill().Padding(24).Children(func() {
+				ui.Column(c).Width(200).Gap(16).Children(func() {
+					Card(c, func() { wideRow(c) }, CardOptions{
+						Variant: CardOutlined,
+						Label:   "PlainNarrowCard",
+					}).DrawOver(func(_ *ui.Painter, r ui.Rect) { plainR = r })
+					Card(c, func() { wideRow(c) }, CardOptions{
+						Variant: CardOutlined,
+						Label:   "ClickNarrowCard",
+						OnClick: func() {},
+					}).DrawOver(func(_ *ui.Painter, r ui.Rect) { clickR = r })
+				})
+			})
+		}).Fill()
+	}, 320, 240)
+	tt.Frame()
+
+	img := tt.Image()
+	for _, tc := range []struct {
+		name string
+		r    ui.Rect
+	}{{"plain", plainR}, {"clickable", clickR}} {
+		if absF32(tc.r.W-200) > 1 {
+			t.Fatalf("%s card width = %.1f, want the 200 DIP column width", tc.name, tc.r.W)
+		}
+		x := int(tc.r.X + tc.r.W + 8)
+		y := int(tc.r.Y + tc.r.H/2)
+		if px := img.RGBAAt(x, y); colorMatches(px, ui.RGB(255, 0, 0), 20) {
+			t.Fatalf("%s card painted %+v past its border at (%d,%d)", tc.name, px, x, y)
+		}
+	}
+}
+
 // TestCardListDividerDisabledConsistencyAndInsets checks non-interactive
 // disabled cards/list items expose disabled semantics, disabled lists don't
 // double-dim, and Divider honors vertical insets and Shrink(0).

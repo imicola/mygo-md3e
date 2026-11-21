@@ -199,7 +199,9 @@ MD3E 将动效分为 **Spatial（空间：位移、缩放、尺寸、圆角、�
   - `WindowMedium`：`600 <= width < 840` DIP
   - `WindowExpanded`：`width >= 840` DIP（含 `+Inf`）
 - **`AdaptiveScaffold`**：随断点自动在底部 `NavigationBar`（Compact）、折叠 `NavigationRail`（Medium）与展开 `NavigationRail`（Expanded）间切换，并保持内容槽位位于稳定父级与固定 `Key` 下，确保局部状态不因窗口缩放丢失。
+- **内容净宽感知**：`AdaptiveScaffold` 的内容槽位以扣减侧栏实际占用后的可用宽度构建；`BentoGrid` 与 `SupportingPane` 在未显式传入 `WidthOverride` 时通过 `ContentSizeClassOf` 据此解析断点（880 DIP 窗口 + 192 DIP 展开侧栏 → 688 DIP 内容区按 `WindowMedium` 排 2 列且不自动展开辅助栏），避免整窗断点造成的列挤压；`WindowSizeClassOf` 仍恒按整窗宽度判定。
 - **`ListDetailPane` / `SupportingPane` / `BentoGrid`**：复用上游 `ui.Split`/`ui.SplitPercent` + `.SplitReset(...)` 与 `ui.Grid`，在 `WindowCompact` 下自动退化为单栏堆叠/受控单页视图，完整支持 RTL 镜像。
+- **`Card` 横向约束**：非交互与可点击 Card 均使用 `.AlignItems(ui.Stretch).MinWidth(0)` 并以圆角内裁切约束子内容，窄列中的 `Row(Grow + Fixed)` 不再把卡片撑破边框。
 - **`WindowTitleBar`**：基于 `c.TitleBar()` 自动预留 macOS 左交通灯与 Windows/Linux 系统按钮物理安全区，支持 `DragWindow()`、`.MaximizeButton()` 与零后端耦合的 `WindowController`（`*mygo.Window` 原生满足该接口）。
 
 ---

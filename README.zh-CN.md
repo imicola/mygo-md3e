@@ -228,7 +228,7 @@ func main() {
 | 对话框与底部抽屉 | `AlertDialog`、`FullScreenDialog`、`BottomSheet` |
 | 菜单 | `DropdownMenu`、`MenuButton`、`ContextMenu` |
 | 日期与时间选择器 | `DatePicker`、`DateRangePicker`、`TimePicker` |
-| 桌面外壳与 Adaptive 布局 | `WindowTitleBar`、`WindowController`、`WindowSizeClass`、`WindowSizeClassForWidth`、`WindowSizeClassOf`、`AdaptiveScaffold`、`ListDetailPane`、`SupportingPane`、`BentoGrid`、`BentoSpan` |
+| 桌面外壳与 Adaptive 布局 | `WindowTitleBar`、`WindowController`、`WindowSizeClass`、`WindowSizeClassForWidth`、`WindowSizeClassOf`、`ContentSizeClassOf`、`AdaptiveScaffold`、`ListDetailPane`、`SupportingPane`、`BentoGrid`、`BentoSpan` |
 | 零膨胀矢量图标子包（`symbols`） | 252 个圆角 24×24 图标（`symbols.Home`、`symbols.PlayArrow`、`symbols.Pause`、`symbols.Settings`、`symbols.Terminal` 等）、`symbols.Custom`、`symbols.CustomEvenOdd` |
 
 ### 使用零膨胀 `symbols` 与异形交互组件

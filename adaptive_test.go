@@ -233,6 +233,108 @@ func TestListDetailPaneAndSupportingPaneAdaptiveAndDrag(t *testing.T) {
 	}
 }
 
+// TestAdaptiveScaffoldContentWidthShrinksBentoAndSupportingPane checks that an
+// 880 DIP window with an expanded 192 DIP rail leaves a 688 DIP Medium content
+// area: the nested BentoGrid keeps two wide columns instead of four squeezed
+// ones, and SupportingPane keeps its supporting pane closed even though
+// WindowSizeClassOf still reports the window as Expanded.
+func TestAdaptiveScaffoldContentWidthShrinksBentoAndSupportingPane(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor, ThemeOptions{
+		Density:      tokens.DensityDesktop,
+		ReduceMotion: true,
+	})
+	dests := []NavigationDestination{
+		{Label: "Home", Icon: func(p *ui.Painter, r ui.Rect, ink ui.Color) { p.Fill(r, ink, 0) }},
+		{Label: "Docs", Icon: func(p *ui.Painter, r ui.Rect, ink ui.Color) { p.Fill(r, ink, 0) }},
+	}
+	selected := 0
+	var cells [4]ui.Rect
+	var windowClass, contentClass WindowSizeClass
+
+	tt := ui.NewTester(func(c *ui.Context) {
+		ThemeScope(c, th, func() {
+			AdaptiveScaffold(c, dests, func() {
+				// WindowSizeClassOf keeps measuring the window; the adaptive
+				// layouts below resolve against the content width instead.
+				windowClass = WindowSizeClassOf(c)
+				contentClass = ContentSizeClassOf(c)
+				SupportingPane(c,
+					func() {
+						BentoGrid(c, func() {
+							for i := range cells {
+								Card(c, func() { ui.Box(c).Height(40) }, CardOptions{Variant: CardFilled}).
+									DrawOver(func(_ *ui.Painter, r ui.Rect) { cells[i] = r })
+							}
+						}, BentoGridOptions{Label: "ContentWidthBento"})
+					},
+					func() { Text(c, "SupportingPaneBody", tokens.BodyMedium) },
+					SupportingPaneOptions{Label: "ContentWidthSplit"},
+				)
+			}, AdaptiveScaffoldOptions{Selected: &selected})
+		}).Fill()
+	}, 880, 600)
+
+	if windowClass != WindowExpanded {
+		t.Fatalf("window class = %v, want Expanded for 880 DIP", windowClass)
+	}
+	if contentClass != WindowMedium {
+		t.Fatalf("content class = %v, want Medium for 880-192 DIP", contentClass)
+	}
+	if tt.HasText("SupportingPaneBody") {
+		t.Fatal("880 DIP scaffold opened the supporting pane for a Medium content area")
+	}
+	if absF32(cells[0].Y-cells[1].Y) > 1 || cells[2].Y <= cells[0].Y {
+		t.Fatalf("content-width BentoGrid did not lay out two columns: %+v", cells)
+	}
+	for i, r := range cells {
+		if r.W < 160 {
+			t.Fatalf("Bento cell %d width = %.1f, want >= 160 in a 688 DIP content area", i, r.W)
+		}
+		if absF32(r.W-cells[0].W) > 1 {
+			t.Fatalf("Bento cells have different widths: cell0 %.1f, cell%d %.1f", cells[0].W, i, r.W)
+		}
+	}
+	if tt.FramePending() {
+		t.Fatal("content-width adaptive scaffold left pending frames")
+	}
+}
+
+// TestBentoGridNarrowSingleColumnClipsWideCardRow checks a Compact BentoGrid
+// whose single cell holds a Card with a Row of a flexible slot and a fixed
+// trailing block wider than the card: the card stays the content width and
+// clips the overflowing row at its border instead of painting outside it.
+func TestBentoGridNarrowSingleColumnClipsWideCardRow(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor, ThemeOptions{Density: tokens.DensityDesktop})
+	var cardR ui.Rect
+	tt := ui.NewTester(func(c *ui.Context) {
+		ThemeScope(c, th, func() {
+			ui.Column(c).Fill().Padding(16).Children(func() {
+				BentoGrid(c, func() {
+					Card(c, func() {
+						ui.Row(c).Gap(8).Children(func() {
+							ui.Box(c).Grow(1).MinWidth(0).Height(24)
+							ui.Box(c).Width(360).Height(24).Background(ui.RGB(255, 0, 0))
+						})
+					}, CardOptions{Variant: CardOutlined, Label: "NarrowBentoCell"}).
+						DrawOver(func(_ *ui.Painter, r ui.Rect) { cardR = r })
+				}, BentoGridOptions{Label: "NarrowBento"})
+			})
+		}).Fill()
+	}, 320, 240)
+	tt.Frame()
+
+	// 320 DIP minus the 2x16 padding leaves a 288 DIP single column: the 360
+	// DIP trailing block may only be clipped, never widen the card.
+	if absF32(cardR.W-288) > 1 {
+		t.Fatalf("Bento cell width = %.1f, want the 288 DIP content width", cardR.W)
+	}
+	x := int(cardR.X + cardR.W + 8)
+	y := int(cardR.Y + cardR.H/2)
+	if px := tt.Image().RGBAAt(x, y); colorMatches(px, ui.RGB(255, 0, 0), 20) {
+		t.Fatalf("wide card row painted %+v outside the Bento cell at (%d,%d)", px, x, y)
+	}
+}
+
 func TestBentoGridResponsiveSpansAndZeroSizeSafety(t *testing.T) {
 	th := ThemeFromSeed(DefaultSeedColor, ThemeOptions{Density: tokens.DensityDesktop})
 	var heroR, cell1R, cell2R ui.Rect

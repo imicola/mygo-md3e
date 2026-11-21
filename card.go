@@ -132,9 +132,14 @@ func Card(c *ui.Context, content func(), opts ...CardOptions) ui.Element {
 	var el ui.Element
 	if interactive {
 		el = ui.ButtonBase(c).Column().Justify(ui.Start).AlignItems(ui.Stretch).
-			DimDisabled(false).FocusRing(false)
+			MinWidth(0).Clip().DimDisabled(false).FocusRing(false)
 	} else {
-		el = ui.Column(c).DimDisabled(false)
+		// Match the interactive card: stretch the content to the card's inner
+		// width, allow the card to shrink below its content's min-content width
+		// in narrow grid tracks, and clip rows that still overflow so they
+		// cannot paint past the border. Clip only wraps the children; the
+		// card's own shadow, background and ripple stay unclipped.
+		el = ui.Column(c).AlignItems(ui.Stretch).MinWidth(0).Clip().DimDisabled(false)
 	}
 	el.Disabled(o.Disabled)
 	disabled := o.Disabled || el.IsDisabled()

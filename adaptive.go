@@ -2,6 +2,7 @@ package md3e
 
 import (
 	"math"
+	"sync"
 
 	"github.com/egoist/mygo/ui"
 
@@ -55,12 +56,105 @@ func WindowSizeClassForWidth(w float32) WindowSizeClass {
 
 // WindowSizeClassOf returns the WindowSizeClass for c's current window width.
 // Passing nil returns WindowCompact.
+//
+// It always measures the whole window, even inside an AdaptiveScaffold content
+// area; use ContentSizeClassOf there for the width left beside the rail.
 func WindowSizeClassOf(c *ui.Context) WindowSizeClass {
 	if c == nil {
 		return WindowCompact
 	}
 	w, _ := c.Size()
 	return WindowSizeClassForWidth(w)
+}
+
+// contentWidthScope records the width AdaptiveScaffold's content area is built
+// with once its navigation rail has taken its share, for the nested adaptive
+// layouts that size themselves by the room they get rather than by the window.
+type contentWidthScope struct {
+	srv   ui.Services
+	width float32
+}
+
+var (
+	contentWidthMu     sync.Mutex
+	contentWidthScopes []contentWidthScope
+)
+
+// withContentWidth builds fn with width as the content width of c's window.
+// The scope lasts for the synchronous build alone, as ui.Element and
+// *ui.Context hand out values for a single build pass.
+func withContentWidth(c *ui.Context, width float32, fn func()) {
+	if c == nil || !isFiniteNonNegativeF32(width) {
+		fn()
+		return
+	}
+	srv := c.Services()
+	if srv == (ui.Services{}) {
+		fn()
+		return
+	}
+	contentWidthMu.Lock()
+	contentWidthScopes = append(contentWidthScopes, contentWidthScope{srv: srv, width: width})
+	contentWidthMu.Unlock()
+	defer func() {
+		contentWidthMu.Lock()
+		if n := len(contentWidthScopes); n > 0 {
+			contentWidthScopes = contentWidthScopes[:n-1]
+		}
+		contentWidthMu.Unlock()
+	}()
+	fn()
+}
+
+// scopedContentWidth returns the innermost content width recorded for c's
+// window, if any.
+func scopedContentWidth(c *ui.Context) (float32, bool) {
+	if c == nil {
+		return 0, false
+	}
+	srv := c.Services()
+	if srv == (ui.Services{}) {
+		return 0, false
+	}
+	contentWidthMu.Lock()
+	defer contentWidthMu.Unlock()
+	for i := len(contentWidthScopes) - 1; i >= 0; i-- {
+		if contentWidthScopes[i].srv == srv {
+			return contentWidthScopes[i].width, true
+		}
+	}
+	return 0, false
+}
+
+// ContentSizeClassOf returns the WindowSizeClass of the content area c is
+// being built in: inside an AdaptiveScaffold content slot, the window width
+// less the navigation rail's actual share (80 DIP collapsed, or its expanded
+// width), and the window width elsewhere. Nested BentoGrid and SupportingPane
+// use it so a wide window whose rail leaves a Medium or Compact content area
+// does not force four Bento columns or an automatic supporting pane.
+//
+// It never changes WindowSizeClassOf, which keeps measuring the whole window.
+// Passing nil returns WindowCompact.
+func ContentSizeClassOf(c *ui.Context) WindowSizeClass {
+	if w, ok := scopedContentWidth(c); ok {
+		return WindowSizeClassForWidth(w)
+	}
+	return WindowSizeClassOf(c)
+}
+
+// resolveContentSizeClass resolves a layout's size class: an explicit
+// WidthOverride wins, then the AdaptiveScaffold content area, then the window.
+func resolveContentSizeClass(c *ui.Context, widthOverride float32) WindowSizeClass {
+	if isPositiveFiniteF32(widthOverride) {
+		return WindowSizeClassForWidth(widthOverride)
+	}
+	return ContentSizeClassOf(c)
+}
+
+// isFiniteNonNegativeF32 reports whether v is a real, non-negative width.
+func isFiniteNonNegativeF32(v float32) bool {
+	f := float64(v)
+	return !math.IsNaN(f) && !math.IsInf(f, 0) && v >= 0
 }
 
 func resolveSizeClass(c *ui.Context, widthOverride float32) WindowSizeClass {
@@ -119,6 +213,10 @@ type (
 // NavigationRail (WindowMedium), and expanded NavigationRail (WindowExpanded),
 // while keeping the body content under a stable keyed container so local state
 // and focus survive breakpoint transitions.
+//
+// The content slot builds with the width the rail actually leaves beside it, so
+// nested BentoGrid and SupportingPane resolve their own breakpoints from that
+// content width (see ContentSizeClassOf) instead of the whole window's.
 func AdaptiveScaffold(c *ui.Context, destinations []NavigationDestination, content func(), opts ...AdaptiveScaffoldOptions) ui.Element {
 	if len(opts) > 1 {
 		panic("md3e: AdaptiveScaffold takes at most one AdaptiveScaffoldOptions")
@@ -135,6 +233,26 @@ func AdaptiveScaffold(c *ui.Context, destinations []NavigationDestination, conte
 	}
 	class := resolveSizeClass(c, o.WidthOverride)
 	navLabel := labelOr(o.NavigationLabel, "Navigation")
+
+	// The content slot only gets what the rail leaves, so carry that width into
+	// the content build: nested layouts must not treat a wide window with a wide
+	// rail as a wide content area.
+	winW, _ := c.Size()
+	if isPositiveFiniteF32(o.WidthOverride) {
+		winW = o.WidthOverride
+	}
+	contentW := winW
+	if class != WindowCompact && len(destinations) > 0 {
+		railW := float32(navRailCollapsedWidth)
+		expanded := class == WindowExpanded
+		if o.RailExpanded != nil {
+			expanded = *o.RailExpanded
+		}
+		if expanded {
+			railW = resolveNavRailExpandedWidth(o.RailExpandedWidth, th.Density)
+		}
+		contentW = max(0, contentW-railW)
+	}
 
 	root := ui.Column(c).
 		Fill().
@@ -177,18 +295,20 @@ func AdaptiveScaffold(c *ui.Context, destinations []NavigationDestination, conte
 				MinWidth(0).
 				MinHeight(0).
 				Children(func() {
-					if content != nil {
-						content()
-					}
-					if o.FAB != nil {
-						ui.Box(c.Key(adaptiveFABKey{})).
-							Attach(ui.AnchorBottomEnd, ui.AnchorBottomEnd).
-							End(16).
-							Bottom(16).
-							Children(func() {
-								o.FAB()
-							})
-					}
+					withContentWidth(c, contentW, func() {
+						if content != nil {
+							content()
+						}
+						if o.FAB != nil {
+							ui.Box(c.Key(adaptiveFABKey{})).
+								Attach(ui.AnchorBottomEnd, ui.AnchorBottomEnd).
+								End(16).
+								Bottom(16).
+								Children(func() {
+									o.FAB()
+								})
+						}
+					})
 				})
 		})
 
@@ -367,6 +487,11 @@ type SupportingPaneOptions struct {
 // handle indicator. Under WindowCompact it switches between main and supporting
 // in a single pane; under wider breakpoints it shows main alone or both panes
 // side by side (mirroring cleanly in ui.RightToLeft).
+//
+// Without WidthOverride it resolves its breakpoint from the content area it is
+// built in (ContentSizeClassOf), so inside an AdaptiveScaffold the supporting
+// pane does not open just because the window is wide while the rail leaves a
+// narrower content area.
 func SupportingPane(c *ui.Context, main func(), supporting func(), opts ...SupportingPaneOptions) ui.Element {
 	if len(opts) > 1 {
 		panic("md3e: SupportingPane takes at most one SupportingPaneOptions")
@@ -377,7 +502,7 @@ func SupportingPane(c *ui.Context, main func(), supporting func(), opts ...Suppo
 	}
 
 	th := CurrentTheme(c)
-	class := resolveSizeClass(c, o.WidthOverride)
+	class := resolveContentSizeClass(c, o.WidthOverride)
 	rtl := c.Direction() == ui.RightToLeft
 
 	root := ui.Box(c).Fill().MinWidth(0).MinHeight(0)
@@ -521,6 +646,11 @@ type BentoGridOptions struct {
 // explicit Tracks (for example under WindowCompact), BentoGrid lays children
 // out in a vertical ui.Column so multi-column BentoSpan hints collapse cleanly
 // into a single full-width stack without creating implicit overflow columns.
+//
+// Without WidthOverride the column count follows the content area BentoGrid is
+// built in (ContentSizeClassOf): inside an AdaptiveScaffold, a wide window whose
+// expanded rail leaves less than 840 DIP of content gets Medium columns instead
+// of squeezing four columns into the remainder.
 func BentoGrid(c *ui.Context, content func(), opts ...BentoGridOptions) ui.Element {
 	if len(opts) > 1 {
 		panic("md3e: BentoGrid takes at most one BentoGridOptions")
@@ -540,7 +670,7 @@ func BentoGrid(c *ui.Context, content func(), opts ...BentoGridOptions) ui.Eleme
 	if len(o.Tracks) > 0 {
 		grid = ui.Grid(c).FillWidth().Gap(gap).ColumnTracks(o.Tracks...)
 	} else {
-		cols := resolveBentoColumns(resolveSizeClass(c, o.WidthOverride), o)
+		cols := resolveBentoColumns(resolveContentSizeClass(c, o.WidthOverride), o)
 		if cols <= 1 {
 			grid = ui.Column(c).FillWidth().AlignItems(ui.Stretch).Gap(gap)
 		} else {
