@@ -951,6 +951,472 @@ func CurrentTheme(c *ui.Context) *Theme {
 	return DefaultTheme(c)
 }
 
+func clampLerpT(t float32) float32 {
+	if math.IsNaN(float64(t)) || t <= 0 {
+		return 0
+	}
+	if t >= 1 {
+		return 1
+	}
+	return t
+}
+
+func mixRoleColor(a, b ui.Color, t float32) ui.Color {
+	if a.A == 0 && b.A == 0 {
+		return ui.Color{}
+	}
+	if a.A == 0 {
+		a = b
+	} else if b.A == 0 {
+		b = a
+	}
+	m := a.Mix(b, t)
+	if m.A == 0 {
+		m.A = 1
+	}
+	return m
+}
+
+func contrastRatio(a, b ui.Color) float64 {
+	la := relativeLuminance(a)
+	lb := relativeLuminance(b)
+	if la < lb {
+		la, lb = lb, la
+	}
+	return (la + 0.05) / (lb + 0.05)
+}
+
+func minContrastAcross(fg ui.Color, bgs ...ui.Color) float64 {
+	best := math.Inf(1)
+	for _, bg := range bgs {
+		if bg.A == 0 {
+			continue
+		}
+		if r := contrastRatio(fg, bg); r < best {
+			best = r
+		}
+	}
+	if math.IsInf(best, 1) {
+		return 21
+	}
+	return best
+}
+
+// ensurePairContrast adjusts an interpolated foreground role when linear sRGB
+// mixing crosses background luminance mid-transition (e.g. Light <-> Dark at
+// t ≈ 0.5), keeping text and icons legible across all paired backgrounds.
+func ensurePairContrast(fg, fromFg, toFg ui.Color, bgs, fromBgs, toBgs []ui.Color) ui.Color {
+	if fg.A == 0 {
+		return fg
+	}
+	targetRatio := 4.5
+	if len(fromBgs) > 0 && fromFg.A > 0 {
+		if r := minContrastAcross(fromFg, fromBgs...); r < targetRatio {
+			targetRatio = r
+		}
+	}
+	if len(toBgs) > 0 && toFg.A > 0 {
+		if r := minContrastAcross(toFg, toBgs...); r < targetRatio {
+			targetRatio = r
+		}
+	}
+	if targetRatio <= 1 || minContrastAcross(fg, bgs...) >= targetRatio {
+		return fg
+	}
+
+	alpha := fg.A
+	bestEnd := ui.Color{}
+	bestEndRatio := 0.0
+	if fromFg.A > 0 {
+		bestEnd = fromFg
+		bestEndRatio = minContrastAcross(fromFg, bgs...)
+	}
+	if toFg.A > 0 {
+		if r := minContrastAcross(toFg, bgs...); r > bestEndRatio {
+			bestEnd = toFg
+			bestEndRatio = r
+		}
+	}
+
+	if bestEnd.A > 0 && bestEndRatio >= targetRatio {
+		lo, hi := float32(0), float32(1)
+		best := bestEnd
+		for range 12 {
+			mid := (lo + hi) * 0.5
+			cand := fg.Mix(bestEnd, mid)
+			if minContrastAcross(cand, bgs...) >= targetRatio {
+				best = cand
+				hi = mid
+			} else {
+				lo = mid
+			}
+		}
+		best.A = alpha
+		return best
+	}
+
+	start := fg
+	if bestEnd.A > 0 && bestEndRatio > minContrastAcross(fg, bgs...) {
+		start = bestEnd
+	}
+	black := ui.Color{R: 0, G: 0, B: 0, A: alpha}
+	white := ui.Color{R: 255, G: 255, B: 255, A: alpha}
+	extreme := black
+	extremeRatio := minContrastAcross(black, bgs...)
+	if wr := minContrastAcross(white, bgs...); wr > extremeRatio {
+		extreme = white
+		extremeRatio = wr
+	}
+	if extremeRatio < targetRatio {
+		targetRatio = extremeRatio
+	}
+
+	lo, hi := float32(0), float32(1)
+	best := extreme
+	for range 12 {
+		mid := (lo + hi) * 0.5
+		cand := start.Mix(extreme, mid)
+		if minContrastAcross(cand, bgs...) >= targetRatio {
+			best = cand
+			hi = mid
+		} else {
+			lo = mid
+		}
+	}
+	best.A = alpha
+	return best
+}
+
+func lerpColorScheme(a, b tokens.ColorScheme, t float32) tokens.ColorScheme {
+	cs := tokens.ColorScheme{
+		Primary:                 mixRoleColor(a.Primary, b.Primary, t),
+		OnPrimary:               mixRoleColor(a.OnPrimary, b.OnPrimary, t),
+		PrimaryContainer:        mixRoleColor(a.PrimaryContainer, b.PrimaryContainer, t),
+		OnPrimaryContainer:      mixRoleColor(a.OnPrimaryContainer, b.OnPrimaryContainer, t),
+		InversePrimary:          mixRoleColor(a.InversePrimary, b.InversePrimary, t),
+		PrimaryFixed:            mixRoleColor(a.PrimaryFixed, b.PrimaryFixed, t),
+		PrimaryFixedDim:         mixRoleColor(a.PrimaryFixedDim, b.PrimaryFixedDim, t),
+		OnPrimaryFixed:          mixRoleColor(a.OnPrimaryFixed, b.OnPrimaryFixed, t),
+		OnPrimaryFixedVariant:   mixRoleColor(a.OnPrimaryFixedVariant, b.OnPrimaryFixedVariant, t),
+		Secondary:               mixRoleColor(a.Secondary, b.Secondary, t),
+		OnSecondary:             mixRoleColor(a.OnSecondary, b.OnSecondary, t),
+		SecondaryContainer:      mixRoleColor(a.SecondaryContainer, b.SecondaryContainer, t),
+		OnSecondaryContainer:    mixRoleColor(a.OnSecondaryContainer, b.OnSecondaryContainer, t),
+		SecondaryFixed:          mixRoleColor(a.SecondaryFixed, b.SecondaryFixed, t),
+		SecondaryFixedDim:       mixRoleColor(a.SecondaryFixedDim, b.SecondaryFixedDim, t),
+		OnSecondaryFixed:        mixRoleColor(a.OnSecondaryFixed, b.OnSecondaryFixed, t),
+		OnSecondaryFixedVariant: mixRoleColor(a.OnSecondaryFixedVariant, b.OnSecondaryFixedVariant, t),
+		Tertiary:                mixRoleColor(a.Tertiary, b.Tertiary, t),
+		OnTertiary:              mixRoleColor(a.OnTertiary, b.OnTertiary, t),
+		TertiaryContainer:       mixRoleColor(a.TertiaryContainer, b.TertiaryContainer, t),
+		OnTertiaryContainer:     mixRoleColor(a.OnTertiaryContainer, b.OnTertiaryContainer, t),
+		TertiaryFixed:           mixRoleColor(a.TertiaryFixed, b.TertiaryFixed, t),
+		TertiaryFixedDim:        mixRoleColor(a.TertiaryFixedDim, b.TertiaryFixedDim, t),
+		OnTertiaryFixed:         mixRoleColor(a.OnTertiaryFixed, b.OnTertiaryFixed, t),
+		OnTertiaryFixedVariant:  mixRoleColor(a.OnTertiaryFixedVariant, b.OnTertiaryFixedVariant, t),
+		Error:                   mixRoleColor(a.Error, b.Error, t),
+		OnError:                 mixRoleColor(a.OnError, b.OnError, t),
+		ErrorContainer:          mixRoleColor(a.ErrorContainer, b.ErrorContainer, t),
+		OnErrorContainer:        mixRoleColor(a.OnErrorContainer, b.OnErrorContainer, t),
+		Background:              mixRoleColor(a.Background, b.Background, t),
+		OnBackground:            mixRoleColor(a.OnBackground, b.OnBackground, t),
+		Surface:                 mixRoleColor(a.Surface, b.Surface, t),
+		SurfaceDim:              mixRoleColor(a.SurfaceDim, b.SurfaceDim, t),
+		SurfaceBright:           mixRoleColor(a.SurfaceBright, b.SurfaceBright, t),
+		OnSurface:               mixRoleColor(a.OnSurface, b.OnSurface, t),
+		OnSurfaceVariant:        mixRoleColor(a.OnSurfaceVariant, b.OnSurfaceVariant, t),
+		SurfaceVariant:          mixRoleColor(a.SurfaceVariant, b.SurfaceVariant, t),
+		SurfaceContainerLowest:  mixRoleColor(a.SurfaceContainerLowest, b.SurfaceContainerLowest, t),
+		SurfaceContainerLow:     mixRoleColor(a.SurfaceContainerLow, b.SurfaceContainerLow, t),
+		SurfaceContainer:        mixRoleColor(a.SurfaceContainer, b.SurfaceContainer, t),
+		SurfaceContainerHigh:    mixRoleColor(a.SurfaceContainerHigh, b.SurfaceContainerHigh, t),
+		SurfaceContainerHighest: mixRoleColor(a.SurfaceContainerHighest, b.SurfaceContainerHighest, t),
+		SurfaceTint:             mixRoleColor(a.SurfaceTint, b.SurfaceTint, t),
+		Outline:                 mixRoleColor(a.Outline, b.Outline, t),
+		OutlineVariant:          mixRoleColor(a.OutlineVariant, b.OutlineVariant, t),
+		InverseSurface:          mixRoleColor(a.InverseSurface, b.InverseSurface, t),
+		InverseOnSurface:        mixRoleColor(a.InverseOnSurface, b.InverseOnSurface, t),
+		Scrim:                   mixRoleColor(a.Scrim, b.Scrim, t),
+		Shadow:                  mixRoleColor(a.Shadow, b.Shadow, t),
+	}
+
+	cs.OnPrimary = ensurePairContrast(cs.OnPrimary, a.OnPrimary, b.OnPrimary,
+		[]ui.Color{cs.Primary}, []ui.Color{a.Primary}, []ui.Color{b.Primary})
+	cs.OnPrimaryContainer = ensurePairContrast(cs.OnPrimaryContainer, a.OnPrimaryContainer, b.OnPrimaryContainer,
+		[]ui.Color{cs.PrimaryContainer}, []ui.Color{a.PrimaryContainer}, []ui.Color{b.PrimaryContainer})
+	cs.OnPrimaryFixed = ensurePairContrast(cs.OnPrimaryFixed, a.OnPrimaryFixed, b.OnPrimaryFixed,
+		[]ui.Color{cs.PrimaryFixed, cs.PrimaryFixedDim}, []ui.Color{a.PrimaryFixed, a.PrimaryFixedDim}, []ui.Color{b.PrimaryFixed, b.PrimaryFixedDim})
+	cs.OnPrimaryFixedVariant = ensurePairContrast(cs.OnPrimaryFixedVariant, a.OnPrimaryFixedVariant, b.OnPrimaryFixedVariant,
+		[]ui.Color{cs.PrimaryFixed, cs.PrimaryFixedDim}, []ui.Color{a.PrimaryFixed, a.PrimaryFixedDim}, []ui.Color{b.PrimaryFixed, b.PrimaryFixedDim})
+
+	cs.OnSecondary = ensurePairContrast(cs.OnSecondary, a.OnSecondary, b.OnSecondary,
+		[]ui.Color{cs.Secondary}, []ui.Color{a.Secondary}, []ui.Color{b.Secondary})
+	cs.OnSecondaryContainer = ensurePairContrast(cs.OnSecondaryContainer, a.OnSecondaryContainer, b.OnSecondaryContainer,
+		[]ui.Color{cs.SecondaryContainer}, []ui.Color{a.SecondaryContainer}, []ui.Color{b.SecondaryContainer})
+	cs.OnSecondaryFixed = ensurePairContrast(cs.OnSecondaryFixed, a.OnSecondaryFixed, b.OnSecondaryFixed,
+		[]ui.Color{cs.SecondaryFixed, cs.SecondaryFixedDim}, []ui.Color{a.SecondaryFixed, a.SecondaryFixedDim}, []ui.Color{b.SecondaryFixed, b.SecondaryFixedDim})
+	cs.OnSecondaryFixedVariant = ensurePairContrast(cs.OnSecondaryFixedVariant, a.OnSecondaryFixedVariant, b.OnSecondaryFixedVariant,
+		[]ui.Color{cs.SecondaryFixed, cs.SecondaryFixedDim}, []ui.Color{a.SecondaryFixed, a.SecondaryFixedDim}, []ui.Color{b.SecondaryFixed, b.SecondaryFixedDim})
+
+	cs.OnTertiary = ensurePairContrast(cs.OnTertiary, a.OnTertiary, b.OnTertiary,
+		[]ui.Color{cs.Tertiary}, []ui.Color{a.Tertiary}, []ui.Color{b.Tertiary})
+	cs.OnTertiaryContainer = ensurePairContrast(cs.OnTertiaryContainer, a.OnTertiaryContainer, b.OnTertiaryContainer,
+		[]ui.Color{cs.TertiaryContainer}, []ui.Color{a.TertiaryContainer}, []ui.Color{b.TertiaryContainer})
+	cs.OnTertiaryFixed = ensurePairContrast(cs.OnTertiaryFixed, a.OnTertiaryFixed, b.OnTertiaryFixed,
+		[]ui.Color{cs.TertiaryFixed, cs.TertiaryFixedDim}, []ui.Color{a.TertiaryFixed, a.TertiaryFixedDim}, []ui.Color{b.TertiaryFixed, b.TertiaryFixedDim})
+	cs.OnTertiaryFixedVariant = ensurePairContrast(cs.OnTertiaryFixedVariant, a.OnTertiaryFixedVariant, b.OnTertiaryFixedVariant,
+		[]ui.Color{cs.TertiaryFixed, cs.TertiaryFixedDim}, []ui.Color{a.TertiaryFixed, a.TertiaryFixedDim}, []ui.Color{b.TertiaryFixed, b.TertiaryFixedDim})
+
+	cs.OnError = ensurePairContrast(cs.OnError, a.OnError, b.OnError,
+		[]ui.Color{cs.Error}, []ui.Color{a.Error}, []ui.Color{b.Error})
+	cs.OnErrorContainer = ensurePairContrast(cs.OnErrorContainer, a.OnErrorContainer, b.OnErrorContainer,
+		[]ui.Color{cs.ErrorContainer}, []ui.Color{a.ErrorContainer}, []ui.Color{b.ErrorContainer})
+
+	cs.OnBackground = ensurePairContrast(cs.OnBackground, a.OnBackground, b.OnBackground,
+		[]ui.Color{cs.Background}, []ui.Color{a.Background}, []ui.Color{b.Background})
+	cs.OnSurface = ensurePairContrast(cs.OnSurface, a.OnSurface, b.OnSurface,
+		[]ui.Color{cs.Surface, cs.SurfaceContainer}, []ui.Color{a.Surface, a.SurfaceContainer}, []ui.Color{b.Surface, b.SurfaceContainer})
+	cs.OnSurfaceVariant = ensurePairContrast(cs.OnSurfaceVariant, a.OnSurfaceVariant, b.OnSurfaceVariant,
+		[]ui.Color{cs.Surface, cs.SurfaceVariant}, []ui.Color{a.Surface, a.SurfaceVariant}, []ui.Color{b.Surface, b.SurfaceVariant})
+	cs.InverseOnSurface = ensurePairContrast(cs.InverseOnSurface, a.InverseOnSurface, b.InverseOnSurface,
+		[]ui.Color{cs.InverseSurface}, []ui.Color{a.InverseSurface}, []ui.Color{b.InverseSurface})
+
+	return cs
+}
+
+// LerpTheme interpolates between from and to at fraction t (clamped to [0, 1],
+// with NaN treated as 0). All 49 ColorScheme roles and extended Warning/Success
+// semantic roles are smoothly mixed while preserving usable foreground contrast
+// and non-transparent colors across mid-transition luminance crossings.
+// TextScale interpolates linearly, while discrete fields (Dark, Motion, Density,
+// Shapes, Typography, Contrast, ReduceMotion, Font, MonoFont) switch at t >= 0.5.
+// Intermediate themes clear seed provenance so they never pollute schemeCache.
+func LerpTheme(from, to *Theme, t float32) *Theme {
+	if from == nil {
+		from = DefaultTheme(nil)
+	}
+	if to == nil {
+		to = DefaultTheme(nil)
+	}
+	t = clampLerpT(t)
+
+	sa := sanitizeTheme(*from)
+	sb := sanitizeTheme(*to)
+
+	if t == 0 {
+		out := sa
+		if from.followed != nil {
+			f := *from.followed
+			out.followed = &f
+		}
+		return &out
+	}
+	if t == 1 {
+		out := sb
+		if to.followed != nil {
+			f := *to.followed
+			out.followed = &f
+		}
+		return &out
+	}
+
+	out := sa
+	if t >= 0.5 {
+		out.Dark = sb.Dark
+		out.Motion = sb.Motion
+		out.Density = sb.Density
+		out.Typography = sb.Typography
+		out.Shapes = sb.Shapes
+		out.Contrast = sb.Contrast
+		out.ReduceMotion = sb.ReduceMotion
+		out.Font = sb.Font
+		out.MonoFont = sb.MonoFont
+	}
+	out.TextScale = sanitizePositiveScale(sa.TextScale+(sb.TextScale-sa.TextScale)*t, 1)
+	out.Colors = lerpColorScheme(sa.Colors, sb.Colors, t)
+
+	out.Warning = mixRoleColor(sa.Warning, sb.Warning, t)
+	out.OnWarning = ensurePairContrast(mixRoleColor(sa.OnWarning, sb.OnWarning, t), sa.OnWarning, sb.OnWarning,
+		[]ui.Color{out.Warning}, []ui.Color{sa.Warning}, []ui.Color{sb.Warning})
+	out.WarningContainer = mixRoleColor(sa.WarningContainer, sb.WarningContainer, t)
+	out.OnWarningContainer = ensurePairContrast(mixRoleColor(sa.OnWarningContainer, sb.OnWarningContainer, t), sa.OnWarningContainer, sb.OnWarningContainer,
+		[]ui.Color{out.WarningContainer}, []ui.Color{sa.WarningContainer}, []ui.Color{sb.WarningContainer})
+
+	out.Success = mixRoleColor(sa.Success, sb.Success, t)
+	out.OnSuccess = ensurePairContrast(mixRoleColor(sa.OnSuccess, sb.OnSuccess, t), sa.OnSuccess, sb.OnSuccess,
+		[]ui.Color{out.Success}, []ui.Color{sa.Success}, []ui.Color{sb.Success})
+	out.SuccessContainer = mixRoleColor(sa.SuccessContainer, sb.SuccessContainer, t)
+	out.OnSuccessContainer = ensurePairContrast(mixRoleColor(sa.OnSuccessContainer, sb.OnSuccessContainer, t), sa.OnSuccessContainer, sb.OnSuccessContainer,
+		[]ui.Color{out.SuccessContainer}, []ui.Color{sa.SuccessContainer}, []ui.Color{sb.SuccessContainer})
+
+	// Intermediate blended themes do not belong to a single seed, preventing
+	// schemeCache entries from ever being generated during transitions.
+	out.seed = ui.Color{}
+	out.hasSeed = false
+	out.variant = 0
+	out.followed = nil
+
+	if from.followed != nil && to.followed != nil && from.followed.prefs == to.followed.prefs {
+		unscaled := out
+		ba := sanitizePositiveScale(from.followed.from.TextScale, 1)
+		bb := sanitizePositiveScale(to.followed.from.TextScale, 1)
+		unscaled.TextScale = sanitizePositiveScale(ba+(bb-ba)*t, 1)
+		if t >= 0.5 {
+			unscaled.Contrast = to.followed.from.Contrast
+			unscaled.ReduceMotion = to.followed.from.ReduceMotion
+		} else {
+			unscaled.Contrast = from.followed.from.Contrast
+			unscaled.ReduceMotion = from.followed.from.ReduceMotion
+		}
+		out.followed = &followedTheme{
+			from:  unscaled,
+			to:    out,
+			prefs: from.followed.prefs,
+		}
+	}
+
+	return &out
+}
+
+// ThemeTransitionOptions configures how AnimatedThemeScope transitions between
+// themes when color or appearance signatures change.
+type ThemeTransitionOptions struct {
+	// Token selects the MD3E effects spring driving the transition. The zero
+	// value defaults to motion.DefaultEffects (~230ms critically damped, zero
+	// overshoot); motion.FastEffects and motion.SlowEffects are also supported.
+	Token motion.Token
+}
+
+type themeTransitionKey struct{}
+type themeTransitionProgressKey struct{}
+
+type themeVisualSig struct {
+	dark               bool
+	contrast           tokens.Contrast
+	colors             tokens.ColorScheme
+	warning            ui.Color
+	onWarning          ui.Color
+	warningContainer   ui.Color
+	onWarningContainer ui.Color
+	success            ui.Color
+	onSuccess          ui.Color
+	successContainer   ui.Color
+	onSuccessContainer ui.Color
+	textScale          float32
+}
+
+func visualSigOf(t Theme) themeVisualSig {
+	return themeVisualSig{
+		dark:               t.Dark,
+		contrast:           t.Contrast,
+		colors:             t.Colors,
+		warning:            t.Warning,
+		onWarning:          t.OnWarning,
+		warningContainer:   t.WarningContainer,
+		onWarningContainer: t.OnWarningContainer,
+		success:            t.Success,
+		onSuccess:          t.OnSuccess,
+		successContainer:   t.SuccessContainer,
+		onSuccessContainer: t.OnSuccessContainer,
+		textScale:          t.TextScale,
+	}
+}
+
+type themeTransitionState struct {
+	initialized bool
+	from        Theme
+	to          Theme
+	targetSig   themeVisualSig
+}
+
+// AnimatedThemeScope wraps ThemeScope and smoothly animates colors and
+// TextScale whenever target's visual signature changes (such as Light <-> Dark,
+// seed color, or contrast switches). Descendants and ui.Overlay popups inherit
+// the interpolated theme frame by frame until the spring settles cleanly. When
+// ReduceMotion is enabled on either target or c.Preferences(), changes jump
+// immediately to target with zero pending animation frames.
+func AnimatedThemeScope(c *ui.Context, target *Theme, fn func(), opts ...ThemeTransitionOptions) ui.Element {
+	if len(opts) > 1 {
+		panic("md3e: AnimatedThemeScope takes at most one ThemeTransitionOptions")
+	}
+	var opt ThemeTransitionOptions
+	if len(opts) == 1 {
+		opt = opts[0]
+	}
+	if c == nil {
+		return ui.Element{}
+	}
+	if target == nil {
+		target = DefaultTheme(c)
+	}
+
+	token := motion.DefaultEffects
+	if opt.Token >= motion.FastEffects && opt.Token <= motion.SlowEffects {
+		token = opt.Token
+	}
+
+	prefs := c.Preferences()
+	resolvedTarget := target.resolvedValue(prefs)
+	reduceMotion := prefs.ReduceMotion || resolvedTarget.ReduceMotion
+	sig := visualSigOf(resolvedTarget)
+
+	scheme := resolvedTarget.Motion
+	if scheme != motion.Expressive && scheme != motion.Standard {
+		scheme = motion.Expressive
+	}
+	anim := ui.Animation{
+		Spring: motion.Spring(scheme, token),
+		Oklab:  true,
+	}
+
+	host := ui.Column(c)
+	st := ui.Local(host, themeTransitionKey{}, func() themeTransitionState {
+		return themeTransitionState{}
+	})
+
+	var current *Theme
+	if !st.initialized {
+		st.initialized = true
+		st.from = resolvedTarget
+		st.to = resolvedTarget
+		st.targetSig = sig
+		host.Jump(themeTransitionProgressKey{}, 1)
+		cp := resolvedTarget
+		current = &cp
+	} else if reduceMotion {
+		st.from = resolvedTarget
+		st.to = resolvedTarget
+		st.targetSig = sig
+		host.Jump(themeTransitionProgressKey{}, 1)
+		cp := resolvedTarget
+		current = &cp
+	} else if sig != st.targetSig {
+		prevT := host.AnimateTo(themeTransitionProgressKey{}, 1, anim)
+		snap := LerpTheme(&st.from, &st.to, prevT)
+		st.from = *snap
+		st.to = resolvedTarget
+		st.targetSig = sig
+		host.Jump(themeTransitionProgressKey{}, 0)
+		t := host.AnimateTo(themeTransitionProgressKey{}, 1, anim)
+		current = LerpTheme(&st.from, &st.to, t)
+	} else {
+		t := host.AnimateTo(themeTransitionProgressKey{}, 1, anim)
+		if host.Settled(themeTransitionProgressKey{}) || t >= 1 {
+			st.from = resolvedTarget
+			st.to = resolvedTarget
+			cp := resolvedTarget
+			current = &cp
+		} else {
+			current = LerpTheme(&st.from, &st.to, t)
+		}
+	}
+
+	host.Children(func() {
+		ThemeScope(c, current, fn).Fill()
+	})
+	return host
+}
+
 func themeRegistryCountForTest() int {
 	themeRegMu.RLock()
 	defer themeRegMu.RUnlock()

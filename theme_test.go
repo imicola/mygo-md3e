@@ -4,6 +4,7 @@ import (
 	"math"
 	"runtime"
 	"testing"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 
@@ -739,5 +740,424 @@ func TestTextWithAndTabularNums(t *testing.T) {
 	}()
 	ui.NewTester(func(c *ui.Context) {
 		TextWith(c, "panic", TextOptions{}, TextOptions{})
+	}, 100, 50)
+}
+
+func colorBetween(c, a, b ui.Color) bool {
+	inRange := func(v, x, y uint8) bool {
+		lo, hi := min(x, y), max(x, y)
+		// Allow ±1 rounding tolerance from sRGB Mix rounding.
+		if lo > 0 {
+			lo--
+		}
+		if hi < 255 {
+			hi++
+		}
+		return v >= lo && v <= hi
+	}
+	return inRange(c.R, a.R, b.R) && inRange(c.G, a.G, b.G) && inRange(c.B, a.B, b.B) && inRange(c.A, a.A, b.A)
+}
+
+func assertAllColorsOpaque(t *testing.T, label string, th *Theme) {
+	t.Helper()
+	cs := th.Colors
+	roles := map[string]ui.Color{
+		"Primary":                 cs.Primary,
+		"OnPrimary":               cs.OnPrimary,
+		"PrimaryContainer":        cs.PrimaryContainer,
+		"OnPrimaryContainer":      cs.OnPrimaryContainer,
+		"InversePrimary":          cs.InversePrimary,
+		"PrimaryFixed":            cs.PrimaryFixed,
+		"PrimaryFixedDim":         cs.PrimaryFixedDim,
+		"OnPrimaryFixed":          cs.OnPrimaryFixed,
+		"OnPrimaryFixedVariant":   cs.OnPrimaryFixedVariant,
+		"Secondary":               cs.Secondary,
+		"OnSecondary":             cs.OnSecondary,
+		"SecondaryContainer":      cs.SecondaryContainer,
+		"OnSecondaryContainer":    cs.OnSecondaryContainer,
+		"SecondaryFixed":          cs.SecondaryFixed,
+		"SecondaryFixedDim":       cs.SecondaryFixedDim,
+		"OnSecondaryFixed":        cs.OnSecondaryFixed,
+		"OnSecondaryFixedVariant": cs.OnSecondaryFixedVariant,
+		"Tertiary":                cs.Tertiary,
+		"OnTertiary":              cs.OnTertiary,
+		"TertiaryContainer":       cs.TertiaryContainer,
+		"OnTertiaryContainer":     cs.OnTertiaryContainer,
+		"TertiaryFixed":           cs.TertiaryFixed,
+		"TertiaryFixedDim":        cs.TertiaryFixedDim,
+		"OnTertiaryFixed":         cs.OnTertiaryFixed,
+		"OnTertiaryFixedVariant":  cs.OnTertiaryFixedVariant,
+		"Error":                   cs.Error,
+		"OnError":                 cs.OnError,
+		"ErrorContainer":          cs.ErrorContainer,
+		"OnErrorContainer":        cs.OnErrorContainer,
+		"Background":              cs.Background,
+		"OnBackground":            cs.OnBackground,
+		"Surface":                 cs.Surface,
+		"SurfaceDim":              cs.SurfaceDim,
+		"SurfaceBright":           cs.SurfaceBright,
+		"OnSurface":               cs.OnSurface,
+		"OnSurfaceVariant":        cs.OnSurfaceVariant,
+		"SurfaceVariant":          cs.SurfaceVariant,
+		"SurfaceContainerLowest":  cs.SurfaceContainerLowest,
+		"SurfaceContainerLow":     cs.SurfaceContainerLow,
+		"SurfaceContainer":        cs.SurfaceContainer,
+		"SurfaceContainerHigh":    cs.SurfaceContainerHigh,
+		"SurfaceContainerHighest": cs.SurfaceContainerHighest,
+		"SurfaceTint":             cs.SurfaceTint,
+		"Outline":                 cs.Outline,
+		"OutlineVariant":          cs.OutlineVariant,
+		"InverseSurface":          cs.InverseSurface,
+		"InverseOnSurface":        cs.InverseOnSurface,
+		"Scrim":                   cs.Scrim,
+		"Shadow":                  cs.Shadow,
+		"Warning":                 th.Warning,
+		"OnWarning":               th.OnWarning,
+		"WarningContainer":        th.WarningContainer,
+		"OnWarningContainer":      th.OnWarningContainer,
+		"Success":                 th.Success,
+		"OnSuccess":               th.OnSuccess,
+		"SuccessContainer":        th.SuccessContainer,
+		"OnSuccessContainer":      th.OnSuccessContainer,
+	}
+	for name, col := range roles {
+		if col.A == 0 {
+			t.Fatalf("%s: color role %s became transparent", label, name)
+		}
+	}
+}
+
+func TestLerpThemeEndpointsMidpointContrastAndClamping(t *testing.T) {
+	lightShapes := DefaultShapeScale()
+	lightShapes.Medium = 10
+	darkShapes := DefaultShapeScale()
+	darkShapes.Medium = 20
+
+	light := ThemeFromSeed(ui.Hex("#6750A4"), ThemeOptions{
+		Dark:      false,
+		Motion:    motion.Expressive,
+		Density:   tokens.DensityComfortable,
+		Font:      "Inter",
+		MonoFont:  "JetBrains Mono",
+		TextScale: 1.0,
+		Shapes:    &lightShapes,
+	})
+	dark := ThemeFromSeed(ui.Hex("#1B873F"), ThemeOptions{
+		Dark:         true,
+		Contrast:     tokens.ContrastHigh,
+		Motion:       motion.Standard,
+		Density:      tokens.DensityCompact,
+		Font:         "Roboto",
+		MonoFont:     "Fira Code",
+		TextScale:    1.5,
+		ReduceMotion: true,
+		Shapes:       &darkShapes,
+	})
+
+	// t=0, NaN, -Inf, and negative values clamp cleanly to from.
+	for name, tv := range map[string]float32{
+		"zero":   0,
+		"neg":    -0.5,
+		"nan":    float32(math.NaN()),
+		"negInf": float32(math.Inf(-1)),
+	} {
+		got := LerpTheme(light, dark, tv)
+		if got.Colors != light.Colors || got.Dark != light.Dark || got.Warning != light.Warning || got.Success != light.Success {
+			t.Fatalf("LerpTheme(t=%s) did not match light endpoint", name)
+		}
+		if got.TextScale != light.TextScale || got.Font != light.Font || got.MonoFont != light.MonoFont || got.Density != light.Density {
+			t.Fatalf("LerpTheme(t=%s) discrete/scale fields mismatch: %+v", name, got)
+		}
+	}
+
+	// t=1, +Inf, and >1 clamp cleanly to to.
+	for name, tv := range map[string]float32{
+		"one":    1,
+		"gtOne":  2.5,
+		"posInf": float32(math.Inf(1)),
+	} {
+		got := LerpTheme(light, dark, tv)
+		if got.Colors != dark.Colors || got.Dark != dark.Dark || got.Warning != dark.Warning || got.Success != dark.Success {
+			t.Fatalf("LerpTheme(t=%s) did not match dark endpoint", name)
+		}
+		if got.TextScale != dark.TextScale || got.Font != dark.Font || got.MonoFont != dark.MonoFont || got.Density != dark.Density {
+			t.Fatalf("LerpTheme(t=%s) discrete/scale fields mismatch: %+v", name, got)
+		}
+	}
+
+	// Discrete fields switch at t >= 0.5; TextScale interpolates linearly.
+	below := LerpTheme(light, dark, 0.49)
+	if below.Dark || below.Motion != motion.Expressive || below.Density != tokens.DensityComfortable ||
+		below.Font != "Inter" || below.MonoFont != "JetBrains Mono" || below.Shapes.Medium != 10 {
+		t.Fatalf("LerpTheme(0.49) switched discrete fields too early: %+v", below)
+	}
+
+	beforeCount := schemeComputeCount.Load()
+	mid := LerpTheme(light, dark, 0.5)
+	if afterCount := schemeComputeCount.Load(); afterCount != beforeCount {
+		t.Fatalf("LerpTheme incremented schemeComputeCount by %d, must not pollute schemeCache", afterCount-beforeCount)
+	}
+	if mid.hasSeed {
+		t.Fatal("intermediate LerpTheme must clear hasSeed to prevent schemeCache pollution")
+	}
+	if !mid.Dark || mid.Motion != motion.Standard || mid.Density != tokens.DensityCompact ||
+		mid.Font != "Roboto" || mid.MonoFont != "Fira Code" || mid.Shapes.Medium != 20 || !mid.ReduceMotion {
+		t.Fatalf("LerpTheme(0.5) did not switch discrete fields at t >= 0.5: %+v", mid)
+	}
+	if math.Abs(float64(mid.EffectiveTextScale()-1.25)) > 1e-4 {
+		t.Fatalf("LerpTheme(0.5).TextScale = %v, want 1.25", mid.EffectiveTextScale())
+	}
+
+	assertAllColorsOpaque(t, "mid(0.5)", mid)
+	if mid.Colors.Surface == light.Colors.Surface || mid.Colors.Surface == dark.Colors.Surface {
+		t.Fatal("mid Surface should differ from both endpoints")
+	}
+	if !colorBetween(mid.Colors.Surface, light.Colors.Surface, dark.Colors.Surface) {
+		t.Fatalf("mid Surface %+v not between %+v and %+v", mid.Colors.Surface, light.Colors.Surface, dark.Colors.Surface)
+	}
+	if !colorBetween(mid.Colors.Primary, light.Colors.Primary, dark.Colors.Primary) {
+		t.Fatalf("mid Primary %+v not between %+v and %+v", mid.Colors.Primary, light.Colors.Primary, dark.Colors.Primary)
+	}
+	if !colorBetween(mid.Warning, light.Warning, dark.Warning) || !colorBetween(mid.Success, light.Success, dark.Success) {
+		t.Fatal("mid Warning/Success not between endpoints")
+	}
+
+	// Verify usable foreground contrast across Light <-> Dark luminance crossing at t=0.5.
+	for _, pair := range []struct {
+		name   string
+		fg, bg ui.Color
+	}{
+		{"OnSurface/Surface", mid.Colors.OnSurface, mid.Colors.Surface},
+		{"OnSurface/SurfaceContainer", mid.Colors.OnSurface, mid.Colors.SurfaceContainer},
+		{"OnSurfaceVariant/Surface", mid.Colors.OnSurfaceVariant, mid.Colors.Surface},
+		{"OnPrimary/Primary", mid.Colors.OnPrimary, mid.Colors.Primary},
+		{"OnPrimaryContainer/PrimaryContainer", mid.Colors.OnPrimaryContainer, mid.Colors.PrimaryContainer},
+		{"OnSecondary/Secondary", mid.Colors.OnSecondary, mid.Colors.Secondary},
+		{"OnTertiary/Tertiary", mid.Colors.OnTertiary, mid.Colors.Tertiary},
+		{"OnError/Error", mid.Colors.OnError, mid.Colors.Error},
+		{"InverseOnSurface/InverseSurface", mid.Colors.InverseOnSurface, mid.Colors.InverseSurface},
+		{"OnWarning/Warning", mid.OnWarning, mid.Warning},
+		{"OnSuccess/Success", mid.OnSuccess, mid.Success},
+	} {
+		if r := contrastRatio(pair.fg, pair.bg); r < 4.49 {
+			t.Fatalf("mid(0.5) %s contrast ratio = %.2f (< 4.5): fg=%+v bg=%+v", pair.name, r, pair.fg, pair.bg)
+		}
+	}
+
+	// Non-transparent protection when one side leaves a color unset.
+	sparse := &Theme{Colors: tokens.ColorScheme{Primary: ui.Hex("#123456")}}
+	blendedSparse := LerpTheme(sparse, light, 0.5)
+	assertAllColorsOpaque(t, "blendedSparse", blendedSparse)
+}
+
+func TestAnimatedThemeScopeLightDarkSeedAndOverlay(t *testing.T) {
+	lightPurple := ThemeFromSeed(ui.Hex("#6750A4"), ThemeOptions{Dark: false})
+	darkGreen := ThemeFromSeed(ui.Hex("#1B873F"), ThemeOptions{Dark: true})
+	highContrastAmber := ThemeFromSeed(ui.Hex("#E65100"), ThemeOptions{Dark: false, Contrast: tokens.ContrastHigh})
+
+	active := lightPurple
+	var childTheme, overlayTheme *Theme
+	openOverlay := true
+
+	tt := ui.NewTester(func(c *ui.Context) {
+		AnimatedThemeScope(c, active, func() {
+			childTheme = CurrentTheme(c)
+			ui.Box(c).Size(80, 40)
+			if openOverlay {
+				ui.Overlay(c, func() {
+					overlayTheme = CurrentTheme(c)
+					ui.Box(c).Size(20, 20)
+				})
+			}
+		}).Fill()
+	}, 320, 240)
+
+	if tt.FramePending() {
+		t.Fatal("initial AnimatedThemeScope frame should start settled")
+	}
+	if childTheme == nil || childTheme.Colors != lightPurple.Colors {
+		t.Fatalf("initial childTheme mismatch: %+v", childTheme)
+	}
+	if overlayTheme == nil || overlayTheme.Colors != childTheme.Colors {
+		t.Fatal("overlay did not inherit initial AnimatedThemeScope theme")
+	}
+
+	// Switch Light Purple -> Dark Green.
+	active = darkGreen
+	tt.Frame()
+	if !tt.FramePending() {
+		t.Fatal("AnimatedThemeScope should schedule animation frames when target theme changes")
+	}
+
+	schemeCountBefore := schemeComputeCount.Load()
+	tt.Advance(48 * time.Millisecond)
+	if after := schemeComputeCount.Load(); after != schemeCountBefore {
+		t.Fatalf("AnimatedThemeScope transition computed %d DynamicSchemes during interpolation", after-schemeCountBefore)
+	}
+	if childTheme.Colors == lightPurple.Colors || childTheme.Colors == darkGreen.Colors {
+		t.Fatalf("mid-transition Colors did not interpolate: surface=%+v", childTheme.Colors.Surface)
+	}
+	if !colorBetween(childTheme.Colors.Surface, lightPurple.Colors.Surface, darkGreen.Colors.Surface) {
+		t.Fatalf("mid-transition Surface %+v not between endpoints", childTheme.Colors.Surface)
+	}
+	if !colorBetween(childTheme.Colors.Primary, lightPurple.Colors.Primary, darkGreen.Colors.Primary) {
+		t.Fatalf("mid-transition Primary %+v not between endpoints", childTheme.Colors.Primary)
+	}
+	if r := contrastRatio(childTheme.Colors.OnSurface, childTheme.Colors.Surface); r < 4.49 {
+		t.Fatalf("mid-transition OnSurface/Surface contrast dropped to %.2f", r)
+	}
+	if overlayTheme.Colors != childTheme.Colors {
+		t.Fatal("overlay did not track mid-transition interpolated theme")
+	}
+
+	// Advance past DefaultEffects settle (~230ms).
+	tt.Advance(350 * time.Millisecond)
+	if tt.FramePending() {
+		t.Fatal("AnimatedThemeScope still has frames pending after settle window")
+	}
+	if childTheme.Colors != darkGreen.Colors || !childTheme.Dark {
+		t.Fatalf("settled AnimatedThemeScope did not reach darkGreen: Dark=%v Surface=%+v want=%+v",
+			childTheme.Dark, childTheme.Colors.Surface, darkGreen.Colors.Surface)
+	}
+	if overlayTheme.Colors != darkGreen.Colors {
+		t.Fatal("overlay did not converge to darkGreen")
+	}
+
+	// Switch Seed + Contrast mid-flight and verify reversing back to lightPurple settles cleanly.
+	active = highContrastAmber
+	tt.Frame()
+	tt.Advance(32 * time.Millisecond)
+	midAmber := childTheme.Colors
+	if midAmber == darkGreen.Colors || midAmber == highContrastAmber.Colors {
+		t.Fatal("seed/contrast change did not interpolate")
+	}
+	active = lightPurple
+	tt.Frame()
+	tt.Advance(400 * time.Millisecond)
+	if tt.FramePending() {
+		t.Fatal("reverted AnimatedThemeScope still has frames pending after settle")
+	}
+	if childTheme.Colors != lightPurple.Colors || childTheme.Dark {
+		t.Fatal("reverted AnimatedThemeScope did not converge to lightPurple")
+	}
+}
+
+func TestAnimatedThemeScopeTokensReduceMotionAndNoWeakRegistryLeak(t *testing.T) {
+	light := ThemeFromSeed(ui.Hex("#6750A4"), ThemeOptions{Dark: false})
+	dark := ThemeFromSeed(ui.Hex("#6750A4"), ThemeOptions{Dark: true})
+
+	// FastEffects settles significantly faster than SlowEffects.
+	runSettle := func(tok motion.Token) time.Duration {
+		cur := light
+		tt := ui.NewTester(func(c *ui.Context) {
+			AnimatedThemeScope(c, cur, func() {
+				ui.Box(c).Size(20, 20)
+			}, ThemeTransitionOptions{Token: tok})
+		}, 100, 100)
+		cur = dark
+		tt.Frame()
+		var elapsed time.Duration
+		for tt.FramePending() && elapsed < 2*time.Second {
+			tt.Advance(16 * time.Millisecond)
+			elapsed += 16 * time.Millisecond
+		}
+		if tt.FramePending() {
+			t.Fatalf("token %v never settled within 2s", tok)
+		}
+		return elapsed
+	}
+	fastDur := runSettle(motion.FastEffects)
+	slowDur := runSettle(motion.SlowEffects)
+	if !(fastDur < slowDur) {
+		t.Fatalf("expected FastEffects (%v) < SlowEffects (%v)", fastDur, slowDur)
+	}
+
+	// ReduceMotion via Preferences snaps immediately with zero pending frames.
+	cur := light
+	var got *Theme
+	ttPref := ui.NewTesterWith(func(c *ui.Context) {
+		AnimatedThemeScope(c, cur, func() {
+			got = CurrentTheme(c)
+			ui.Box(c).Size(20, 20)
+		})
+	}, 120, 100, ui.TesterOptions{Preferences: ui.Preferences{ReduceMotion: true, TextScale: 1.5}})
+	if got == nil || math.Abs(float64(got.EffectiveTextScale()-1.5)) > 1e-4 {
+		t.Fatalf("Preferences.TextScale mismatch: got=%+v", got)
+	}
+	cur = dark
+	ttPref.Frame()
+	if ttPref.FramePending() {
+		t.Fatal("ReduceMotion preference must not leave animation frames pending")
+	}
+	if got.Colors != dark.Colors || !got.Dark || math.Abs(float64(got.EffectiveTextScale()-1.5)) > 1e-4 {
+		t.Fatalf("ReduceMotion did not snap immediately to dark with TextScale=1.5: %+v", got)
+	}
+
+	// ReduceMotion on the target Theme itself also snaps immediately.
+	darkRM := ThemeFromSeed(ui.Hex("#1B873F"), ThemeOptions{Dark: true, ReduceMotion: true})
+	cur2 := light
+	var got2 *Theme
+	ttThemeRM := ui.NewTester(func(c *ui.Context) {
+		AnimatedThemeScope(c, cur2, func() {
+			got2 = CurrentTheme(c)
+			ui.Box(c).Size(20, 20)
+		})
+	}, 120, 100)
+	cur2 = darkRM
+	ttThemeRM.Frame()
+	if ttThemeRM.FramePending() {
+		t.Fatal("target Theme.ReduceMotion=true must not leave animation frames pending")
+	}
+	if got2.Colors != darkRM.Colors || !got2.Dark {
+		t.Fatal("target Theme.ReduceMotion=true did not snap immediately")
+	}
+
+	// Repeated round-trip transitions must not leak themeByUI or themeBySpec entries.
+	runtime.GC()
+	uiBaseline := themeRegistryCountForTest()
+	specBaseline := themeSpecRegistryCountForTest()
+
+	for range 4 {
+		func() {
+			target := light
+			tt := ui.NewTester(func(c *ui.Context) {
+				AnimatedThemeScope(c, target, func() {
+					_ = CurrentTheme(c)
+					ui.Box(c).Size(20, 20)
+				})
+			}, 120, 100)
+			for _, next := range []*Theme{dark, light, dark, light} {
+				target = next
+				tt.Frame()
+				for range 6 {
+					tt.Advance(32 * time.Millisecond)
+				}
+				tt.Advance(350 * time.Millisecond)
+			}
+		}()
+	}
+
+	for range 20 {
+		runtime.GC()
+		runtime.Gosched()
+		if themeRegistryCountForTest() <= uiBaseline && themeSpecRegistryCountForTest() <= specBaseline {
+			break
+		}
+	}
+	if got := themeRegistryCountForTest(); got > uiBaseline {
+		t.Fatalf("themeByUI leaked after AnimatedThemeScope transitions: count=%d baseline=%d", got, uiBaseline)
+	}
+	if got := themeSpecRegistryCountForTest(); got > specBaseline {
+		t.Fatalf("themeBySpec leaked after AnimatedThemeScope transitions: count=%d baseline=%d", got, specBaseline)
+	}
+
+	// Passing more than one ThemeTransitionOptions must panic.
+	defer func() {
+		if recover() == nil {
+			t.Fatal("expected AnimatedThemeScope with 2 options to panic")
+		}
+	}()
+	ui.NewTester(func(c *ui.Context) {
+		AnimatedThemeScope(c, light, func() {}, ThemeTransitionOptions{}, ThemeTransitionOptions{})
 	}, 100, 50)
 }
