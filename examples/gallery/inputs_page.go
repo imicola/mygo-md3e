@@ -3,9 +3,9 @@ package main
 import (
 	"github.com/egoist/mygo/ui"
 
-	md3e "mygo-md3e"
-	"mygo-md3e/internal/mdicon"
-	"mygo-md3e/tokens"
+	md3e "github.com/imicola/mygo-md3e"
+	"github.com/imicola/mygo-md3e/internal/mdicon"
+	"github.com/imicola/mygo-md3e/tokens"
 )
 
 // inputsPage holds the state of the selection and input demos.

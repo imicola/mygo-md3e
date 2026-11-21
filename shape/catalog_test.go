@@ -7,7 +7,7 @@ import (
 
 	"github.com/egoist/mygo/ui"
 
-	"mygo-md3e/shape"
+	"github.com/imicola/mygo-md3e/shape"
 )
 
 // wantShapes is the catalog order docs/md3e-spec.md §3.3 gives.

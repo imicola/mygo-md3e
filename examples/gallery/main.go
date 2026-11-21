@@ -16,10 +16,10 @@ import (
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 
-	md3e "mygo-md3e"
-	"mygo-md3e/internal/mdicon"
-	"mygo-md3e/motion"
-	"mygo-md3e/tokens"
+	md3e "github.com/imicola/mygo-md3e"
+	"github.com/imicola/mygo-md3e/internal/mdicon"
+	"github.com/imicola/mygo-md3e/motion"
+	"github.com/imicola/mygo-md3e/tokens"
 )
 
 // seedPreset is one seed color the header offers.

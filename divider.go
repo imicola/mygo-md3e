@@ -3,7 +3,7 @@ package md3e
 import (
 	"github.com/egoist/mygo/ui"
 
-	"mygo-md3e/tokens"
+	"github.com/imicola/mygo-md3e/tokens"
 )
 
 // DividerOptions configures a Divider. The zero value is a 1 DIP horizontal

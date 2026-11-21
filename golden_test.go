@@ -8,7 +8,7 @@ import (
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/golden"
 
-	"mygo-md3e/shape"
+	"github.com/imicola/mygo-md3e/shape"
 )
 
 // goldenTolerance accepts a channel's one-step rounding difference in one pixel

@@ -3,8 +3,8 @@ package md3e
 import (
 	"github.com/egoist/mygo/ui"
 
-	"mygo-md3e/motion"
-	"mygo-md3e/tokens"
+	"github.com/imicola/mygo-md3e/motion"
+	"github.com/imicola/mygo-md3e/tokens"
 )
 
 // IconButtonVariant selects the MD3E icon button look of IconButton and

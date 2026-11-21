@@ -7,7 +7,7 @@ import (
 
 	"github.com/egoist/mygo/ui"
 
-	"mygo-md3e/tokens"
+	"github.com/imicola/mygo-md3e/tokens"
 )
 
 // tabsCanvas builds a 480 DIP wide primary or secondary tab bar over the

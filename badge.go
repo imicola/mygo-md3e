@@ -7,7 +7,7 @@ import (
 
 	"github.com/egoist/mygo/ui"
 
-	"mygo-md3e/tokens"
+	"github.com/imicola/mygo-md3e/tokens"
 )
 
 // BadgeOptions configures a Badge or SmallBadge. The zero value is a visible

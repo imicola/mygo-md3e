@@ -7,7 +7,7 @@ import (
 
 	"github.com/egoist/mygo/ui"
 
-	"mygo-md3e/internal/mdicon"
+	"github.com/imicola/mygo-md3e/internal/mdicon"
 )
 
 // chipCanvas builds a 640x360 white canvas holding build's chips.

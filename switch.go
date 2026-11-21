@@ -5,9 +5,9 @@ import (
 
 	"github.com/egoist/mygo/ui"
 
-	"mygo-md3e/internal/mdicon"
-	"mygo-md3e/motion"
-	"mygo-md3e/tokens"
+	"github.com/imicola/mygo-md3e/internal/mdicon"
+	"github.com/imicola/mygo-md3e/motion"
+	"github.com/imicola/mygo-md3e/tokens"
 )
 
 // Switch metrics in DIP, as MD3E specifies the switch: a 52x32 track, a

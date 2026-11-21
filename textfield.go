@@ -6,8 +6,8 @@ import (
 
 	"github.com/egoist/mygo/ui"
 
-	"mygo-md3e/motion"
-	"mygo-md3e/tokens"
+	"github.com/imicola/mygo-md3e/motion"
+	"github.com/imicola/mygo-md3e/tokens"
 )
 
 // TextFieldVariant selects the Material Design 3 Expressive text field look.

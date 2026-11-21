@@ -9,7 +9,7 @@ import (
 
 	"github.com/egoist/mygo/ui"
 
-	"mygo-md3e/tokens"
+	"github.com/imicola/mygo-md3e/tokens"
 )
 
 var groupItems = []ButtonGroupItem{{Label: "Cut"}, {Label: "Copy"}, {Label: "Paste"}}

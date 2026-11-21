@@ -5,9 +5,9 @@ import (
 
 	"github.com/egoist/mygo/ui"
 
-	md3e "mygo-md3e"
-	myshape "mygo-md3e/shape"
-	"mygo-md3e/tokens"
+	md3e "github.com/imicola/mygo-md3e"
+	myshape "github.com/imicola/mygo-md3e/shape"
+	"github.com/imicola/mygo-md3e/tokens"
 )
 
 // shapePage holds the morph playground: the two ends, the progress and the

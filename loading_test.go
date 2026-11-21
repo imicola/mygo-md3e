@@ -8,9 +8,9 @@ import (
 
 	"github.com/egoist/mygo/ui"
 
-	"mygo-md3e/motion"
-	"mygo-md3e/shape"
-	"mygo-md3e/tokens"
+	"github.com/imicola/mygo-md3e/motion"
+	"github.com/imicola/mygo-md3e/shape"
+	"github.com/imicola/mygo-md3e/tokens"
 )
 
 // loadingCanvas builds a 320x200 white canvas holding build's indicators.

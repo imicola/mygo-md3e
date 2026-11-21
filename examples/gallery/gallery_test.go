@@ -6,7 +6,7 @@ import (
 
 	"github.com/egoist/mygo/ui"
 
-	myshape "mygo-md3e/shape"
+	myshape "github.com/imicola/mygo-md3e/shape"
 )
 
 // galleryTester builds the gallery in a tall window so every control of a page

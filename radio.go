@@ -5,8 +5,8 @@ import (
 
 	"github.com/egoist/mygo/ui"
 
-	"mygo-md3e/motion"
-	"mygo-md3e/tokens"
+	"github.com/imicola/mygo-md3e/motion"
+	"github.com/imicola/mygo-md3e/tokens"
 )
 
 // Radio metrics in DIP: a 20 DIP ring with a 10 DIP inner dot, inside a 40 DIP

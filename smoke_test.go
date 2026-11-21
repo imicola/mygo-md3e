@@ -6,7 +6,7 @@ import (
 
 	"github.com/egoist/mygo/ui"
 
-	"mygo-md3e"
+	"github.com/imicola/mygo-md3e"
 )
 
 // TestSmokeHeadlessFrame builds the root module's view in a tester, draws it

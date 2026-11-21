@@ -1,10 +1,10 @@
-module mygo-md3e
+module github.com/imicola/mygo-md3e
 
 go 1.27.3
 
 tool github.com/egoist/mygo/cmd/mygo
 
-require github.com/egoist/mygo v0.0.0
+require github.com/egoist/mygo v0.10.1-0.20261119113012-61ea5567ab14
 
 require (
 	github.com/ProtonMail/go-crypto v1.4.1 // indirect
@@ -20,5 +20,3 @@ require (
 	golang.org/x/sys v0.48.0 // indirect
 	golang.org/x/text v0.43.0 // indirect
 )
-
-replace github.com/egoist/mygo => ./mygo

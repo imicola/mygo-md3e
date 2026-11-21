@@ -7,7 +7,7 @@ import (
 
 	"github.com/egoist/mygo/ui"
 
-	"mygo-md3e/shape"
+	"github.com/imicola/mygo-md3e/shape"
 )
 
 // polygons returns a spread of polygons the tests exercise.

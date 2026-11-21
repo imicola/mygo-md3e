@@ -5,11 +5,11 @@
 //
 // The library is layered:
 //
-//   - [mygo-md3e/tokens] holds the MD3E design tokens: HCT color science,
+//   - [github.com/imicola/mygo-md3e/tokens] holds the MD3E design tokens: HCT color science,
 //     tonal palettes, dynamic color schemes, typography, shape and elevation.
-//   - [mygo-md3e/motion] maps the MD3E spring specifications onto MyGo's
+//   - [github.com/imicola/mygo-md3e/motion] maps the MD3E spring specifications onto MyGo's
 //     physics, converting damping ratios to physical damping coefficients.
-//   - [mygo-md3e/shape] builds the 35 Material Expressive shapes and morphs
+//   - [github.com/imicola/mygo-md3e/shape] builds the 35 Material Expressive shapes and morphs
 //     between them as closed cubic Bézier loops.
 //   - package md3e itself holds the components, from buttons and selection
 //     controls to navigation and overlays.

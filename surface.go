@@ -3,8 +3,8 @@ package md3e
 import (
 	"github.com/egoist/mygo/ui"
 
-	"mygo-md3e/shape"
-	"mygo-md3e/tokens"
+	"github.com/imicola/mygo-md3e/shape"
+	"github.com/imicola/mygo-md3e/tokens"
 )
 
 // SurfaceColorForElevation maps level (Level0..Level5) to MD3E's tonal Surface

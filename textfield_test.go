@@ -8,8 +8,8 @@ import (
 
 	"github.com/egoist/mygo/ui"
 
-	"mygo-md3e/internal/mdicon"
-	"mygo-md3e/tokens"
+	"github.com/imicola/mygo-md3e/internal/mdicon"
+	"github.com/imicola/mygo-md3e/tokens"
 )
 
 // fieldCanvas builds a 360x420 white canvas holding build's fields.

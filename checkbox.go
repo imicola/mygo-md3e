@@ -5,8 +5,8 @@ import (
 
 	"github.com/egoist/mygo/ui"
 
-	"mygo-md3e/motion"
-	"mygo-md3e/tokens"
+	"github.com/imicola/mygo-md3e/motion"
+	"github.com/imicola/mygo-md3e/tokens"
 )
 
 // Checkbox metrics in DIP: an 18 DIP box with 2 DIP corners inside a 40 DIP

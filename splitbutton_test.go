@@ -7,8 +7,8 @@ import (
 
 	"github.com/egoist/mygo/ui"
 
-	"mygo-md3e/internal/mdicon"
-	"mygo-md3e/tokens"
+	"github.com/imicola/mygo-md3e/internal/mdicon"
+	"github.com/imicola/mygo-md3e/tokens"
 )
 
 // splitFixture builds a split button with a counting menu, keeping its

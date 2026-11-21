@@ -7,7 +7,7 @@ import (
 
 	"github.com/egoist/mygo/ui"
 
-	"mygo-md3e/motion"
+	"github.com/imicola/mygo-md3e/motion"
 )
 
 var (

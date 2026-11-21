@@ -3,8 +3,8 @@ package md3e
 import (
 	"github.com/egoist/mygo/ui"
 
-	"mygo-md3e/motion"
-	"mygo-md3e/tokens"
+	"github.com/imicola/mygo-md3e/motion"
+	"github.com/imicola/mygo-md3e/tokens"
 )
 
 // ListItem describes one row of a List: its text, its leading and trailing

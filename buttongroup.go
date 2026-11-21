@@ -3,8 +3,8 @@ package md3e
 import (
 	"github.com/egoist/mygo/ui"
 
-	"mygo-md3e/motion"
-	"mygo-md3e/tokens"
+	"github.com/imicola/mygo-md3e/motion"
+	"github.com/imicola/mygo-md3e/tokens"
 )
 
 // ButtonGroupKind selects how a button group's buttons meet.
