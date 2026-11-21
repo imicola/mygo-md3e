@@ -93,6 +93,10 @@ type app struct {
 
 	snack *md3e.SnackbarState
 
+	// scrolls keeps where each page was scrolled, by its place in
+	// galleryRoutes, so the rail brings a page back where it was left.
+	scrolls []ui.ScrollState
+
 	shapes     shapePage
 	motionPage motionPage
 	actions    actionsPage
@@ -104,9 +108,20 @@ type app struct {
 
 func newApp() *app {
 	return &app{
-		router: ui.NewRouter(galleryRoutes[0].path),
-		snack:  &md3e.SnackbarState{},
+		router:  ui.NewRouter(galleryRoutes[0].path),
+		snack:   &md3e.SnackbarState{},
+		scrolls: make([]ui.ScrollState, len(galleryRoutes)),
 	}
+}
+
+// pageScroll is where a page path was scrolled.
+func (a *app) pageScroll(path string) *ui.ScrollState {
+	for i := range galleryRoutes {
+		if galleryRoutes[i].path == path {
+			return &a.scrolls[i]
+		}
+	}
+	return &a.scrolls[0]
 }
 
 // scheme is the motion scheme the header chooses.
@@ -167,7 +182,7 @@ func (a *app) view(c *ui.Context) {
 		root.Children(func() {
 			a.header(c, th)
 			md3e.Divider(c)
-			ui.Row(c).Grow(1).AlignItems(ui.Stretch).Children(func() {
+			ui.Row(c).Grow(1).MinHeight(0).AlignItems(ui.Stretch).Children(func() {
 				md3e.NavigationRail(c, a.destinations(), md3e.NavigationRailOptions{
 					Selected: &a.page,
 					Changed:  func(i int) { a.router.Push(galleryRoutes[i].path) },
@@ -177,13 +192,20 @@ func (a *app) view(c *ui.Context) {
 					},
 					Label: "Gallery pages",
 				})
-				ui.Scroll(c.Key("page-scroll")).Grow(1).Children(func() {
-					a.router.View(c, func(r *ui.Route) { a.route(c, r) })
+				// Each route scrolls on its own, keeping the place it had
+				// when the rail took the window to another page.
+				ui.Column(c).Grow(1).MinWidth(0).MinHeight(0).Children(func() {
+					a.router.View(c, func(r *ui.Route) {
+						ui.Scroll(c.Key("page-scroll-" + r.Path())).TrackScroll(a.pageScroll(r.Path())).
+							Grow(1).KeepScrollbars(true).Children(func() {
+							a.route(c, r)
+						})
+					})
 				})
 			})
 			md3e.SnackbarHost(c, a.snack)
 		})
-	})
+	}).Fill()
 }
 
 // route builds the page the router shows.
@@ -210,7 +232,7 @@ func (a *app) destinations() []md3e.NavigationDestination {
 // header holds the live theme controls.
 func (a *app) header(c *ui.Context, th *md3e.Theme) {
 	cs := th.Colors
-	ui.Column(c).FillWidth().Padding(16, 14).Gap(10).Background(cs.SurfaceContainerLow).Children(func() {
+	ui.Column(c).FillWidth().Shrink(0).Padding(16, 10).Gap(8).Background(cs.SurfaceContainerLow).Children(func() {
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(12).Wrap().Children(func() {
 			ui.Column(c).Gap(2).Children(func() {
 				md3e.Text(c, "MyGo MD3E Gallery", tokens.TitleLarge, true)
@@ -300,15 +322,18 @@ func main() {
 	}
 }
 
-// page lays out a page: its title, a description and its sections.
+// page lays out a page: its title, a description and its sections, in a
+// centered reading column that keeps its lines comfortable on wide windows.
 func page(c *ui.Context, title, subtitle string, body func()) {
 	cs := md3e.CurrentTheme(c).Colors
-	ui.Column(c).FillWidth().Padding(24).Gap(18).AlignItems(ui.Start).Children(func() {
-		ui.Column(c).Gap(4).Children(func() {
-			md3e.Text(c, title, tokens.HeadlineMedium, true)
-			md3e.Text(c, subtitle, tokens.BodyMedium).TextColor(cs.OnSurfaceVariant)
+	ui.Row(c).FillWidth().Justify(ui.Center).Children(func() {
+		ui.Column(c).FillWidth().MaxWidth(1120).Padding(24, 24, 48).Gap(18).AlignItems(ui.Start).Children(func() {
+			ui.Column(c).Gap(4).Children(func() {
+				md3e.Text(c, title, tokens.HeadlineMedium, true)
+				md3e.Text(c, subtitle, tokens.BodyMedium).TextColor(cs.OnSurfaceVariant)
+			})
+			body()
 		})
-		body()
 	})
 }
 

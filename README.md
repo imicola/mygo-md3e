@@ -73,7 +73,7 @@ func (a *app) view(c *ui.Context) {
 				log.Println("Hello,", a.name)
 			}
 		})
-	})
+	}).Fill()
 }
 
 func main() {
@@ -97,6 +97,7 @@ func main() {
 1. 所有组件首参数是 `*ui.Context`，状态通过指针传入（`*bool`、`*float64`、`*string`…），构造时即写入用户输入。
 2. 有状态控件必须在构造前用 `c.Key(...)` 指定 key；容器在读取状态前用 `e.Key(...)`。
 3. `md3e.ThemeScope` 同时桥接 `ui.Themed`，因此页面内通过 `ui.Overlay` 打开的 Dialog / Sheet / Menu / Modal Picker / Snackbar 都继承同一主题。
+4. `ThemeScope` 返回的元素默认按内容高度布局。作为整窗根包装、且内部使用 `ui.Column(...).Fill()` 或 `ui.Scroll(...).Grow(1)` 时，必须链式调用 `.Fill()`（如上面的 `}).Fill()`），否则 `100%` 高度会解析为无界并撑满整页内容，滚动容器将没有可滚动距离。局部或卡片内的 `ThemeScope` 不要加 `.Fill()`。
 
 ---
 

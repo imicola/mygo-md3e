@@ -894,6 +894,16 @@ func DefaultTheme(c *ui.Context) *Theme {
 // MD3E theme for content, simultaneously bridging into ui.Themed so native MyGo
 // controls, nested scopes, and overlays launched inside content inherit the
 // exact same palette, typography metrics, and accessibility preferences.
+//
+// A ThemeScope takes the height its content needs, as a ui.Themed column
+// does. When it wraps a whole window and its content fills or scrolls the
+// window (a ui.Column with Fill(), a ui.Scroll with Grow(1)), chain Fill()
+// on the returned element so those sizes resolve against the window rather
+// than growing without bound:
+//
+//	md3e.ThemeScope(c, th, func() {
+//		ui.Column(c).Fill().Children(app)
+//	}).Fill()
 func ThemeScope(c *ui.Context, t *Theme, content func()) ui.Element {
 	if t == nil {
 		t = DefaultTheme(c)
