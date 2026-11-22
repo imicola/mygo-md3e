@@ -239,3 +239,23 @@ MD3E 将动效分为 **Spatial（空间：位移、缩放、尺寸、圆角、�
 - **`TreeView`**：基于 `ui.TreeBase` 构建，保留完整 `RoleTree` / `RoleTreeItem`（`Level`、`Expandable`、`Expanded`、`Selected`）、单次 Tab 停靠及 Up/Down/Left/Right/Home/End/首字母键入导航。分支披露箭头以 `motion.FastSpatial` 弹簧在 `0° ↔ ±90°` 平滑旋转（RTL 自动镜像箭头与方向键）；点击箭头仅切换展开态且不触发行选中与 `OnClick`；当 `TreeNode.Open == nil` 且存在 `Children` 时通过节点键隔离的 `ui.Local` 持久化展开态；`ShowIndentGuides` 在展开分支下方绘制对齐的 `OutlineVariant` `1` DIP 竖向引导线。
 - **`Breadcrumb`**：`ui.RoleNavigation` 地标（默认 `"Breadcrumb"`），祖先层级为 `ui.ButtonBase`，末尾当前项为静态 `RoleText` + `ui.CurrentPage` + `SecondaryContainer` 高亮胶囊；支持 `MaxVisible` 与基于容器 `LayoutBounds` 宽度的响应式自动折叠（中间层级收进 `MoreHoriz` 触发的 `ui.MenuBase` 下拉菜单，保留首项与末尾当前项），自带无限重排保护与 RTL 分隔符镜像。
 - **`Pagination`**：1-based（`1..totalPages`）`ui.RoleNavigation` 水平 `FocusGroup` 分页条，安全钳位越界 `*page` 与 `totalPages <= 0`；提供可选 `ShowEdges`（首页/末页）、上一页/下一页与边界禁用逻辑、基于 `SiblingCount`/`MaxButtons` 的对称窗口省略号折叠、`TabularNums` 等宽页码胶囊、`motion.FastSpatial` 按压圆角形变及 RTL 布局/方向键/图标镜像。
+
+---
+
+## 9. 媒体、图像与动态封面取色规格（M12）
+
+### 9.1 图像封面动态取色引擎（`tokens/extract.go`）
+- **算法链路（Pure-Go MCU）**：`tokens.SeedFromImage` 与 `tokens.PaletteFromImage` 对 `image.Image` 执行确定性步长下采样（`<= 128×128 = 16384` 样本，自动跳过 `alpha < 128` 半透明像素并对预乘 `*image.RGBA` 还原直通通道）、Wu 5-bit `[33][33][33]` 前缀和量化分割、`CIE L*a*b*` 空间 `WSMeans` 质心微调，以及基于 `360°` 色相直方图（`±15°` 激励比例）与色度加权的 Material `Score` 排序（含渐进最小色相间隔去重与 `#6750A4` 等可配置回退色）。
+- **零重算防抖原则**：所有播放器仅在封面图像引用变化时触发提取并将结果记忆在 `ui.Local`，杜绝每帧遍历像素。
+
+### 9.2 根包局部图像 `md3e.Image`（`image.go`）
+- **多形态与适应度**：支持 `*ui.Bitmap`、`*ui.SVG` 与通用 `ui.ImageSource`，提供 `Fit`（默认 `Contain`）、`ObjectPosition`（默认 `[0.5, 0.5]`）与 `Grayscale`；支持 `ShapeScale` / `Radius` / `Radii` 四角独立圆角或任意 `*shape.RoundedPolygon` 几何裁切（`shape.ClipShape`）。
+- **状态迁移与幽灵绘制**：`Loading` 复用适配形变的 Tonal `Skeleton`；`Failed` / `Error` 渲染图标容器与可选重试按钮；异步 `Loading/nil -> src` 过渡使用 `motion.DefaultEffects` 从 `0 -> 1` 平滑淡入并响应 `ReduceMotion` / `NoFade`；支持可选 `MatchKey` 共享元素过渡；严守根包零引入 `media/`、`ui/netimage` 与 `ui/video`。
+
+### 9.3 网络图、模态灯箱与 Expressive 音视频播放器（`media/`）
+- **`media.NetImage`**：在 `github.com/egoist/mygo/ui/netimage` 上叠加 MD3E 骨架屏占位、网络失败重试（点击通过 `c.Services()` + `ForgetImage` 清除失败退避后立即重新拉取）与空白 URL 安全空占位，并导出 `PreloadImages`、`ForgetImage`、`ClearImageCache` 与 `SetImageHTTPClient`。
+- **`media.ImageLightbox`**：基于全屏 `ui.Overlay` + `Modal()` 的照片预览器（含退场动画隔离与关闭归还焦点）。支持工具栏 / 滚轮 / 双指捏合 / 双击 / `=` `-` `0` 键 `1x..5x` 缩放（默认），支持按放大倍比与视口尺寸钳位的拖拽与触控板平移、RTL 自动镜像的上/下页按钮与左右方向键切换、顶部计数栏、底部标题/副标题浮层、`MatchKey` 共享元素进场及 `Escape`/Scrim 外部点击关闭。
+- **`media.VideoPlayer`**：封装 `ui.Video` / `*ui.VideoPlayer` 与 `OpenVideo`/`OpenVideoURL`/`OpenVideoData` 辅助构造器。提供基于虚拟时钟（`c.Now()` + `c.After`）在播放闲置 `AutoHideDelay`（默认 `3s`）后平滑收起、鼠标移入/按键/操作即刻唤起的底部渐变与半透明控制条；集成 `MorphIconButton`（`Circle ↔ Square`）播放切换、共享 `mediaScrubber`（播放态 `LinearWavy` 波浪与缓冲进度段 + 拖拽/聚焦时显示水滴 `TabularNums` 时间气泡）、`TabularNums` 时长文本、静音开关与音量条、倍速 `MenuButton`、`Fullscreen` 钩子、居中缓冲 `LoadingIndicator`、错误重试覆盖层及全套键盘快捷键（`Space`/`K`、`M`、`F`、RTL 感知 `Left`/`Right`）。
+- **`media.AudioPlayerCard` & `media.MiniPlayer`**：支持 `TrackInfo` 封面显示与可选异形裁切（`ArtworkShape`），并在 `DynamicColor: true` 或 `SeedColor` 开启时记忆提取主题并包裹于 `md3e.AnimatedThemeScope` 实现跨曲目 Oklab 平滑换肤。`AudioPlayerCard` 提供展开封面信息、波浪拖拽轨、时间显示与 `FocusGroup` 传输按钮栏；`MiniPlayer` 随 `Theme.Density` 自适应高度（`64`/`56`/`52` DIP）并在底部边沿使用仅播放且未启用 `ReduceMotion` 时波动的 `LinearWavyProgress`（暂停与 `ReduceMotion` 下切换静止 `LinearProgress`，保证 `FramePending() == false`）。
+- **DCE 硬边界验证**：通过独立编译 `media/dce_test.go` 验证仅引用 `md3e.Button`+`md3e.Image` 时零链接 `media/`、`ui/netimage`、`ui/video` 与 `symbols/`，且仅引用 `media.NetImage` 时零链接 `ui/video` 与 `tokens.SeedFromImage`。
+

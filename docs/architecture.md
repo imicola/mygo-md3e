@@ -18,10 +18,11 @@ Go 模块路径：`github.com/imicola/mygo-md3e`（直接依赖上游 `github.co
 │   ├── md3e-spec.md        # MD3E 精确设计令牌与组件行为规格
 │   └── ROADMAP.md          # Phase 2 演进路线图与里程碑进度
 ├── go.mod / go.sum
-├── tokens/                 # M1/M9: 纯 Go MD3E 设计令牌与 HCT 色彩引擎（无 UI 状态依赖）
+├── tokens/                 # M1/M9/M12: 纯 Go MD3E 设计令牌、HCT 色彩与封面取色引擎（无 UI 状态依赖）
 │   ├── hct.go              # sRGB/XYZ/Lab/CAM16/HCT 转换、对比度计算
 │   ├── palette.go          # TonalPalette & CorePalette
 │   ├── scheme.go           # DynamicScheme (TonalSpot/Expressive/Vibrant/...) & 45+ ColorRoles
+│   ├── extract.go          # M12: QuantizerCelebi（Wu+WSMeans）与 Material Score 动态封面取色
 │   ├── size.go             # XS..XL 尺寸档位（SizeTier / SizeSpec）
 │   ├── density.go          # M9: Comfortable / Desktop / Compact 三档密度规格与 ButtonSpec
 │   ├── shape.go            # CornerRadius / ShapeScale tokens
@@ -94,6 +95,17 @@ Go 模块路径：`github.com/imicola/mygo-md3e`（直接依赖上游 `github.co
 ├── treeview.go             # M11: TreeView（基于 ui.TreeBase 的缩进引导线、弹簧旋转折叠箭头与本地展开态回退）
 ├── breadcrumb.go           # M11: Breadcrumb（响应式路径面包屑与 MoreHoriz 溢出下拉菜单）
 ├── pagination.go           # M11: Pagination（1-based 胶囊分页条、TabularNums 与窗口省略号折叠）
+├── image.go                # M12: Image（根包局部/SVG 图像，形状裁切、Fade-In、Skeleton 与 Error/Retry）
+├── media/                  # M12: 业务扩展子包（按需引入，零侵入根包）
+│   ├── helpers.go          # media 包内动画、数值防御与文本回退辅助函数
+│   ├── netimage.go         # NetImage 与缓存控制（封装 github.com/egoist/mygo/ui/netimage）
+│   ├── lightbox.go         # ImageLightbox 全屏模态预览（缩放、平移、RTL 导航、Escape/Scrim）
+│   ├── scrubber.go         # 内部共享 Expressive mediaScrubber（波浪/胶囊/缓冲段/时间气泡）
+│   ├── player.go           # VideoPlayer（封装 ui.Video / ui/video）与 OpenVideo* 构造器
+│   ├── audio.go            # AudioPlayerCard 与 MiniPlayer（memoized 动态取色 + AnimatedThemeScope）
+│   ├── image_test.go       # NetImage & ImageLightbox 无头/Mock HTTP/RTL 测试
+│   ├── player_test.go      # VideoPlayer（GIF 解码）/ AudioPlayerCard / MiniPlayer 测试
+│   └── dce_test.go         # Zero-Bloat / 死代码消除链接边界测试
 ├── golden_test.go          # 纯几何 Golden 视觉基线测试（testdata/）
 └── examples/
     ├── m2-demo/            # M2: 独立可运行的令牌/动效/形状预览模块
@@ -109,8 +121,9 @@ Go 模块路径：`github.com/imicola/mygo-md3e`（直接依赖上游 `github.co
    - `motion` 仅依赖 `tokens` 与 `github.com/egoist/mygo/ui`（`Animation`、`SpringOptions`、`Preferences`）。
    - `shape` 仅依赖 `github.com/egoist/mygo/ui`（`Path`、`Painter`、`Rect`、`Point`）。
    - `symbols` 仅依赖 Go 标准库与 `github.com/egoist/mygo/ui`（`Path`、`Painter`、`Rect`、`Color`），不导入 `md3e`，其 `(*Symbol).Draw` 方法值签名与 `md3e.IconDraw` 完全一致。
-   - `md3e`（根包）整合 `tokens`、`motion`、`shape`、`internal/mdicon` 与 `github.com/egoist/mygo/ui`。
-   - **禁止循环依赖**：`tokens`、`motion`、`shape`、`symbols` 不得导入根包 `md3e`。
+   - `md3e`（根包）整合 `tokens`、`motion`、`shape`、`internal/mdicon` 与 `github.com/egoist/mygo/ui`；**严禁导入** `media`、`ui/netimage` 或 `ui/video`。
+   - `media`（扩展媒体子包）单向构建于 `md3e`、`tokens`、`motion`、`shape`、`symbols`、`github.com/egoist/mygo/ui`、`ui/netimage` 与 `ui/video` 之上，各功能块无包级 `init()`，确保仅使用 `NetImage` 时不链接 `ui/video`，仅使用根包 `md3e.Button`/`md3e.Image` 时零引入 `media/`。
+   - **禁止循环依赖**：`tokens`、`motion`、`shape`、`symbols` 不得导入根包 `md3e` 或 `media`；`md3e` 不得导入任何业务扩展子包（如 `media`）。
 2. **零 `init()` 注册表**：任何包不得在 `init()` 中构造大对象或注册全量组件表，确保用户应用只链接实际调用的组件（遵循 MyGo“按需付费”原则）。
 
 ---

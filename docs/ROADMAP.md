@@ -125,15 +125,15 @@ tokens  ──►  motion  ──►  shape  ──►  md3e (根包：核心美
 #### M12 — 媒体、图片与动态取色子包（`media/` + `tokens/extract`）
 > **目标**：补齐图片展示、图库预览、音乐/视频播放器与 Material You 内容动态取色能力。
 
-- [ ] **M12.1 图像封面动态取色（`tokens/extract.go`）**
-  - 纯 Go 实现轻量化 Quantizer + Score 算法（`tokens.SeedFromImage(img image.Image)`），从专辑封面/壁纸/头图提取最佳 HCT 种子色，驱动播放器与详情页的局部 `ThemeScope` 动态变色。
-- [ ] **M12.2 MD3E 图像组件（根包 `image.go` + `media/netimage.go`）**
-  - 根包 `md3e.Image`：支持本地位图/SVG、`ShapeScale` 或 `shape.RoundedPolygon` 异形裁切、圆角遮罩、`Fit(Cover/Contain)`、平滑淡入与加载/失败占位。
-  - `media.NetImage`：封装上游 `ui/netimage`，叠加 MD3E Tonal `Skeleton` 骨架屏、失败重试占位与缓存控制。
-  - `media.ImageLightbox`：点击图片平滑展开的全屏预览层（缩放/平移/左右切换/Escape 关闭）。
-- [ ] **M12.3 MD3E Expressive 音视频播放器（`media/player.go`）**
-  - `media.VideoPlayer`：封装上游 `ui.Video` / `ui/video`，提供 MD3E 悬浮半透明磨砂/渐变控制条（自动隐藏）、Expressive 波浪/胶囊进度拖拽条（带缓冲段与时间气泡）、异形 Play/Pause Morph 按钮、音量条、倍速菜单与全屏钩子。
-  - `media.AudioPlayerCard` / `media.MiniPlayer`：紧凑底栏迷你播放器与展开式专辑封面卡片（支持封面取色 + `LinearWavyProgress` 播放波浪条）。
+- [x] **M12.1 图像封面动态取色（`tokens/extract.go`）**
+  - 纯 Go 实现轻量化 `QuantizerCelebi`（Wu + CIE L*a*b* WSMeans）与 Material `Score` 评分算法（`tokens.SeedFromImage`、`tokens.PaletteFromImage`、`tokens.ExtractOptions`），从专辑封面/壁纸/头图提取最佳 HCT 种子色，驱动播放器与详情页的局部 `ThemeScope` / `AnimatedThemeScope` 动态变色。
+- [x] **M12.2 MD3E 图像组件（根包 `image.go` + `media/netimage.go` + `media/lightbox.go`）**
+  - 根包 `md3e.Image`：支持本地位图/SVG、`ShapeScale` / `Radii` / `shape.RoundedPolygon` 异形裁切、`Fit`/`ObjectPosition`/`Grayscale`、平滑淡入（`ReduceMotion` 适配）、`MatchKey` 与加载/失败重试占位；零导入 `media/`、`ui/netimage` 与 `ui/video`。
+  - `media.NetImage`：封装上游 `ui/netimage`（含 `PreloadImages`、`ForgetImage`、`ClearImageCache`、`SetImageHTTPClient`），叠加 MD3E Tonal `Skeleton` 骨架屏、失败重试占位与形状裁切。
+  - `media.ImageLightbox`：全屏模态 `ui.Overlay` 预览层（`1x..5x` 按钮/滚轮/捏合/双击/键盘缩放、受限拖拽与触控板平移、RTL 镜像切换、字幕栏、`MatchKey` 共享过渡、Escape/Scrim 关闭及焦点恢复）。
+- [x] **M12.3 MD3E Expressive 音视频播放器（`media/scrubber.go`、`media/player.go`、`media/audio.go`）**
+  - `media.VideoPlayer`：封装上游 `ui.Video` / `ui/video`（含 `OpenVideo`、`OpenVideoURL`、`OpenVideoData`），提供基于虚拟时钟（`c.Now()`/`c.After`）自动隐藏与移入唤起的半透明控制条、共享 Expressive `mediaScrubber` 波浪/胶囊进度拖拽条（带缓冲段与 `TabularNums` 时间气泡）、Play/Pause Morph 按钮、音量滑块、倍速菜单、全屏钩子及快捷键/RTL 支持。
+  - `media.AudioPlayerCard` / `media.MiniPlayer`：紧凑密度自适应底栏迷你播放器与展开式专辑封面卡片（支持 `ui.Local` 缓存的封面取色 + `AnimatedThemeScope` 过渡、`ArtworkShape` 裁切、播放态 `LinearWavyProgress` 波浪条及暂停/`ReduceMotion` 零多余帧收敛）。
 
 #### M13 — 文档、Markdown 与知识展示子包（`docview/`）
 > **目标**：补齐文档站、README 预览、笔记应用、AI 流式回复渲染场景。

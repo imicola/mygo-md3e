@@ -150,13 +150,16 @@ func main() {
 ├── treeview.go        # TreeView（基于 ui.TreeBase 的缩进竖线与弹簧旋转折叠箭头）
 ├── breadcrumb.go      # Breadcrumb（响应式路径面包屑与 MoreHoriz 溢出下拉菜单）
 ├── pagination.go      # Pagination（1-based 胶囊分页条、TabularNums 与窗口省略号折叠）
+├── image.go           # 本地/SVG 图像组件 Image（异形裁切、平滑淡入、Skeleton 与 Error/Retry 占位）
+├── media/             # 按需媒体扩展子包：NetImage、ImageLightbox、VideoPlayer、AudioPlayerCard、MiniPlayer
 ├── docs/              # 架构设计规范与 MD3E 技术规格基线
 └── examples/
     ├── gallery/       # 全量交互式展示画廊（属于根模块）
+    ├── desktop-demo/  # PulseDesk 桌面工作站示例
     └── m2-demo/       # M1–M2 令牌/动效/形状独立演示模块
 ```
 
-包依赖严格保持单向：`tokens` → `motion` → `shape` → 根包 `md3e`，`symbols` 仅依赖 `github.com/egoist/mygo/ui` 与标准库（子包绝不导入 `md3e`）。
+包依赖严格保持单向：`tokens` → `motion` → `shape` → 根包 `md3e` → `media`，`symbols` 仅依赖 `github.com/egoist/mygo/ui` 与标准库（底层子包绝不导入 `md3e`，根包绝不导入 `media/`、`ui/netimage` 或 `ui/video`）。
 
 ---
 
@@ -224,6 +227,10 @@ func main() {
 
 | 组件 | 主要入口 |
 | --- | --- |
+| 本地与矢量图像（`md3e`） | `Image`、`ImageOptions`（`Fit`、`ShapeScale`/`Radii`/`Shape`、`Skeleton` 占位、`OnRetry`、`FadeIn`、`MatchKey`） |
+| 封面动态取色（`tokens`） | `tokens.SeedFromImage`、`tokens.PaletteFromImage`、`tokens.ExtractOptions` |
+| 网络图与全屏灯箱（`media`） | `media.NetImage`、`media.ImageLightbox`、`media.PreloadImages`、`media.ForgetImage`、`media.ClearImageCache`、`media.SetImageHTTPClient` |
+| Expressive 音视频播放器（`media`） | `media.VideoPlayer`、`media.OpenVideo`、`media.OpenVideoURL`、`media.OpenVideoData`、`media.AudioPlayerCard`、`media.MiniPlayer`、`media.TrackInfo` |
 | Card 与 Divider | `ElevatedCard`、`FilledCard`、`OutlinedCard`、`Card`、`Divider` |
 | 卡片式快捷开关与操作行 | `SwitchCard`、`ActionTile` |
 | Expressive 分段与虚拟化列表/数据表 | `List`、`ListItem`、`VirtualList`、`DataTable`、`DataTableCellText`、`ApplyDataTableMenuActions` |
