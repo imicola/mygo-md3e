@@ -152,6 +152,7 @@ func main() {
 ├── pagination.go      # Pagination（1-based 胶囊分页条、TabularNums 与窗口省略号折叠）
 ├── image.go           # 本地/SVG 图像组件 Image（异形裁切、平滑淡入、Skeleton 与 Error/Retry 占位）
 ├── media/             # 按需媒体扩展子包：NetImage、ImageLightbox、VideoPlayer、AudioPlayerCard、MiniPlayer
+├── charts/            # 按需图表扩展子包：RingBuffer、AreaSparkline、StackedProgress、MetricCard、LineChart、BarChart、DonutChart
 ├── docs/              # 架构设计规范与 MD3E 技术规格基线
 └── examples/
     ├── gallery/       # 全量交互式展示画廊（属于根模块）
@@ -159,7 +160,7 @@ func main() {
     └── m2-demo/       # M1–M2 令牌/动效/形状独立演示模块
 ```
 
-包依赖严格保持单向：`tokens` → `motion` → `shape` → 根包 `md3e` → `media`，`symbols` 仅依赖 `github.com/egoist/mygo/ui` 与标准库（底层子包绝不导入 `md3e`，根包绝不导入 `media/`、`ui/netimage` 或 `ui/video`）。
+包依赖严格保持单向：`tokens` → `motion` → `shape` → 根包 `md3e` → 按需子包 `media` / `charts`，`symbols` 仅依赖 `github.com/egoist/mygo/ui` 与标准库（底层子包绝不导入 `md3e`，根包绝不导入 `media/`、`charts/`、`ui/netimage`、`ui/video` 或 `ui/chart`）。
 
 ---
 
@@ -231,6 +232,8 @@ func main() {
 | 封面动态取色（`tokens`） | `tokens.SeedFromImage`、`tokens.PaletteFromImage`、`tokens.ExtractOptions` |
 | 网络图与全屏灯箱（`media`） | `media.NetImage`、`media.ImageLightbox`、`media.PreloadImages`、`media.ForgetImage`、`media.ClearImageCache`、`media.SetImageHTTPClient` |
 | Expressive 音视频播放器（`media`） | `media.VideoPlayer`、`media.OpenVideo`、`media.OpenVideoURL`、`media.OpenVideoData`、`media.AudioPlayerCard`、`media.MiniPlayer`、`media.TrackInfo` |
+| 仪表盘微图表与指标卡（`charts`） | `charts.RingBuffer`、`charts.AreaSparkline`、`charts.StackedProgress`、`charts.MetricCard`、`charts.SeriesColor`、`charts.SeriesPalette` |
+| 通用统计图表（`charts`） | `charts.LineChart`、`charts.BarChart`（`BarGrouped`/`BarStacked`）、`charts.DonutChart`（环形/饼图）、`charts.TooltipRow` |
 | Card 与 Divider | `ElevatedCard`、`FilledCard`、`OutlinedCard`、`Card`、`Divider` |
 | 卡片式快捷开关与操作行 | `SwitchCard`、`ActionTile` |
 | Expressive 分段与虚拟化列表/数据表 | `List`、`ListItem`、`VirtualList`、`DataTable`、`DataTableCellText`、`ApplyDataTableMenuActions` |

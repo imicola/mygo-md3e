@@ -151,12 +151,13 @@ tokens  ──►  motion  ──►  shape  ──►  md3e (根包：核心美
 #### M14 — 实时与统计图表子包（`charts/`）
 > **目标**：基于上游 `ui/chart` 提供高颜值、零分配的 MD3E 数据可视化组件。
 
-- [ ] **M14.1 仪表盘微图表**
-  - `charts.AreaSparkline`：平滑曲线 + 垂直渐变面积淡出 + 环形缓冲（`RingBuffer`）复用 `ui.Path`，高频刷新零堆分配；支持无缝贴合卡片圆角底边。
-  - `charts.StackedProgress`：多段水平占比条（带段间隙、圆角与自动图例，如内存/存储构成）。
-  - `charts.MetricCard`：标准指标卡片（图标 + 标题 + 副指标/峰值 + 等宽大号数值 + 底部嵌入 Sparkline 或 WavyProgress）。
-- [ ] **M14.2 通用统计图表（薄封装 `ui/chart`）**
-  - `charts.LineChart`、`charts.BarChart`、`charts.DonutChart`：预置 HCT 谐调多序列色板（Light/Dark/HighContrast 自动可读）、悬停交互式 `RichTooltip` 数值浮标与弹簧入场过渡。
+- [x] **M14.1 仪表盘微图表（`charts/palette.go`、`ringbuffer.go`、`sparkline.go`、`stacked.go`、`metriccard.go`）**
+  - `charts.RingBuffer` & `charts.AreaSparkline`：零分配固定容量环形缓冲 + Steffen 单调三次平滑曲线（`CurveSmooth`/`CurveLinear`/`CurveStep*`）+ 三段垂直渐变面积淡出 + 柔光底描边 + 复用 `ui.Path`/切片缓冲（热路径实测 `0 allocs/op`，支持 `chart.MinMax` 高密降采样）；支持 `BottomRadius`/`Radii` 裁切无缝贴合卡片圆角底边。
+  - `charts.StackedProgress`：多段水平占比条（外胶囊圆角 + 内段圆角 + 段间隙 + 剩余轨道 + 顶部微高光 + RTL 镜像 + `DefaultSpatial` 弹簧过渡 + 悬停微高亮浮标 + 自动换行 `TabularNums` 图例）。
+  - `charts.MetricCard`：标准仪表盘指标卡片（可选图标徽章 + 标题/副标 + 状态胶囊/徽章 + 局部主题径向氛围底光 + `TabularNums` 大号数值/单位/峰值 + 底部满宽圆角贴合 `AreaSparkline` 或 `LinearWavyProgress`/`LinearProgress`）。
+- [x] **M14.2 通用统计图表（薄封装 `ui/chart`：`charts/tooltip.go`、`linechart.go`、`barchart.go`、`donutchart.go`、`dce_test.go`）**
+  - `charts.SeriesColor` / `charts.SeriesPalette`：预置 HCT 谐调多序列色板（Light/Dark/Medium/HighContrast/Monochrome 自动对比度与色相分离校验，单色查询零堆分配）。
+  - `charts.LineChart`、`charts.BarChart`（Grouped/Stacked/负值）、`charts.DonutChart`（Donut/Pie 模式）：集成即时指针穿透 MD3E `RichTooltip` 风格浮动卡片（`SurfaceContainerHigh` + `Level2` 阴影 + `TabularNums`）、可点击聚焦单序列交互图例、曲线柔光/柱体纵向 Oklab 渐变与列聚光灯/扇区归一化 `FastSpatial` 外弹微光晕、`DefaultSpatial` 弹簧入场、RTL/键盘导航与离线 DCE 零膨胀边界测试。
 
 ---
 

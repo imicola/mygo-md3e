@@ -259,3 +259,28 @@ MD3E 将动效分为 **Spatial（空间：位移、缩放、尺寸、圆角、�
 - **`media.AudioPlayerCard` & `media.MiniPlayer`**：支持 `TrackInfo` 封面显示与可选异形裁切（`ArtworkShape`），并在 `DynamicColor: true` 或 `SeedColor` 开启时记忆提取主题并包裹于 `md3e.AnimatedThemeScope` 实现跨曲目 Oklab 平滑换肤。`AudioPlayerCard` 提供展开封面信息、波浪拖拽轨、时间显示与 `FocusGroup` 传输按钮栏；`MiniPlayer` 随 `Theme.Density` 自适应高度（`64`/`56`/`52` DIP）并在底部边沿使用仅播放且未启用 `ReduceMotion` 时波动的 `LinearWavyProgress`（暂停与 `ReduceMotion` 下切换静止 `LinearProgress`，保证 `FramePending() == false`）。
 - **DCE 硬边界验证**：通过独立编译 `media/dce_test.go` 验证仅引用 `md3e.Button`+`md3e.Image` 时零链接 `media/`、`ui/netimage`、`ui/video` 与 `symbols/`，且仅引用 `media.NetImage` 时零链接 `ui/video` 与 `tokens.SeedFromImage`。
 
+---
+
+## 10. 实时与统计图表子包规格（M14：`charts/`）
+
+### 10.1 HCT 谐调多序列色板（`charts/palette.go`）
+- **`SeriesColor` / `SeriesPalette`**：槽位 `0..2` 优先锚定当前主题 `Primary`、`Tertiary`、`Secondary`（并在 `TonalSpot` 等 `Secondary` 与 `Primary` 同色相方案中自动检测色相夹角 `< 28°` 切入感知分离偏转角，杜绝多序列撞色），更高槽位基于主色相按预设感知分离角与黄金角续延派生；`Monochrome` 单色主题保持中性灰度色阶区分而不注入人工高饱和色。
+- **对比度硬底线**：每个序列色相对卡片表面（`Level1`）均通过 `tokens.ContrastRatio` 校验并在不足时沿 HCT Tone 轴微调至达标（标准对比度 `>= 3.0:1`、中等 `>= 3.5:1`、高对比度 `>= 4.5:1`），`SeriesColor` 单点求值保持零堆分配。
+
+### 10.2 实时环形缓冲与零分配面积微图（`ringbuffer.go` / `sparkline.go`）
+- **`RingBuffer`**：O(1) 零分配定长环形缓冲，保留 `NaN` 断点，`MinMax` 自动跳过非有限值，`CopyTo` 复用目标切片达成零分配。
+- **`AreaSparkline`**：默认 `CurveSmooth`（Steffen 单调三次平滑样条，兼容 `CurveLinear` 与 `CurveStep*`），通过 `ui.Local` 持久化 `sparklineScratch` 复用 `linePath`/`areaPath`/`clipPath` 与坐标/斜率/降采样切片（高密采样超过 `2×pixelWidth` 时复用 `chart.MinMax`），核心路径构造实测 `0 B/op`、`0 allocs/op`；绘制三段垂直渐变面积淡出、柔和曲线外发光底描边、可选带表面环与光晕的末端实时点，并支持 `BottomRadius`/`Radii` 独立四角裁切以无缝贴合卡片底边。
+
+### 10.3 仪表盘占比条与指标卡片（`stacked.go` / `metriccard.go`）
+- **`StackedProgress`**：外端胶囊圆角 + 内部 `3 DIP` 间隙与内圆角 + 未占用余量轨 + 柔和顶部微高光，支持 `Theme.Density` 自适应高度（`12`/`10`/`8` DIP）、`DefaultSpatial` 弹簧宽度过渡（`ReduceMotion` 零帧收敛）、`ui.RightToLeft` 镜像排布、悬停单段微高亮与即时浮动占比提示，以及自动换行 `TabularNums` 图例与 `RoleMeter` 无障碍摘要。
+- **`MetricCard`**：整合可选 `IconBadge`、标题/副标、语义 `Tag` 或呼吸 `StatusPill`、纯绘制幽灵安全的局部主题径向氛围底光、Hairline 微高光描边、密度自适应 `TabularNums` 大号读数/单位/峰值，以及零内边距满宽贴合底部圆角的 `AreaSparkline` 或 `LinearWavyProgress`/`LinearProgress` 槽位。
+
+### 10.4 通用统计图表与 DCE 边界（`tooltip.go` / `linechart.go` / `barchart.go` / `donutchart.go` / `dce_test.go`）
+- **`LineChart` / `BarChart` / `DonutChart`**：薄封装上游 `github.com/egoist/mygo/ui/chart`（`Plot`/`NewLinear`/`NewBand`/`Stack`/`Pie`/`Sector`/`SliceAt`/`Polar`/`Select`/`Anchor`），统一具备：
+  - 指针穿透的 MD3E `RichTooltip` 风格浮动读数卡（`SurfaceContainerHigh` + `Level2` 阴影 + `OutlineVariant` 描边 + `TabularNums` + 边缘自动翻转防裁切）；
+  - 可点击聚焦单序列并柔暗兄弟序列的交互式图例；
+  - `DefaultSpatial` 弹簧入场与 `DonutChart` 归一化 `FastSpatial` 激活扇区外弹（`+6 DIP` + 外缘光晕 + 动态中心指标读数）；
+  - 完整键盘导航（Tab/Arrow/Home/End/Escape + `c.Announce`）、`DonutChart` RTL 方向键镜像、`ReduceMotion` 首帧零多余帧与退场幽灵绘制安全。
+- **DCE 硬边界验证**：通过离线 `charts/dce_test.go` 验证仅引用根包 `md3e.Button` 时零链接 `charts/` 与 `ui/chart`，且仅引用 `charts.AreaSparkline` + `charts.RingBuffer` 时零链接 `charts.BarChart`、`charts.DonutChart`、`symbols/` 与 `media/`。
+
+

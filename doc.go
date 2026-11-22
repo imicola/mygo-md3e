@@ -13,8 +13,11 @@
 //     between them as closed cubic Bézier loops.
 //   - [github.com/imicola/mygo-md3e/symbols] provides 252 zero-bloat rounded 24x24 vector icons
 //     whose (*Symbol).Draw method values plug directly into [IconDraw].
-//   - package md3e itself holds the components, from buttons and selection
-//     controls to navigation and overlays.
+//   - package md3e itself holds the core components, from buttons and selection
+//     controls to navigation, overlays, virtualized tables, and local/SVG images.
+//   - [github.com/imicola/mygo-md3e/media] and [github.com/imicola/mygo-md3e/charts] are
+//     opt-in extension subpackages for network images/lightbox/video/audio players and
+//     real-time/statistical charts over ui/chart, isolated from root md3e for zero-bloat DCE.
 //
 // Components follow MyGo's value API: an element and its context live for one
 // build pass only, state is held by the caller through pointers, and a

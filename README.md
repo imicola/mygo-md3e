@@ -152,6 +152,7 @@ Key conventions:
 ├── pagination.go      # Pagination (1-based pill bar + TabularNums & window ellipsis folding)
 ├── image.go           # Local/SVG Image with shape clipping, smooth fade-in, Skeleton & retry slots
 ├── media/             # Optional extension subpackage: NetImage, ImageLightbox, VideoPlayer, AudioPlayerCard, MiniPlayer
+├── charts/            # Optional extension subpackage: RingBuffer, AreaSparkline, StackedProgress, MetricCard, LineChart, BarChart, DonutChart
 ├── docs/              # Architecture guide & MD3E specification baseline
 └── examples/
     ├── gallery/       # Full interactive showcase application (part of root module)
@@ -159,7 +160,7 @@ Key conventions:
     └── m2-demo/       # Standalone M1–M2 tokens/motion/shape preview module
 ```
 
-Dependencies are strictly acyclic: `tokens` -> `motion` -> `shape` -> root `md3e` -> `media`, and `symbols` depends only on `github.com/egoist/mygo/ui` + stdlib (`tokens`/`motion`/`shape`/`symbols` never import `md3e`, and root `md3e` never imports `media/`, `ui/netimage`, or `ui/video`).
+Dependencies are strictly acyclic: `tokens` -> `motion` -> `shape` -> root `md3e` -> opt-in `media` / `charts`, and `symbols` depends only on `github.com/egoist/mygo/ui` + stdlib (`tokens`/`motion`/`shape`/`symbols` never import `md3e`, and root `md3e` never imports `media/`, `charts/`, `ui/netimage`, `ui/video`, or `ui/chart`).
 
 ---
 
@@ -231,6 +232,8 @@ Dependencies are strictly acyclic: `tokens` -> `motion` -> `shape` -> root `md3e
 | Cover Seed Extraction (`tokens`) | `tokens.SeedFromImage`, `tokens.PaletteFromImage`, `tokens.ExtractOptions` |
 | Network Image & Lightbox (`media`) | `media.NetImage`, `media.ImageLightbox`, `media.PreloadImages`, `media.ForgetImage`, `media.ClearImageCache`, `media.SetImageHTTPClient` |
 | Video & Audio Players (`media`) | `media.VideoPlayer`, `media.OpenVideo`, `media.OpenVideoURL`, `media.OpenVideoData`, `media.AudioPlayerCard`, `media.MiniPlayer`, `media.TrackInfo` |
+| Dashboard Micro-Charts (`charts`) | `charts.RingBuffer`, `charts.AreaSparkline`, `charts.StackedProgress`, `charts.MetricCard`, `charts.SeriesColor`, `charts.SeriesPalette` |
+| Statistical Charts (`charts`) | `charts.LineChart`, `charts.BarChart` (`BarGrouped`/`BarStacked`), `charts.DonutChart` (`Donut`/`Pie`), `charts.TooltipRow` |
 | Cards & Divider | `ElevatedCard`, `FilledCard`, `OutlinedCard`, `Card`, `Divider` |
 | Quick Toggle & Action Tiles | `SwitchCard`, `ActionTile` |
 | Expressive Segmented List & Virtualized Data | `List`, `ListItem`, `VirtualList`, `DataTable`, `DataTableCellText`, `ApplyDataTableMenuActions` |

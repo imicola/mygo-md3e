@@ -106,6 +106,22 @@ Go 模块路径：`github.com/imicola/mygo-md3e`（直接依赖上游 `github.co
 │   ├── image_test.go       # NetImage & ImageLightbox 无头/Mock HTTP/RTL 测试
 │   ├── player_test.go      # VideoPlayer（GIF 解码）/ AudioPlayerCard / MiniPlayer 测试
 │   └── dce_test.go         # Zero-Bloat / 死代码消除链接边界测试
+├── charts/                 # M14: 实时与统计图表扩展子包（按需引入，零侵入根包）
+│   ├── doc.go              # charts 子包概览与零膨胀约束
+│   ├── helpers.go          # 非有限值防护、视口相交、弹簧入场与零分配圆角路径构造
+│   ├── palette.go          # SeriesColor / SeriesPalette（HCT 谐调多序列色板与对比度保障）
+│   ├── ringbuffer.go       # RingBuffer（零分配定长实时采样环形缓冲区）
+│   ├── sparkline.go        # AreaSparkline（Steffen 平滑曲线、三段渐变、柔光与零分配 Path 复用）
+│   ├── stacked.go          # StackedProgress（多段占比条、RTL 镜像、悬停浮标与 TabularNums 图例）
+│   ├── metriccard.go       # MetricCard（仪表盘指标卡片、径向氛围底光与圆角贴合 Sparkline/Progress）
+│   ├── tooltip.go          # 共享 MD3E RichTooltip 浮动卡片、交互聚焦图例与坐标轴标签
+│   ├── linechart.go        # LineChart（封装 ui/chart.Plot/NewLinear/Select）
+│   ├── barchart.go         # BarChart（封装 ui/chart.NewBand/Stack/Rect/Select）
+│   ├── donutchart.go       # DonutChart（封装 ui/chart.Pie/Sector/SliceAt/Polar）
+│   ├── sparkline_test.go   # RingBuffer / SeriesPalette / AreaSparkline 零分配与像素测试
+│   ├── dashboard_test.go   # StackedProgress & MetricCard 测试
+│   ├── charts_test.go      # LineChart / BarChart / DonutChart 交互、RTL 与弹簧收敛测试
+│   └── dce_test.go         # Zero-Bloat / 死代码消除链接边界测试
 ├── golden_test.go          # 纯几何 Golden 视觉基线测试（testdata/）
 └── examples/
     ├── m2-demo/            # M2: 独立可运行的令牌/动效/形状预览模块
@@ -121,9 +137,10 @@ Go 模块路径：`github.com/imicola/mygo-md3e`（直接依赖上游 `github.co
    - `motion` 仅依赖 `tokens` 与 `github.com/egoist/mygo/ui`（`Animation`、`SpringOptions`、`Preferences`）。
    - `shape` 仅依赖 `github.com/egoist/mygo/ui`（`Path`、`Painter`、`Rect`、`Point`）。
    - `symbols` 仅依赖 Go 标准库与 `github.com/egoist/mygo/ui`（`Path`、`Painter`、`Rect`、`Color`），不导入 `md3e`，其 `(*Symbol).Draw` 方法值签名与 `md3e.IconDraw` 完全一致。
-   - `md3e`（根包）整合 `tokens`、`motion`、`shape`、`internal/mdicon` 与 `github.com/egoist/mygo/ui`；**严禁导入** `media`、`ui/netimage` 或 `ui/video`。
+   - `md3e`（根包）整合 `tokens`、`motion`、`shape`、`internal/mdicon` 与 `github.com/egoist/mygo/ui`；**严禁导入** `media`、`charts`、`ui/netimage`、`ui/video` 或 `ui/chart`。
    - `media`（扩展媒体子包）单向构建于 `md3e`、`tokens`、`motion`、`shape`、`symbols`、`github.com/egoist/mygo/ui`、`ui/netimage` 与 `ui/video` 之上，各功能块无包级 `init()`，确保仅使用 `NetImage` 时不链接 `ui/video`，仅使用根包 `md3e.Button`/`md3e.Image` 时零引入 `media/`。
-   - **禁止循环依赖**：`tokens`、`motion`、`shape`、`symbols` 不得导入根包 `md3e` 或 `media`；`md3e` 不得导入任何业务扩展子包（如 `media`）。
+   - `charts`（扩展图表子包）单向构建于 `md3e`、`tokens`、`motion`、`github.com/egoist/mygo/ui` 与 `github.com/egoist/mygo/ui/chart` 之上，不导入 `symbols/` 或 `media/`，零 `init()` 注册表，确保仅使用根包 `md3e.Button` 时零引入 `charts/` 与 `ui/chart`，且仅使用 `AreaSparkline`/`RingBuffer` 时不链接 `BarChart`/`DonutChart`。
+   - **禁止循环依赖**：`tokens`、`motion`、`shape`、`symbols` 不得导入根包 `md3e`、`media` 或 `charts`；`md3e` 不得导入任何业务扩展子包（如 `media`、`charts`）。
 2. **零 `init()` 注册表**：任何包不得在 `init()` 中构造大对象或注册全量组件表，确保用户应用只链接实际调用的组件（遵循 MyGo“按需付费”原则）。
 
 ---
