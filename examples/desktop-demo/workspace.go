@@ -236,25 +236,30 @@ func (a *appState) skeletonRows(c *ui.Context) {
 // selected row fills with the high surface instead of carrying a badge, so its
 // title never truncates.
 func (a *appState) nodeTile(c *ui.Context, n node) {
+	cs := md3e.CurrentTheme(c).Colors
 	selected := n.id == a.selectedID
 	variant := md3e.CardOutlined
+	ringCol := cs.Surface
 	if selected {
 		variant = md3e.CardFilled
+		ringCol = cs.SurfaceContainerHighest
 	}
 	md3e.ActionTile(c.Key("node-"+n.id), n.name, md3e.ActionTileOptions{
 		Subtitle: n.short,
 		Leading: func() {
 			md3e.Avatar(c, md3e.AvatarOptions{
-				Text:   n.name,
-				Size:   36,
-				Shape:  n.clip,
-				Status: n.status,
-				Label:  n.name + " avatar",
+				Text:            n.name,
+				Size:            36,
+				Shape:           n.clip,
+				Status:          n.status,
+				StatusRingColor: ringCol,
+				Label:           n.name + " avatar",
 			})
 		},
 		Meta:       n.state,
 		Variant:    variant,
 		HasVariant: true,
+		Hairline:   selected,
 		ShapeScale: tokens.ShapeLarge,
 		OnClick: func() {
 			a.selectedID = n.id

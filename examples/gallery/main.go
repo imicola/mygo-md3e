@@ -244,7 +244,7 @@ func (a *app) destinations() []md3e.NavigationDestination {
 // header holds the live theme controls.
 func (a *app) header(c *ui.Context, th *md3e.Theme) {
 	cs := th.Colors
-	ui.Column(c).FillWidth().Shrink(0).Padding(16, 10).Gap(8).Background(cs.SurfaceContainerLow).Children(func() {
+	ui.Column(c).FillWidth().Shrink(0).Padding(12, 18).Gap(8).Background(cs.SurfaceContainerLow).Children(func() {
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(12).Wrap().Children(func() {
 			ui.Column(c).Gap(2).Children(func() {
 				md3e.Text(c, "MyGo MD3E Gallery", tokens.TitleLarge, true)
@@ -344,11 +344,12 @@ func page(c *ui.Context, title, subtitle string, body func()) {
 
 // section is a titled card of a page.
 func section(c *ui.Context, title string, body func()) {
-	th := md3e.CurrentTheme(c)
-	cs := th.Colors
-	ui.Column(c).FillWidth().Padding(16).Gap(12).
-		Radius(float32(th.Shapes.Large)).Background(cs.SurfaceContainerLow).
-		Border(1, cs.OutlineVariant).Children(func() {
+	cs := md3e.CurrentTheme(c).Colors
+	md3e.Surface(c, md3e.SurfaceOptions{
+		Color:      cs.SurfaceContainerLow,
+		ShapeScale: tokens.ShapeLargeIncreased,
+		Hairline:   true,
+	}).FillWidth().Padding(16).Column().Gap(12).Children(func() {
 		md3e.Text(c, title, tokens.TitleMedium, true)
 		body()
 	})

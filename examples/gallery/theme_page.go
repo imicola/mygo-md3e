@@ -33,7 +33,7 @@ func (a *app) themePageView(c *ui.Context) {
 					tokens.ContrastRatio(cs.Primary, cs.OnPrimary)))
 				roles := []colorRole{
 					{"Primary", cs.Primary, cs.OnPrimary},
-					{"OnPrimaryContainer", cs.PrimaryContainer, cs.OnPrimaryContainer},
+					{"PrimaryContainer", cs.PrimaryContainer, cs.OnPrimaryContainer},
 					{"Secondary", cs.Secondary, cs.OnSecondary},
 					{"SecondaryContainer", cs.SecondaryContainer, cs.OnSecondaryContainer},
 					{"Tertiary", cs.Tertiary, cs.OnTertiary},
@@ -44,10 +44,10 @@ func (a *app) themePageView(c *ui.Context) {
 					{"SurfaceContainer", cs.SurfaceContainer, cs.OnSurface},
 					{"SurfaceContainerHighest", cs.SurfaceContainerHighest, cs.OnSurface},
 					{"InverseSurface", cs.InverseSurface, cs.InverseOnSurface},
-					{"Outline", cs.Outline, cs.Surface},
-					{"OutlineVariant", cs.OutlineVariant, cs.Surface},
-					{"Scrim", cs.Scrim, cs.Surface},
-					{"Shadow", cs.Shadow, cs.Surface},
+					{"Outline", cs.Outline, th.ContentColorFor(cs.Outline)},
+					{"OutlineVariant", cs.OutlineVariant, th.ContentColorFor(cs.OutlineVariant)},
+					{"Scrim", cs.Scrim, ui.RGB(255, 255, 255)},
+					{"Shadow", cs.Shadow, ui.RGB(255, 255, 255)},
 				}
 				ui.Row(c).Wrap().Gap(8).Children(func() {
 					for _, role := range roles {
@@ -98,7 +98,8 @@ func (a *app) themePageView(c *ui.Context) {
 					for level := tokens.Level0; level <= tokens.Level5; level++ {
 						bg := md3e.SurfaceColorForElevation(th, level)
 						box := ui.Column(c).Size(120, 76).Padding(10).Gap(4).
-							Justify(ui.Center).Radius(16).Background(bg)
+							Justify(ui.Center).Radius(16).Background(bg).
+							Border(1, cs.OutlineVariant.Alpha(0.45))
 						md3e.ApplyElevationShadows(th, box, level)
 						box.Children(func() {
 							md3e.Text(c, "Level "+strconv.Itoa(int(level)), tokens.TitleSmall, true)

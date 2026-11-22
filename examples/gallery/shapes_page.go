@@ -74,9 +74,11 @@ func (a *app) shapesPageView(c *ui.Context) {
 	page(c, "Shapes & Morph Playground",
 		"All 35 Material 3 Expressive shapes, and a bidirectional cubic Bézier morph between any two of them.",
 		func() {
-			ui.Column(c).FillWidth().Padding(16).Gap(12).
-				Radius(float32(th.Shapes.ExtraLarge)).Background(cs.SurfaceContainerLow).
-				Border(1, cs.OutlineVariant).Children(func() {
+			md3e.Surface(c, md3e.SurfaceOptions{
+				Color:      cs.SurfaceContainerLow,
+				ShapeScale: tokens.ShapeExtraLarge,
+				Hairline:   true,
+			}).FillWidth().Padding(16).Column().Gap(12).Children(func() {
 				ui.Row(c).FillWidth().AlignItems(ui.Center).Children(func() {
 					ui.Column(c).Grow(1).Gap(2).Children(func() {
 						md3e.Text(c, "Morph studio", tokens.TitleMedium, true)
@@ -90,9 +92,10 @@ func (a *app) shapesPageView(c *ui.Context) {
 						p.progress = 1 - p.progress
 					}
 				})
+				heroRad := float32(th.Shapes.Large)
 				hero := ui.Box(c.Key("shape-hero")).FillWidth().Height(240).
-					Radius(float32(th.Shapes.Large)).Background(cs.SurfaceContainerLowest).
-					Border(1, cs.OutlineVariant)
+					Radius(heroRad).Background(cs.SurfaceContainerLowest).
+					Border(1, cs.OutlineVariant.Alpha(0.55)).Clip()
 				hero.Draw(func(paint *ui.Painter, r ui.Rect) {
 					if r.W <= 0 || r.H <= 0 {
 						return
@@ -100,8 +103,16 @@ func (a *app) shapesPageView(c *ui.Context) {
 					side := min(r.W, r.H) * 0.68
 					cx, cy := r.X+r.W/2, r.Y+r.H/2
 					dst := ui.Rect{X: cx - side/2, Y: cy - side/2, W: side, H: side}
-					halo := ui.Rect{X: cx - side*0.56, Y: cy - side*0.56, W: side * 1.12, H: side * 1.12}
-					paint.Fill(halo, cs.PrimaryContainer.Alpha(0.4), halo.W/2)
+					stops := [3]ui.GradientStop{
+						{Color: cs.PrimaryContainer.Alpha(0.55), At: 0},
+						{Color: cs.PrimaryContainer.Alpha(0.18), At: 0.45},
+						{Color: cs.PrimaryContainer.Alpha(0), At: 1},
+					}
+					paint.FillRadialGradient(r, ui.RadialGradient{
+						Stops:  stops[:],
+						Center: ui.Point{X: 0.5, Y: 0.5},
+						Oklab:  true,
+					}, heroRad)
 					myshape.DrawMorph(paint, p.morph, float32(max(0, min(1, p.progress))), dst, cs.Primary)
 				})
 				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(12).Children(func() {
@@ -138,8 +149,13 @@ func (a *app) shapesPageView(c *ui.Context) {
 							bg, border, ink, text = cs.PrimaryContainer, cs.Primary, cs.OnPrimaryContainer, cs.OnPrimaryContainer
 						}
 						tile := ui.ButtonBase(c.Key("shape-"+sh.Name)).Size(96, 82).
-							Column().Center().Padding(8).Gap(6).Radius(16).
+							Column().Center().Padding(8).Gap(6).Radius(16).FocusRing(false).
 							Background(bg).Border(1, border).Label("Morph to " + sh.Name)
+						md3e.AttachRipple(c, tile, md3e.StateLayerOptions{
+							Color:       text,
+							Radius:      16,
+							BorderInset: 1,
+						})
 						if tile.Clicked() {
 							p.b = float64(idx)
 						}

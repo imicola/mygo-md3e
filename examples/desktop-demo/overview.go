@@ -92,26 +92,47 @@ func (a *appState) heroCard(c *ui.Context) {
 		}
 	}
 
+	fromCol := cs.PrimaryContainer.MixOklab(cs.SurfaceContainerHigh, 0.16)
+	if th.Dark {
+		fromCol = cs.PrimaryContainer.MixOklab(cs.SurfaceContainerHigh, 0.34)
+	}
 	gradient := ui.LinearGradient{
-		From:  cs.PrimaryContainer,
+		From:  fromCol,
 		To:    cs.SurfaceContainerHigh,
 		Angle: 128,
 		Oklab: true,
 	}
-	// The backdrop stays pure: it reads only the colors captured above, asks
-	// for no frames and never queries the element's interaction state.
+	// The backdrop stays pure: soft ambient radial orbs captured from theme colors.
+	orbPrimaryA := float32(0.16)
+	orbTertiaryA := float32(0.12)
+	if th.Dark {
+		orbPrimaryA = 0.20
+		orbTertiaryA = 0.15
+	}
 	backdrop := func(p *ui.Painter, r ui.Rect) {
 		if r.W <= 0 || r.H <= 0 {
 			return
 		}
-		p.Fill(ui.Rect{
-			X: r.X + r.W*0.64, Y: r.Y - r.H*0.62,
-			W: r.H * 1.55, H: r.H * 1.55,
-		}, cs.Primary.Alpha(0.14), r.H*0.775)
-		p.Fill(ui.Rect{
-			X: r.X + r.W*0.84, Y: r.Y + r.H*0.10,
-			W: r.H * 1.10, H: r.H * 1.10,
-		}, cs.Tertiary.Alpha(0.10), r.H*0.55)
+		stops1 := [3]ui.GradientStop{
+			{Color: cs.Primary.Alpha(orbPrimaryA), At: 0},
+			{Color: cs.Primary.Alpha(orbPrimaryA * 0.35), At: 0.48},
+			{Color: cs.Primary.Alpha(0), At: 1},
+		}
+		p.FillRadialGradient(r, ui.RadialGradient{
+			Stops:  stops1[:],
+			Center: ui.Point{X: 0.84, Y: 0.14},
+			Oklab:  true,
+		}, 0)
+		stops2 := [3]ui.GradientStop{
+			{Color: cs.Tertiary.Alpha(orbTertiaryA), At: 0},
+			{Color: cs.Tertiary.Alpha(orbTertiaryA * 0.35), At: 0.45},
+			{Color: cs.Tertiary.Alpha(0), At: 1},
+		}
+		p.FillRadialGradient(r, ui.RadialGradient{
+			Stops:  stops2[:],
+			Center: ui.Point{X: 0.94, Y: 0.82},
+			Oklab:  true,
+		}, 0)
 	}
 
 	card := md3e.Card(c, func() {
@@ -303,10 +324,11 @@ func (a *appState) actionCard(c *ui.Context) {
 			md3e.ActionTile(c.Key("jump-log"), "Activity log", md3e.ActionTileOptions{
 				Subtitle:    "12 events since launch",
 				LeadingIcon: symbols.History.Draw,
-				IconBadge:   md3e.IconBadgeOptions{Variant: md3e.IconBadgeOutlined},
+				IconBadge:   md3e.IconBadgeOptions{Variant: md3e.IconBadgePrimaryTonal},
 				Meta:        "12",
-				Variant:     md3e.CardOutlined,
+				Variant:     md3e.CardElevated,
 				HasVariant:  true,
+				Hairline:    true,
 				OnClick: func() {
 					a.snack.Show(md3e.SnackbarOptions{Message: "Activity log opened", ActionLabel: "Undo"})
 				},
@@ -314,19 +336,21 @@ func (a *appState) actionCard(c *ui.Context) {
 			md3e.ActionTile(c.Key("jump-workspace"), "Review workspace", md3e.ActionTileOptions{
 				Subtitle:    "6 managed nodes",
 				LeadingIcon: symbols.Dashboard.Draw,
-				IconBadge:   md3e.IconBadgeOptions{Variant: md3e.IconBadgeOutlined},
+				IconBadge:   md3e.IconBadgeOptions{Variant: md3e.IconBadgeTonal},
 				Meta:        "6",
-				Variant:     md3e.CardOutlined,
+				Variant:     md3e.CardElevated,
 				HasVariant:  true,
+				Hairline:    true,
 				OnClick:     func() { a.page = 1; a.dirty = true },
 			})
 			md3e.ActionTile(c.Key("jump-components"), "Component lab", md3e.ActionTileOptions{
 				Subtitle:    "M10 micro components",
 				LeadingIcon: symbols.Palette.Draw,
-				IconBadge:   md3e.IconBadgeOptions{Variant: md3e.IconBadgeOutlined},
+				IconBadge:   md3e.IconBadgeOptions{Variant: md3e.IconBadgeTertiaryTonal},
 				Meta:        "M10",
-				Variant:     md3e.CardOutlined,
+				Variant:     md3e.CardElevated,
 				HasVariant:  true,
+				Hairline:    true,
 				OnClick:     func() { a.page = 2; a.dirty = true },
 			})
 		})

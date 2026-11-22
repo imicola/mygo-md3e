@@ -334,10 +334,11 @@ func pageHeading(c *ui.Context, title, subtitle string) {
 func section(c *ui.Context, title, subtitle string, body func()) {
 	th := md3e.CurrentTheme(c)
 	cs := th.Colors
-	ui.Column(c).FillWidth().Padding(16).Gap(12).
-		Radius(th.Shapes.LargeIncreased).
-		Background(cs.SurfaceContainerLow).
-		Border(1, cs.OutlineVariant).
+	md3e.Surface(c, md3e.SurfaceOptions{
+		Color:      cs.SurfaceContainerLow,
+		ShapeScale: tokens.ShapeLargeIncreased,
+		Hairline:   true,
+	}).FillWidth().Padding(16).Column().Gap(12).
 		Children(func() {
 			ui.Column(c).Gap(2).Children(func() {
 				md3e.Text(c, title, tokens.TitleSmall, true)

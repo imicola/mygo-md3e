@@ -105,7 +105,7 @@ func drawSpringCard(c *ui.Context, th *md3e.Theme, scheme motion.Scheme, token m
 	cs := th.Colors
 	spec := motion.SpecOf(scheme, token)
 	ui.Column(c).Width(232).Height(150).Padding(12).Gap(6).Radius(16).
-		Background(cs.SurfaceContainerLowest).Border(1, cs.OutlineVariant).Children(func() {
+		Background(cs.SurfaceContainerLowest).Border(1, cs.OutlineVariant.Alpha(0.55)).Children(func() {
 		md3e.Text(c, spec.Token.String(), tokens.TitleSmall, true)
 		md3e.Text(c, fmt.Sprintf("ζ %.2f · k %.0f · c %.1f", spec.DampingRatio, spec.Stiffness, spec.Damping()),
 			tokens.LabelSmall).TextColor(cs.OnSurfaceVariant)

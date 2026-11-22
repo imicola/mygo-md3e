@@ -29,9 +29,9 @@
 - **Outline & Utility**：`Outline`, `OutlineVariant`, `InverseSurface`, `InverseOnSurface`, `Scrim`, `Shadow`
 
 ### 1.3 状态层（State Layers）与禁用透明度
-- **State Layer 透明度**（以内容前景色或指定态层色叠加在容器之上）：
-  - Hover: `0.08`
-  - Focus: `0.10`
+- **State Layer 透明度与焦点光环**（以内容前景色或指定态层色叠加在容器之上）：
+  - Hover: `0.08`（带零重建悬停海拔微升：`Level0→1`、`Level1→2`、`Level3→4`，在 `Draw` 内驱动）
+  - Focus: `0.10`（配合 `DrawOver` 精确键盘焦点环：`FocusRingAuto` 2px `Secondary` 外/内环 + `FocusRingInset` + 照片双环 `FocusHaloColor` 光晕，支持异形 `ClipPath` 描边）
   - Pressed: `0.10`（配合 Expressive Ripple 波纹扩散）
   - Dragged: `0.16`
 - **Disabled 状态**：
@@ -254,9 +254,9 @@ MD3E 将动效分为 **Spatial（空间：位移、缩放、尺寸、圆角、�
 
 ### 9.3 网络图、模态灯箱与 Expressive 音视频播放器（`media/`）
 - **`media.NetImage`**：在 `github.com/egoist/mygo/ui/netimage` 上叠加 MD3E 骨架屏占位、网络失败重试（点击通过 `c.Services()` + `ForgetImage` 清除失败退避后立即重新拉取）与空白 URL 安全空占位，并导出 `PreloadImages`、`ForgetImage`、`ClearImageCache` 与 `SetImageHTTPClient`。
-- **`media.ImageLightbox`**：基于全屏 `ui.Overlay` + `Modal()` 的照片预览器（含退场动画隔离与关闭归还焦点）。支持工具栏 / 滚轮 / 双指捏合 / 双击 / `=` `-` `0` 键 `1x..5x` 缩放（默认），支持按放大倍比与视口尺寸钳位的拖拽与触控板平移、RTL 自动镜像的上/下页按钮与左右方向键切换、顶部计数栏、底部标题/副标题浮层、`MatchKey` 共享元素进场及 `Escape`/Scrim 外部点击关闭。
-- **`media.VideoPlayer`**：封装 `ui.Video` / `*ui.VideoPlayer` 与 `OpenVideo`/`OpenVideoURL`/`OpenVideoData` 辅助构造器。提供基于虚拟时钟（`c.Now()` 与可见时的 `p.After`）在播放闲置 `AutoHideDelay`（默认 `3s`）后平滑收起、鼠标移入/按键/操作即刻唤起的底部渐变与半透明控制条；集成 `MorphIconButton`（`Circle ↔ Square`）播放切换、共享 `mediaScrubber`（播放态 `LinearWavy` 波浪与缓冲进度段 + 拖拽/聚焦时显示水滴 `TabularNums` 时间气泡）、`TabularNums` 时长文本、静音开关与音量条、倍速 `MenuButton`、`Fullscreen` 钩子、居中缓冲 `LoadingIndicator`、错误重试覆盖层及全套键盘快捷键（`Space`/`K`、`M`、`F`、RTL 感知 `Left`/`Right`）。
-- **`media.AudioPlayerCard` & `media.MiniPlayer`**：支持 `TrackInfo` 封面显示与可选异形裁切（`ArtworkShape`），并在 `DynamicColor: true` 或 `SeedColor` 开启时记忆提取主题并包裹于 `md3e.AnimatedThemeScope` 实现跨曲目 Oklab 平滑换肤。`AudioPlayerCard` 提供展开封面信息、波浪拖拽轨、时间显示与 `FocusGroup` 传输按钮栏；`MiniPlayer` 随 `Theme.Density` 自适应高度（`64`/`56`/`52` DIP）并在底部边沿使用仅播放且未启用 `ReduceMotion` 时波动的 `LinearWavyProgress`（暂停与 `ReduceMotion` 下切换静止 `LinearProgress`，保证 `FramePending() == false`）。
+- **`media.ImageLightbox`**：基于全屏 `ui.Overlay` + `Modal()` 的照片预览器（含退场动画隔离与关闭归还焦点）。通过记忆化暗色影院 HUD 子主题使顶部工具栏、缩放按钮、左右翻页钮与底部说明条在亮/暗宿主模式下均呈现统一的烟熏暗玻璃质感（`Level3` 阴影 + 顶缘微高光）；支持工具栏 / 滚轮 / 双指捏合 / 双击 / `=` `-` `0` 键 `1x..5x` 缩放（默认），支持按放大倍比与视口尺寸钳位的拖拽与触控板平移、RTL 自动镜像的上/下页按钮与左右方向键切换、`MatchKey` 共享元素进场及 `Escape`/Scrim 外部点击关闭。
+- **`media.VideoPlayer`**：封装 `ui.Video` / `*ui.VideoPlayer` 与 `OpenVideo`/`OpenVideoURL`/`OpenVideoData` 辅助构造器。提供基于虚拟时钟（`c.Now()` 与可见时的 `p.After`）在播放闲置 `AutoHideDelay`（默认 `3s`）后平滑收起、鼠标移入/按键/操作即刻唤起的四段平滑顶/底影院渐变遮罩与暗玻璃控制条（暂停/结束时居中呈现半透明 Play/Replay 徽章）；集成 `MorphIconButton`（`Circle ↔ Square`）播放切换、共享 `mediaScrubber`（连续底层轨 + 缓冲叠加 + 末端停靠点 + 暂停振幅平滑衰减波浪 + 悬停光晕 + 带阴影与钳位尖角的水滴 `TabularNums` 时间气泡）、`TabularNums` 时长文本、静音开关与 MD3E 竖直胶囊音量条、倍速 `MenuButton`、`Fullscreen` 钩子、居中缓冲 `LoadingIndicator`、错误重试覆盖层及全套键盘快捷键（`Space`/`K`、`M`、`F`、RTL 感知 `Left`/`Right`）。
+- **`media.AudioPlayerCard` & `media.MiniPlayer`**：支持带边沿微框与阴影的 `TrackInfo` 封面显示（可选异形裁切 `ArtworkShape`），`AudioPlayerCard` 提供顶角主题径向氛围底光、与滑块端齐平的 `TabularNums` 时间戳及对称传输栏；在 `DynamicColor: true` 或 `SeedColor` 开启时记忆提取主题并包裹于 `md3e.AnimatedThemeScope` 实现跨曲目 Oklab 平滑换肤。`MiniPlayer` 随 `Theme.Density` 自适应高度（`64`/`56`/`52` DIP）、支持可点击展开区 Ripple 并在底部内缩边沿使用仅播放且未启用 `ReduceMotion` 时波动的 `LinearWavyProgress`（暂停与 `ReduceMotion` 下切换静止 `LinearProgress`，保证 `FramePending() == false`）。
 - **DCE 硬边界验证**：通过独立编译 `media/dce_test.go` 验证仅引用 `md3e.Button`+`md3e.Image` 时零链接 `media/`、`ui/netimage`、`ui/video` 与 `symbols/`，且仅引用 `media.NetImage` 时零链接 `ui/video` 与 `tokens.SeedFromImage`。
 
 ---
@@ -277,7 +277,8 @@ MD3E 将动效分为 **Spatial（空间：位移、缩放、尺寸、圆角、�
 
 ### 10.4 通用统计图表与 DCE 边界（`tooltip.go` / `linechart.go` / `barchart.go` / `donutchart.go` / `dce_test.go`）
 - **`LineChart` / `BarChart` / `DonutChart`**：薄封装上游 `github.com/egoist/mygo/ui/chart`（`Plot`/`NewLinear`/`NewBand`/`Stack`/`Pie`/`Sector`/`SliceAt`/`Polar`/`Select`/`Anchor`），统一具备：
-  - 指针穿透的 MD3E `RichTooltip` 风格浮动读数卡（`SurfaceContainerHigh` + `Level2` 阴影 + `OutlineVariant` 描边 + `TabularNums` + 边缘自动翻转防裁切）；
+  - 指针穿透的 MD3E `RichTooltip` 风格浮动读数卡（`SurfaceContainerHigh` + `Level3` 阴影 + 暗色顶缘微高光 + 标题细分割线 + `OutlineVariant` 描边 + `TabularNums` + 边缘自动翻转防裁切）；
+  - 零分配虚线水平参考网格、实线零基线与虚线竖直十字线；`BarChart` Oklab 不透明垂直渐变 + 整条元素透明度淡化（无暗淡泛白失真）与堆叠层细缝分离；`DonutChart` 零分配圆角弧段路径、连续双层外弹光晕、底环轨道及中心活跃色块指示点；
   - 可点击聚焦单序列并柔暗兄弟序列的交互式图例；
   - `DefaultSpatial` 弹簧入场与 `DonutChart` 归一化 `FastSpatial` 激活扇区外弹（`+6 DIP` + 外缘光晕 + 动态中心指标读数）；
   - 完整键盘导航（Tab/Arrow/Home/End/Escape + `c.Announce`）、`DonutChart` RTL 方向键镜像、`ReduceMotion` 首帧零多余帧与退场幽灵绘制安全。
@@ -288,17 +289,17 @@ MD3E 将动效分为 **Spatial（空间：位移、缩放、尺寸、圆角、�
 ## 11. 文档、Markdown 与代码视图子包规格（M13：`docview/` & `codeview/`）
 
 ### 11.1 `codeview` 编辑器与 Diff 主题桥（`codeview/theme.go`）
-- **`ThemeFromMD3E`**：将 `*md3e.Theme` 映射到 `*editor.Theme`，包括 `Surface` / `SurfaceContainerLowest` 背景、当前行 `SurfaceContainerHighest` 高亮、选区半透明 `Primary`、匹配括号与搜索高亮、行号槽与 `OutlineVariant` 细分割线、`Primary` 光标、Diff 增删改三态表面底色（兼容 Light/Dark/HighContrast 对比度收敛），以及 9 类语法 Token 调色。
+- **`ThemeFromMD3E`**：将 `*md3e.Theme` 映射到 `*editor.Theme`，包括 `Surface` / `SurfaceContainerLowest` 背景、当前行高亮、半透明 `Primary` 选区（透出语法高亮）、匹配括号与搜索高亮、行号槽与 `OutlineVariant` 细分割线、`Primary` 光标、Diff 增删改三态表面底色（兼容 Light/Dark/HighContrast 对比度收敛），以及带主色感知防撞色求解（`>= 28°` 色相分离）的语法 Token 调色（含加粗关键字与对比度达标的标点符号）。
 - **`FontFromMD3E` / `ScrollbarFromMD3E` / `ApplyToEditor` / `ApplyToDiff` / `ConfigureEditor`**：提供等宽排版字阶映射、`md3e` 胶囊滚动条风格以及编辑器/Diff 状态一步配置与实时上下文字体/滚动条同步。
 
 ### 11.2 `docview.Markdown` 与流式输出（`docview/markdown.go`）
-- **`MarkdownTheme` / `MarkdownThemeFor`**：基于 `th.Type`、`th.Colors` 与 `th.Density` 生成 `*markdown.Theme`，统一映射 `H1..H6`（H1–H3 使用 `Brand` 字体族）、正文行高、行内代码微胶囊、引用左/Start 装饰竖线、`SurfaceContainer` 表格斑马条纹、圆角、链接与文本选区颜色；默认复用 `codeview.ThemeFromMD3E(th)` 着色源码片段。
+- **`MarkdownTheme` / `MarkdownThemeFor`**：基于 `th.Type`、`th.Colors` 与 `th.Density` 生成 `*markdown.Theme`，统一映射 `H1..H6`（疏朗排版节奏）、正文行高、半透明自适配行内代码微胶囊、`Primary` 着色引用竖线、`SurfaceContainerHigh/Low` 表格与 `Hairline` 细框、圆角、链接与文本选区颜色；默认复用 `codeview.ThemeFromMD3E(th)` 着色源码片段。
 - **`Markdown` / `MarkdownStream` / `Revealed`**：`Markdown` 自动将围栏代码块委托给 `docview.CodeBlock`（流式未闭合块自动禁用复制按钮并等待输出完结），将 GitHub Alert 引用映射为 `docview.Callout`，同时保持 `ui/markdown` 的 `ShareSelection` 与 `Copy as Markdown` 完整可用；`MarkdownStream` 结合 `Theme.ReduceMotion || c.Preferences().ReduceMotion` 控制渐显动画并确保结束后无残留动画帧；提供 `Anchor` / `AnchorVersion` 与 `*docview.State` 联动。
 
 ### 11.3 文档增强块与滚动联动目录（`codeblock.go` / `callout.go` / `state.go` / `outline.go`）
-- **`docview.CodeBlock`**：`SurfaceContainerHigh` + `ShapeMedium`（可调）+ 1 DIP `Hairline` 描边卡片，含语言徽章与可选标题栏、可选 `TabularNums` 不可选中行号槽、强制 `ui.LeftToRight` 代码排版方向、`ui/editor` 语法高亮着色与横向滚动条，以及右上角一键复制按钮（支持点击后 2 秒勾选反馈、同步写入剪贴板与可选 `md3e.SnackbarState` 提示、退场幽灵安全与禁用状态）。
-- **`docview.Callout`**：`CalloutNote`、`CalloutTip`、`CalloutImportant`、`CalloutWarning`、`CalloutCaution` 五类语义块（配合 `CalloutKindFromAlert`），分别映射至 `PrimaryContainer`/`SuccessContainer`/`TertiaryContainer`/`WarningContainer`/`ErrorContainer`（均由底层色彩回落保障可用性），提供 Start 侧 3 DIP 强调竖条（支持 `ui.RightToLeft` 右缘镜像）、`RoleRegion`/`RoleAlert` 无障碍语义、Markdown 原生子内容或纯文本降级渲染。
-- **`docview.State` / `ExtractOutline` / `Outline`**：`ExtractOutline` 解析文档标题生成去重小写 `Slug`、`Level` 与块索引；`Markdown` 构建期通过 `LayoutBounds()` 测量标题相对垂直偏移且不干扰 `ui.Scroll` 视口裁剪；`Outline` 在 `RoleNavigation` 内提供层级缩进、活跃态 `SecondaryContainer` 胶囊背景 + `FastSpatial` 弹簧过渡 + Primary Start 侧 3 DIP 指示条（RTL 自动镜像）、点击平滑滚动（无 `ui.ScrollState` 时平滑回退至 `ui/markdown` 锚点）、`FocusGroup(ui.Vertical)` 方向键导航、单独传入 `Items`/`Active`/`OnSelect` 与与 `md3e.SupportingPane` 协同布局。
+- **`docview.CodeBlock`**：`SurfaceContainerHigh` + `ShapeMedium`（可调）+ 1 DIP `Hairline` 描边卡片，含高辨识度标题栏与语言徽章、可选基线对齐 `TabularNums` 不可选中行号槽（含浅色底槽与连续竖直分隔线）、强制 `ui.LeftToRight` 代码排版方向、`ui/editor` 语法高亮着色（独立支持加粗+斜体）与横向滚动条，以及右上角一键复制按钮（点击后切换 `SuccessContainer` 绿色胶囊勾选反馈 2 秒、同步写入剪贴板与可选 `md3e.SnackbarState` 提示、退场幽灵安全与禁用状态）。
+- **`docview.Callout`**：`CalloutNote`、`CalloutTip`、`CalloutImportant`、`CalloutWarning`、`CalloutCaution` 五类语义块（配合 `CalloutKindFromAlert`），分别映射至 `PrimaryContainer`/`SuccessContainer`/`TertiaryContainer`/`WarningContainer`/`ErrorContainer`（暗色模式融合 `SurfaceContainerLow` 降噪、标题对比度底线 `>= 4.5:1`），提供 Start 侧内缩圆头胶囊强调竖条（支持 `ui.RightToLeft` 右缘镜像）、`RoleRegion`/`RoleAlert` 无障碍语义、Markdown 原生子内容或纯文本降级渲染。
+- **`docview.State` / `ExtractOutline` / `Outline`**：`ExtractOutline` 解析文档标题生成去重小写 `Slug`、`Level` 与块索引；`Markdown` 构建期通过 `LayoutBounds()` 测量标题相对垂直偏移且不干扰 `ui.Scroll` 视口裁剪；`Outline` 在 `RoleNavigation` 内提供层级缩进、无暗灰混色失真的 `SecondaryContainer` 透明渐变胶囊背景 + `FastEffects` 过渡 + `listCol.DrawOver` 单条平滑滑动的 Primary Start 侧 3 DIP 指示条（不覆盖行内 Ripple，RTL 自动镜像且退场幽灵安全）、点击平滑滚动（无 `ui.ScrollState` 时平滑回退至 `ui/markdown` 锚点）、`FocusGroup(ui.Vertical)` 方向键导航、单独传入 `Items`/`Active`/`OnSelect` 与 `md3e.SupportingPane` 协同布局。
 - **DCE 硬边界验证**：通过离线 `codeview/dce_test.go` 与 `docview/dce_test.go` 验证仅引用 `md3e.Button` 时零链接 `codeview/`、`docview/` 与 `ui/markdown`/`ui/editor`；仅调用 `codeview.ThemeFromMD3E` 时零链接 `editor.View`/`editor.DiffView`；仅引用 `docview.Outline` + `docview.State` 时零链接 `editor.View`/`editor.DiffView`、`charts/` 与 `media/`。
 
 
