@@ -231,7 +231,7 @@ Dependencies are strictly acyclic: `tokens` -> `motion` -> `shape` -> root `md3e
 | Component | Entry Points |
 | --- | --- |
 | Local & Vector Image (`md3e`) | `Image`, `ImageOptions` (`Fit`, `ShapeScale`/`Radii`/`Shape`, `Skeleton` loading, `OnRetry`, `FadeIn`, `MatchKey`) |
-| Cover Seed Extraction (`tokens`) | `tokens.SeedFromImage`, `tokens.PaletteFromImage`, `tokens.ExtractOptions` |
+| Cover Seed Extraction (`tokens`, up to 16,384 pixel samples) | `tokens.SeedFromImage`, `tokens.PaletteFromImage`, `tokens.ExtractOptions` |
 | Network Image & Lightbox (`media`) | `media.NetImage`, `media.ImageLightbox`, `media.PreloadImages`, `media.ForgetImage`, `media.ClearImageCache`, `media.SetImageHTTPClient` |
 | Video & Audio Players (`media`) | `media.VideoPlayer`, `media.OpenVideo`, `media.OpenVideoURL`, `media.OpenVideoData`, `media.AudioPlayerCard`, `media.MiniPlayer`, `media.TrackInfo` |
 | Dashboard Micro-Charts (`charts`) | `charts.RingBuffer`, `charts.AreaSparkline`, `charts.StackedProgress`, `charts.MetricCard`, `charts.SeriesColor`, `charts.SeriesPalette` |
@@ -291,6 +291,8 @@ md3e.TreeView(c.Key("files"), []md3e.TreeNode{
 
 md3e.Pagination(c.Key("pager"), &page, 20, md3e.PaginationOptions{ShowEdges: true})
 ```
+
+`PaginationOptions.MaxButtons` caps the page and ellipsis slots. One slot shows the current page. Two slots show the first and current pages, or the first and last on page 1.
 
 ---
 

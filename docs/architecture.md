@@ -22,7 +22,7 @@ Go 模块路径：`github.com/imicola/mygo-md3e`（直接依赖上游 `github.co
 │   ├── hct.go              # sRGB/XYZ/Lab/CAM16/HCT 转换、对比度计算
 │   ├── palette.go          # TonalPalette & CorePalette
 │   ├── scheme.go           # DynamicScheme (TonalSpot/Expressive/Vibrant/...) & 45+ ColorRoles
-│   ├── extract.go          # M12: QuantizerCelebi（Wu+WSMeans）与 Material Score 动态封面取色
+│   ├── extract.go          # M12: QuantizerCelebi（Wu+WSMeans）与 Material Score 动态封面取色（上限 16,384 样本）
 │   ├── size.go             # XS..XL 尺寸档位（SizeTier / SizeSpec）
 │   ├── density.go          # M9: Comfortable / Desktop / Compact 三档密度规格与 ButtonSpec
 │   ├── shape.go            # CornerRadius / ShapeScale tokens
@@ -94,7 +94,7 @@ Go 模块路径：`github.com/imicola/mygo-md3e`（直接依赖上游 `github.co
 ├── datatable.go            # M11: DataTable、DataTableCellText 与 ApplyDataTableMenuActions（基于 ui.Table）
 ├── treeview.go             # M11: TreeView（基于 ui.TreeBase 的缩进引导线、弹簧旋转折叠箭头与本地展开态回退）
 ├── breadcrumb.go           # M11: Breadcrumb（响应式路径面包屑与 MoreHoriz 溢出下拉菜单）
-├── pagination.go           # M11: Pagination（1-based 胶囊分页条、TabularNums 与窗口省略号折叠）
+├── pagination.go           # M11: Pagination（1-based 胶囊分页条、TabularNums 与 MaxButtons 槽位上限）
 ├── image.go                # M12: Image（根包局部/SVG 图像，形状裁切、Fade-In、Skeleton 与 Error/Retry）
 ├── media/                  # M12: 业务扩展子包（按需引入，零侵入根包）
 │   ├── helpers.go          # media 包内动画、数值防御与文本回退辅助函数

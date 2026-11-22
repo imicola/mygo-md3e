@@ -238,14 +238,14 @@ MD3E 将动效分为 **Spatial（空间：位移、缩放、尺寸、圆角、�
 ### 8.2 层级导航与分页（`treeview.go` / `breadcrumb.go` / `pagination.go`）
 - **`TreeView`**：基于 `ui.TreeBase` 构建，保留完整 `RoleTree` / `RoleTreeItem`（`Level`、`Expandable`、`Expanded`、`Selected`）、单次 Tab 停靠及 Up/Down/Left/Right/Home/End/首字母键入导航。分支披露箭头以 `motion.FastSpatial` 弹簧在 `0° ↔ ±90°` 平滑旋转（RTL 自动镜像箭头与方向键）；点击箭头仅切换展开态且不触发行选中与 `OnClick`；当 `TreeNode.Open == nil` 且存在 `Children` 时通过节点键隔离的 `ui.Local` 持久化展开态；`ShowIndentGuides` 在展开分支下方绘制对齐的 `OutlineVariant` `1` DIP 竖向引导线。
 - **`Breadcrumb`**：`ui.RoleNavigation` 地标（默认 `"Breadcrumb"`），祖先层级为 `ui.ButtonBase`，末尾当前项为静态 `RoleText` + `ui.CurrentPage` + `SecondaryContainer` 高亮胶囊；支持 `MaxVisible` 与基于容器 `LayoutBounds` 宽度的响应式自动折叠（中间层级收进 `MoreHoriz` 触发的 `ui.MenuBase` 下拉菜单，保留首项与末尾当前项），自带无限重排保护与 RTL 分隔符镜像。
-- **`Pagination`**：1-based（`1..totalPages`）`ui.RoleNavigation` 水平 `FocusGroup` 分页条，安全钳位越界 `*page` 与 `totalPages <= 0`；提供可选 `ShowEdges`（首页/末页）、上一页/下一页与边界禁用逻辑、基于 `SiblingCount`/`MaxButtons` 的对称窗口省略号折叠、`TabularNums` 等宽页码胶囊、`motion.FastSpatial` 按压圆角形变及 RTL 布局/方向键/图标镜像。
+- **`Pagination`**：1-based（`1..totalPages`）`ui.RoleNavigation` 水平 `FocusGroup` 分页条，安全钳位越界 `*page` 与 `totalPages <= 0`；提供可选 `ShowEdges`（首页/末页）、上一页/下一页与边界禁用逻辑、基于 `SiblingCount` 的窗口省略号折叠及正数 `MaxButtons` 槽位上限（一个槽位显示当前页，两个显示首页和当前页，当前在首页时显示首末页）、`TabularNums` 等宽页码胶囊、`motion.FastSpatial` 按压圆角形变及 RTL 布局/方向键/图标镜像。
 
 ---
 
 ## 9. 媒体、图像与动态封面取色规格（M12）
 
 ### 9.1 图像封面动态取色引擎（`tokens/extract.go`）
-- **算法链路（Pure-Go MCU）**：`tokens.SeedFromImage` 与 `tokens.PaletteFromImage` 对 `image.Image` 执行确定性步长下采样（`<= 128×128 = 16384` 样本，自动跳过 `alpha < 128` 半透明像素并对预乘 `*image.RGBA` 还原直通通道）、Wu 5-bit `[33][33][33]` 前缀和量化分割、`CIE L*a*b*` 空间 `WSMeans` 质心微调，以及基于 `360°` 色相直方图（`±15°` 激励比例）与色度加权的 Material `Score` 排序（含渐进最小色相间隔去重与 `#6750A4` 等可配置回退色）。
+- **算法链路（Pure-Go MCU）**：`tokens.SeedFromImage` 与 `tokens.PaletteFromImage` 对 `image.Image` 执行确定性步长下采样（最多 16,384 个样本，按实际行列数调整狭长图像的长轴步长，自动跳过 `alpha < 128` 半透明像素并对预乘 `*image.RGBA` 还原直通通道）、Wu 5-bit `[33][33][33]` 前缀和量化分割、`CIE L*a*b*` 空间 `WSMeans` 质心微调，以及基于 `360°` 色相直方图（`±15°` 激励比例）与色度加权的 Material `Score` 排序（含渐进最小色相间隔去重与 `#6750A4` 等可配置回退色）。
 - **零重算防抖原则**：所有播放器仅在封面图像引用变化时触发提取并将结果记忆在 `ui.Local`，杜绝每帧遍历像素。
 
 ### 9.2 根包局部图像 `md3e.Image`（`image.go`）

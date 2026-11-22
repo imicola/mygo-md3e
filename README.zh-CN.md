@@ -231,7 +231,7 @@ func main() {
 | 组件 | 主要入口 |
 | --- | --- |
 | 本地与矢量图像（`md3e`） | `Image`、`ImageOptions`（`Fit`、`ShapeScale`/`Radii`/`Shape`、`Skeleton` 占位、`OnRetry`、`FadeIn`、`MatchKey`） |
-| 封面动态取色（`tokens`） | `tokens.SeedFromImage`、`tokens.PaletteFromImage`、`tokens.ExtractOptions` |
+| 封面动态取色（`tokens`，最多采样 16,384 个像素） | `tokens.SeedFromImage`、`tokens.PaletteFromImage`、`tokens.ExtractOptions` |
 | 网络图与全屏灯箱（`media`） | `media.NetImage`、`media.ImageLightbox`、`media.PreloadImages`、`media.ForgetImage`、`media.ClearImageCache`、`media.SetImageHTTPClient` |
 | Expressive 音视频播放器（`media`） | `media.VideoPlayer`、`media.OpenVideo`、`media.OpenVideoURL`、`media.OpenVideoData`、`media.AudioPlayerCard`、`media.MiniPlayer`、`media.TrackInfo` |
 | 仪表盘微图表与指标卡（`charts`） | `charts.RingBuffer`、`charts.AreaSparkline`、`charts.StackedProgress`、`charts.MetricCard`、`charts.SeriesColor`、`charts.SeriesPalette` |
@@ -291,6 +291,8 @@ md3e.TreeView(c.Key("files"), []md3e.TreeNode{
 
 md3e.Pagination(c.Key("pager"), &page, 20, md3e.PaginationOptions{ShowEdges: true})
 ```
+
+`PaginationOptions.MaxButtons` 限制页码和省略号的槽位总数。一个槽位显示当前页，两个槽位显示首页和当前页，当前在首页时显示首页和末页。
 
 ---
 
