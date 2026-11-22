@@ -1,6 +1,7 @@
 package md3e
 
 import (
+	"math"
 	"strings"
 	"time"
 	"unicode"
@@ -300,12 +301,21 @@ func Tag(c *ui.Context, text string, opts ...TagOptions) ui.Element {
 
 	// Closeable tag: keep body and close button as sibling controls so clicking
 	// close never triggers OnClick and both remain keyboard accessible.
+	rtl := c.Direction() == ui.RightToLeft
 	row.PaddingEnd(max(padX-4, 4)).Gap(2)
 	if o.OnClick == nil {
 		row.PaddingStart(padX)
 	}
 	row.Children(func() {
 		if o.OnClick != nil {
+			bodyRadii := [4]float32{radius, 0, 0, radius}
+			if rtl {
+				bodyRadii = [4]float32{0, radius, radius, 0}
+			}
+			borderInset := float32(0)
+			if border.A > 0 {
+				borderInset = 1
+			}
 			body := ui.ButtonBase(c.Key(tagBodyKey{})).
 				DimDisabled(false).
 				FocusRing(false).
@@ -313,7 +323,7 @@ func Tag(c *ui.Context, text string, opts ...TagOptions) ui.Element {
 				PaddingStart(padX).
 				PaddingEnd(4).
 				Gap(gap).
-				Radius(radius).
+				Radius(bodyRadii[0], bodyRadii[1], bodyRadii[2], bodyRadii[3]).
 				AlignItems(ui.Center).
 				Disabled(disabled).
 				TextColor(fg)
@@ -324,9 +334,11 @@ func Tag(c *ui.Context, text string, opts ...TagOptions) ui.Element {
 				o.OnClick()
 			}
 			attachRippleWithContext(c, th, body, StateLayerOptions{
-				Color:    fg,
-				Radius:   radius,
-				Disabled: disabled,
+				Color:       fg,
+				Radii:       bodyRadii,
+				HasRadii:    true,
+				BorderInset: borderInset,
+				Disabled:    disabled,
 			})
 			body.Children(func() {
 				if o.LeadingIcon != nil {
@@ -460,9 +472,9 @@ func StatusPill(c *ui.Context, text string, opts ...StatusPillOptions) ui.Elemen
 		DimDisabled(false).
 		Height(h).
 		Shrink(0).
-		PaddingStart(max(padX-2, 6)).
+		PaddingStart(max(padX-3, 5)).
 		PaddingEnd(padX).
-		Gap(gap).
+		Gap(max(gap-1, 4)).
 		Radius(radius).
 		AlignItems(ui.Center).
 		Role(ui.RoleStatus)
@@ -530,20 +542,23 @@ func StatusPill(c *ui.Context, text string, opts ...StatusPillOptions) ui.Elemen
 				coreR = 3
 			}
 			if showRing {
-				// Smooth cubic ease-out expanding ring that fades out cleanly.
+				// Crisp hollow expanding radar ring + gentle core breathe.
 				inv := 1 - phase
 				eased := 1 - inv*inv*inv
-				maxR := min(r.W, r.H) * 0.5
+				strokeW := float32(1.6) - 0.8*eased
+				maxR := min(r.W, r.H)*0.5 - strokeW*0.5
 				ringR := coreR + (maxR-coreR)*eased
-				alpha := float32(0.45) * (1 - eased)
-				if alpha > 0.01 && ringR > 0 {
-					p.Fill(ui.Rect{
+				alpha := float32(0.70) * (1 - eased)
+				if alpha > 0.01 && ringR > 0.5 {
+					p.Stroke(ui.Rect{
 						X: cx - ringR,
 						Y: cy - ringR,
 						W: ringR * 2,
 						H: ringR * 2,
-					}, dotCol.Alpha(alpha), ringR)
+					}, dotCol.Alpha(alpha), ringR, strokeW)
 				}
+				breathe := 1 + 0.08*float32(math.Sin(2*math.Pi*float64(phase)))
+				coreR *= breathe
 			}
 			p.Fill(ui.Rect{
 				X: cx - coreR,
@@ -601,6 +616,9 @@ type AvatarOptions struct {
 	ContentColor ui.Color
 	// Status optionally draws an RTL-aware bottom-end presence dot.
 	Status AvatarStatus
+	// StatusRingColor overrides the cutout halo behind the status dot
+	// (defaults to cs.Surface so callers can match card container surfaces).
+	StatusRingColor ui.Color
 	// Label overrides the accessible name (RoleImage); defaults to Text.
 	Label string
 }
@@ -656,6 +674,7 @@ func Avatar(c *ui.Context, opts ...AvatarOptions) ui.Element {
 	if poly != nil {
 		scratch = localDrawPath(el)
 	}
+	photoRim := cs.OnSurface.Alpha(0.10)
 	imgSrc := o.Image
 	el.Draw(func(p *ui.Painter, r ui.Rect) {
 		if !isPositiveFiniteF32(r.W) || !isPositiveFiniteF32(r.H) {
@@ -670,6 +689,7 @@ func Avatar(c *ui.Context, opts ...AvatarOptions) ui.Element {
 				p.ClipPath(path, func() {
 					p.Image(imgSrc, r, ui.Cover)
 				})
+				p.StrokePath(poly.WriteTo(scratch, insetRect(r, 0.5)), 1, photoRim)
 			}
 			return
 		}
@@ -681,6 +701,7 @@ func Avatar(c *ui.Context, opts ...AvatarOptions) ui.Element {
 			p.Clip(r, rad, func() {
 				p.Image(imgSrc, r, ui.Cover)
 			})
+			p.Stroke(r, photoRim, rad, 1)
 		}
 	})
 
@@ -688,19 +709,27 @@ func Avatar(c *ui.Context, opts ...AvatarOptions) ui.Element {
 		initials := avatarInitials(o.Text)
 		if initials != "" {
 			fontSz := clampF32(side*0.40, 10, 32)
+			style := typeStyleOfWithTheme(th, tokens.TitleMedium)
 			el.Children(func() {
-				ui.Text(c, initials).
+				txt := ui.Text(c, initials).
 					NoWrap().
 					FontSize(fontSz).
+					FixedLineHeight(fontSz * 1.1).
 					FontWeight(500).
 					TextColor(fg)
+				if style.Font != "" {
+					txt.Font(style.Font)
+				}
 			})
 		}
 	}
 
 	if o.Status != AvatarStatusNone {
 		dotCol := avatarStatusColor(th, o.Status)
-		ringCol := cs.Surface
+		ringCol := o.StatusRingColor
+		if ringCol.A == 0 {
+			ringCol = cs.Surface
+		}
 		if ringCol.A == 0 {
 			ringCol = ui.RGB(255, 255, 255)
 		}
@@ -712,11 +741,12 @@ func Avatar(c *ui.Context, opts ...AvatarOptions) ui.Element {
 			dotD := clampF32(min(r.W, r.H)*0.28, 8, 16)
 			ringW := float32(2)
 			outerR := dotD/2 + ringW
-			cx := r.X + r.W - dotD/2
+			// Inset center by outerR so the ring stays strictly within r without clipping.
+			cx := r.X + r.W - outerR
 			if rtl {
-				cx = r.X + dotD/2
+				cx = r.X + outerR
 			}
-			cy := r.Y + r.H - dotD/2
+			cy := r.Y + r.H - outerR
 			p.Fill(ui.Rect{X: cx - outerR, Y: cy - outerR, W: outerR * 2, H: outerR * 2}, ringCol, outerR)
 			p.Fill(ui.Rect{X: cx - dotD/2, Y: cy - dotD/2, W: dotD, H: dotD}, dotCol, dotD/2)
 		})

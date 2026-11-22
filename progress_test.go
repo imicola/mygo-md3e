@@ -135,18 +135,19 @@ func TestLinearWavyDeterminate(t *testing.T) {
 	half := progressInfo(t, tt, "Half")
 	full := progressInfo(t, tt, "Full")
 
-	// Zero: no active ink, only the track and its end dot.
+	// Zero: no active bar, only the track and the Primary stop dot at the far end.
 	row := progressRow(img, int(zero.Bounds.Y+zero.Bounds.H/2), int(zero.Bounds.X), int(zero.Bounds.X+zero.Bounds.W), cs.Primary, track)
-	if runs := progressRuns(row, 'a'); len(runs) != 0 {
-		t.Fatalf("value 0 paints active ink in %v", runs)
+	if runs := progressRuns(row, 'a'); len(runs) != 1 || runs[0][0] < len(row)-8 {
+		t.Fatalf("value 0 active runs = %v, want only the far-end stop dot", runs)
 	}
-	if runs := progressRuns(row, 't'); len(runs) < 2 {
-		t.Fatalf("value 0 has %d track runs, want the track and the stop dot", len(runs))
+	if runs := progressRuns(row, 't'); len(runs) < 1 {
+		t.Fatalf("value 0 has %d track runs, want the unfinished track", len(runs))
 	}
 
-	// Half: the active segment spans half the bar, its wave bulges, and its
-	// ends sit on the center line.
-	ink, count := progressInk(img, half.Bounds, 'a', cs.Primary, track)
+	// Half: the active segment spans half the bar (plus the far-end stop dot),
+	// its wave bulges, and its ends sit on the center line.
+	halfMainBox := ui.Rect{X: half.Bounds.X, Y: half.Bounds.Y, W: half.Bounds.W - 10, H: half.Bounds.H}
+	ink, count := progressInk(img, halfMainBox, 'a', cs.Primary, track)
 	if count == 0 {
 		t.Fatal("half paints no active ink")
 	}
@@ -169,18 +170,25 @@ func TestLinearWavyDeterminate(t *testing.T) {
 		t.Fatalf("the wave is %d DIP high at its start, want it anchored to the stroke", run)
 	}
 
-	// The track gap and the stop dot: two track runs on the center line, the
-	// last a short dot at the far end.
+	// The track gap and the Primary stop dot: unfinished track separated from
+	// the active wave, followed by a short Primary dot at the far end.
 	row = progressRow(img, int(half.Bounds.Y+half.Bounds.H/2), int(half.Bounds.X), int(half.Bounds.X+half.Bounds.W), cs.Primary, track)
 	trackRuns := progressRunsAtLeast(row, 't', 3)
-	if len(trackRuns) < 2 {
-		t.Fatalf("half has %d track runs, want the track and the stop dot", len(trackRuns))
+	if len(trackRuns) < 1 {
+		t.Fatalf("half has %d track runs, want the unfinished track", len(trackRuns))
 	}
-	last := trackRuns[len(trackRuns)-1]
+	activeRuns := progressRunsAtLeast(row, 'a', 2)
+	if len(activeRuns) < 2 {
+		t.Fatalf("half active runs = %v, want active bar and far-end Primary stop dot", activeRuns)
+	}
+	last := activeRuns[len(activeRuns)-1]
 	if last[1]-last[0]+1 > 8 || last[1] < len(row)-3 {
 		t.Fatalf("the stop dot spans %v, want a short dot at the far end", last)
 	}
-	if gap := trackRuns[0][0] - (int(ink.X+ink.W) - int(half.Bounds.X)) - 1; gap < 2 {
+	// Measure the active wave bounds excluding the far-end stop dot.
+	halfWaveArea := ui.Rect{X: half.Bounds.X, Y: half.Bounds.Y, W: half.Bounds.W - 10, H: half.Bounds.H}
+	waveInk, _ := progressInk(img, halfWaveArea, 'a', cs.Primary, track)
+	if gap := trackRuns[0][0] - (int(waveInk.X+waveInk.W) - int(half.Bounds.X)) - 1; gap < 2 {
 		t.Fatalf("the track gap is %d DIP, want a clear gap", gap)
 	}
 
@@ -249,7 +257,9 @@ func TestLinearProgressRTL(t *testing.T) {
 	img := tt.Image()
 	for _, name := range []string{"RightFill", "RightWave"} {
 		info := progressInfo(t, tt, name)
-		ink, count := progressInk(img, info.Bounds, 'a', cs.Primary, track)
+		// Exclude the far-left Primary stop dot when measuring the RTL active bar.
+		barBox := ui.Rect{X: info.Bounds.X + 10, Y: info.Bounds.Y, W: info.Bounds.W - 10, H: info.Bounds.H}
+		ink, count := progressInk(img, barBox, 'a', cs.Primary, track)
 		if count == 0 {
 			t.Fatalf("%s paints no active ink", name)
 		}
@@ -262,10 +272,14 @@ func TestLinearProgressRTL(t *testing.T) {
 		}
 		row := progressRow(img, int(info.Bounds.Y+info.Bounds.H/2), int(info.Bounds.X), int(info.Bounds.X+info.Bounds.W), cs.Primary, track)
 		trackRuns := progressRunsAtLeast(row, 't', 3)
-		if len(trackRuns) < 2 {
-			t.Fatalf("%s has %d track runs, want the track and the left-end stop dot", name, len(trackRuns))
+		if len(trackRuns) < 1 {
+			t.Fatalf("%s has %d track runs, want the unfinished track", name, len(trackRuns))
 		}
-		first := trackRuns[0]
+		activeRuns := progressRunsAtLeast(row, 'a', 2)
+		if len(activeRuns) < 2 {
+			t.Fatalf("%s has %d active runs, want the left-end stop dot and right active bar", name, len(activeRuns))
+		}
+		first := activeRuns[0]
 		if first[0] > 3 || first[1]-first[0]+1 > 8 {
 			t.Fatalf("%s's stop dot spans %v, want it at the left end", name, first)
 		}
@@ -800,7 +814,8 @@ func TestProgressBufferTrackAndRTL(t *testing.T) {
 
 	for _, name := range []string{"BufLinear", "BufWavy"} {
 		info := progressInfo(t, tt, name)
-		actInk, actN := progressInk(img, info.Bounds, 'a', cs.Primary, track)
+		barBox := ui.Rect{X: info.Bounds.X, Y: info.Bounds.Y, W: info.Bounds.W - 10, H: info.Bounds.H}
+		actInk, actN := progressInk(img, barBox, 'a', cs.Primary, track)
 		bufStart, bufEnd, ok := bufferCenterRun(img, info.Bounds)
 		if actN < 50 || !ok {
 			t.Fatalf("%s active=%d bufferRun=%v, want visible active and buffer segments", name, actN, ok)
@@ -810,11 +825,15 @@ func TestProgressBufferTrackAndRTL(t *testing.T) {
 		if gap < 2 {
 			t.Fatalf("%s gap between active and buffer is %.1f DIP, want >= 2", name, gap)
 		}
-		// Track must resume to the right of buffer with a clear TrackGap.
+		// Track must resume to the right of buffer with a clear TrackGap, followed by the Primary stop dot.
 		row := progressRow(img, int(info.Bounds.Y+info.Bounds.H/2), int(info.Bounds.X), int(info.Bounds.X+info.Bounds.W), cs.Primary, track)
 		trackRuns := progressRunsAtLeast(row, 't', 3)
-		if len(trackRuns) < 2 {
-			t.Fatalf("%s has %d track runs, want unfinished track and stop dot", name, len(trackRuns))
+		if len(trackRuns) < 1 {
+			t.Fatalf("%s has %d track runs, want unfinished track", name, len(trackRuns))
+		}
+		activeRuns := progressRunsAtLeast(row, 'a', 2)
+		if len(activeRuns) < 2 {
+			t.Fatalf("%s has %d active runs, want active bar and far-end stop dot", name, len(activeRuns))
 		}
 		trackStartX := info.Bounds.X + float32(trackRuns[0][0])
 		bufTrackGap := trackStartX - bufEnd
@@ -824,8 +843,9 @@ func TestProgressBufferTrackAndRTL(t *testing.T) {
 	}
 
 	zeroVal := progressInfo(t, tt, "BufZeroVal")
-	if _, actN := progressInk(img, zeroVal.Bounds, 'a', cs.Primary, track); actN != 0 {
-		t.Fatalf("BufZeroVal painted %d active pixels, want 0", actN)
+	zeroBarBox := ui.Rect{X: zeroVal.Bounds.X, Y: zeroVal.Bounds.Y, W: zeroVal.Bounds.W - 10, H: zeroVal.Bounds.H}
+	if _, actN := progressInk(img, zeroBarBox, 'a', cs.Primary, track); actN != 0 {
+		t.Fatalf("BufZeroVal painted %d active bar pixels, want 0", actN)
 	}
 	if bufN := countBuffer(img, zeroVal.Bounds); bufN < 100 {
 		t.Fatalf("BufZeroVal painted %d buffer pixels, want visible buffer segment", bufN)
@@ -850,7 +870,8 @@ func TestProgressBufferTrackAndRTL(t *testing.T) {
 	rtlTT.SetDirection(ui.RightToLeft)
 	rtlImg := rtlTT.Image()
 	rtlInfo := progressInfo(t, rtlTT, "RTLBuf")
-	actInk, actN := progressInk(rtlImg, rtlInfo.Bounds, 'a', cs.Primary, track)
+	rtlBarBox := ui.Rect{X: rtlInfo.Bounds.X + 10, Y: rtlInfo.Bounds.Y, W: rtlInfo.Bounds.W - 10, H: rtlInfo.Bounds.H}
+	actInk, actN := progressInk(rtlImg, rtlBarBox, 'a', cs.Primary, track)
 	_, bufEnd, ok := bufferCenterRun(rtlImg, rtlInfo.Bounds)
 	if actN < 50 || !ok {
 		t.Fatalf("RTLBuf active=%d bufferRun=%v, want visible segments", actN, ok)

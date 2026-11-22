@@ -50,18 +50,6 @@ const (
 	progressWaveLength = 24
 )
 
-// progressValueKey is the AnimateTo channel of a determinate indicator's value.
-type progressValueKey struct{}
-
-// progressBufferKey is the AnimateTo channel of a determinate indicator's buffer.
-type progressBufferKey struct{}
-
-// progressStartKey is the Local holding an indeterminate indicator's start time.
-type progressStartKey struct{}
-
-// progressPathKey is the Local holding an indicator's reused paths.
-type progressPathKey struct{}
-
 // progressPaths are the paths an indicator rebuilds each frame, reusing their
 // storage rather than allocating.
 type progressPaths struct {
@@ -217,13 +205,13 @@ func progressIndicator(c *ui.Context, kind progressIndicatorKind, value float64,
 	shown := float32(raw)
 	bufShown := float32(0)
 	if !indeterminate {
-		shown = animateValue(el, progressValueKey{}, float32(raw), th.Animation(motion.DefaultSpatial), reduceMotion)
+		shown = animateValue(el, animChan0, float32(raw), th.Animation(motion.DefaultSpatial), reduceMotion)
 		if bufRaw > 0 {
-			bufShown = animateValue(el, progressBufferKey{}, float32(bufRaw), th.Animation(motion.DefaultSpatial), reduceMotion)
+			bufShown = animateValue(el, animChan1, float32(bufRaw), th.Animation(motion.DefaultSpatial), reduceMotion)
 		}
 	}
-	start := ui.Local(el, progressStartKey{}, func() time.Time { return c.Now() })
-	paths := ui.Local(el, progressPathKey{}, func() progressPaths { return progressPaths{} })
+	start := localPtr(el, animChan2, func() *time.Time { t := c.Now(); return &t })
+	paths := localPtr(el, animChan3, func() *progressPaths { return &progressPaths{} })
 
 	rtl := c.Direction() == ui.RightToLeft
 	wavy := kind == progressLinearWavy || kind == progressCircularWavy
@@ -370,10 +358,10 @@ func paintLinearProgress(p *ui.Painter, r ui.Rect, paths *progressPaths, s linea
 				ta, tb := progressSpan(s.rtl, r, trackStart, trackEnd)
 				p.Fill(ui.Rect{X: ta, Y: cy - s.thickness/2, W: tb - ta, H: s.thickness}, s.track, s.thickness/2)
 			}
-			// Skip the opaque stop dot when a translucent buffer covers it.
+			// Skip the stop dot when a translucent buffer covers it.
 			if bufEnd <= trackEnd {
 				da, db := progressSpan(s.rtl, r, r.W-dotD, r.W)
-				p.Fill(ui.Rect{X: da, Y: cy - dotD/2, W: db - da, H: dotD}, s.track, dotD/2)
+				p.Fill(ui.Rect{X: da, Y: cy - dotD/2, W: db - da, H: dotD}, s.active, dotD/2)
 			}
 		} else {
 			trackStart := activeUsed + s.gap
@@ -381,8 +369,10 @@ func paintLinearProgress(p *ui.Painter, r ui.Rect, paths *progressPaths, s linea
 				ta, tb := progressSpan(s.rtl, r, trackStart, trackEnd)
 				p.Fill(ui.Rect{X: ta, Y: cy - s.thickness/2, W: tb - ta, H: s.thickness}, s.track, s.thickness/2)
 			}
-			da, db := progressSpan(s.rtl, r, r.W-dotD, r.W)
-			p.Fill(ui.Rect{X: da, Y: cy - dotD/2, W: db - da, H: dotD}, s.track, dotD/2)
+			if activeUsed <= trackEnd {
+				da, db := progressSpan(s.rtl, r, r.W-dotD, r.W)
+				p.Fill(ui.Rect{X: da, Y: cy - dotD/2, W: db - da, H: dotD}, s.active, dotD/2)
+			}
 		}
 	} else {
 		trackStart := activeUsed + s.gap
@@ -390,8 +380,10 @@ func paintLinearProgress(p *ui.Painter, r ui.Rect, paths *progressPaths, s linea
 			ta, tb := progressSpan(s.rtl, r, trackStart, trackEnd)
 			p.Fill(ui.Rect{X: ta, Y: cy - s.thickness/2, W: tb - ta, H: s.thickness}, s.track, s.thickness/2)
 		}
-		da, db := progressSpan(s.rtl, r, r.W-dotD, r.W)
-		p.Fill(ui.Rect{X: da, Y: cy - dotD/2, W: db - da, H: dotD}, s.track, dotD/2)
+		if activeUsed <= trackEnd {
+			da, db := progressSpan(s.rtl, r, r.W-dotD, r.W)
+			p.Fill(ui.Rect{X: da, Y: cy - dotD/2, W: db - da, H: dotD}, s.active, dotD/2)
+		}
 	}
 
 	// The amplitude converges to zero as the value nears either end, so a
@@ -544,14 +536,12 @@ func paintIndeterminateLinearProgress(p *ui.Painter, r ui.Rect, paths *progressP
 		cur = max(cur, end+s.gap)
 		maxEnd = max(maxEnd, end)
 	}
-	if trackEnd > cur+0.5 {
-		ta, tb := progressSpan(s.rtl, r, cur, trackEnd)
+	if width > cur+0.5 {
+		ta, tb := progressSpan(s.rtl, r, cur, width)
 		p.Fill(ui.Rect{X: ta, Y: cy - s.thickness/2, W: tb - ta, H: s.thickness}, s.track, s.thickness/2)
 	}
-	if maxEnd <= trackEnd {
-		da, db := progressSpan(s.rtl, r, width-dotD, width)
-		p.Fill(ui.Rect{X: da, Y: cy - dotD/2, W: db - da, H: dotD}, s.track, dotD/2)
-	}
+	_ = maxEnd
+	_ = trackEnd
 
 	phase := float32(u * 6 * math.Pi)
 	segPaths := [2]*ui.Path{&paths.active, &paths.secondary}
@@ -579,7 +569,8 @@ func progressEdgeScale(v float32) float32 {
 }
 
 // progressWavePath builds a cubic Hermite-fitted sine wave between logical
-// from and to, centered on centerY, with its amplitude anchored at zero at both ends.
+// from and to, centered on centerY, flowing forward in track coordinates with
+// physical-DIP end tapering so amplitude anchors cleanly at both ends.
 func progressWavePath(path *ui.Path, from, to, centerY, amplitude, phase float32, rtl bool, r ui.Rect) *ui.Path {
 	path.Reset()
 	length := to - from
@@ -587,25 +578,26 @@ func progressWavePath(path *ui.Path, from, to, centerY, amplitude, phase float32
 		return path
 	}
 	n := max(6, int(length/6))
-	waves := float64(length / progressWaveLength)
-	w := waves * 2 * math.Pi
+	w := float64(length/progressWaveLength) * 2 * math.Pi
+	baseAng := float64(from/progressWaveLength)*2*math.Pi - float64(phase)
+	taper := math.Min(0.25, math.Max(0.06, float64(progressWaveLength*0.5/length)))
 	df := 1.0 / float64(n)
 	eval := func(f float64) (x, y, dydf float32) {
 		x = progressMirrorX(rtl, r, from+length*float32(f))
 		var env, dEnv float64
 		switch {
-		case f < 0.08:
-			t := f / 0.08
+		case f < taper:
+			t := f / taper
 			env = t * t * (3 - 2*t)
-			dEnv = 6 * t * (1 - t) / 0.08
-		case f > 0.92:
-			t := (1 - f) / 0.08
+			dEnv = 6 * t * (1 - t) / taper
+		case f > 1-taper:
+			t := (1 - f) / taper
 			env = t * t * (3 - 2*t)
-			dEnv = -6 * t * (1 - t) / 0.08
+			dEnv = -6 * t * (1 - t) / taper
 		default:
 			env = 1
 		}
-		ang := float64(phase) + w*f
+		ang := baseAng + w*f
 		s, c := math.Sin(ang), math.Cos(ang)
 		y = centerY + amplitude*float32(env*s)
 		dydf = amplitude * float32(dEnv*s+env*w*c)
@@ -647,15 +639,15 @@ func paintCircularProgress(p *ui.Painter, r ui.Rect, paths *progressPaths, s cir
 	radius := min(r.W, r.H)/2 - s.thickness/2
 	amplitude := float32(0)
 	if s.wavy && !s.reduce {
-		amplitude = min(min(r.W, r.H)*0.055, max(radius*0.4, 0))
+		amplitude = min(min(r.W, r.H)*0.044, min(4.2, max(radius*0.35, 0)))
 		radius -= amplitude
 	}
 	if radius <= s.thickness*0.5 || radius <= 0 {
 		return
 	}
-	// The gap is the angle a track gap plus the round cap's radius spans; the
-	// wave's outward bulge widens it so the track never touches the crest.
-	gapDeg := (s.gap + s.thickness/2 + amplitude) / radius * (180 / math.Pi)
+	// Both facing round caps extend thickness/2 toward each other (thickness total),
+	// plus a small margin when wavy so crests stay crisp near the track ends.
+	gapDeg := (s.gap + s.thickness + amplitude*0.2) / radius * (180 / math.Pi)
 
 	if s.indeterminate {
 		var rotation, sweep, phase float32
@@ -665,8 +657,12 @@ func paintCircularProgress(p *ui.Painter, r ui.Rect, paths *progressPaths, s cir
 			cycle := float64(progressCycle)
 			totalTurns := math.Max(float64(s.elapsed), 0) / cycle
 			u := math.Mod(totalTurns, 1)
-			rotation = float32(math.Mod(totalTurns*540, 360))
-			sweep = 90 + 110*(0.5+0.5*float32(math.Sin(2*math.Pi*u)))
+			// Asymmetric MD3 head-stretch / tail-catch-up rotation and sweep.
+			head := progressCubicBezier(0.2, 0, 0, 1, math.Min(u*2, 1))
+			tail := progressCubicBezier(0.4, 0, 0.2, 1, math.Max((u-0.5)*2, 0))
+			baseRot := math.Mod(totalTurns*360, 360)
+			rotation = float32(math.Mod(baseRot+tail*270, 360))
+			sweep = float32(28 + (head-tail)*242)
 			if s.wavy {
 				phase = float32(u * 4 * math.Pi)
 			}
@@ -679,14 +675,19 @@ func paintCircularProgress(p *ui.Painter, r ui.Rect, paths *progressPaths, s cir
 			paths.track.Cap(ui.RoundCap)
 			p.StrokePath(&paths.track, s.thickness, s.track)
 		}
-		progressArcPath(&paths.active, cx, cy, radius, rotation, sweep, amplitude, phase)
+		indAmp := amplitude * clampF32((sweep-24)/42, 0.25, 1)
+		progressArcPath(&paths.active, cx, cy, radius, rotation, sweep, indAmp, phase)
 		paths.active.Cap(ui.RoundCap)
 		p.StrokePath(&paths.active, s.thickness, s.active)
 		return
 	}
 
 	// Determinate: the active arc first, optional buffer arc, then the rest of
-	// the ring, each separated by a clear gap at the joins.
+	// the ring, each separated by a clear gap at the joins. Smoothly close the
+	// gap as value approaches 1.0 so the ring seals without an abrupt jump.
+	if s.value > 0.92 {
+		gapDeg *= clampF32((1-s.value)/0.08, 0, 1)
+	}
 	activeSweep := s.value * 360
 	bufferSweep := s.buffer * 360
 	phase := progressWavePhase(s.elapsed)
@@ -830,6 +831,7 @@ func progressArcPath(path *ui.Path, cx, cy, radius, startDeg, sweepDeg, amplitud
 	}
 	steps := max(12, int(sweepDeg/6))
 	sweepRad := float64(sweepDeg) * math.Pi / 180
+	cycles := math.Max(5, math.Round(2*math.Pi*float64(radius)/38.0))
 	eval := func(f float64) (x, y, dx, dy float32) {
 		theta := float64(startDeg)*math.Pi/180 + sweepRad*f
 		rad := float64(radius)
@@ -844,10 +846,10 @@ func progressArcPath(path *ui.Path, cx, cy, radius, startDeg, sweepDeg, amplitud
 				u := (1 - f) / 0.08
 				env, dEnv = u*u*(3-2*u), -6*u*(1-u)/0.08
 			}
-			ang := 6*theta + float64(phase)
+			ang := cycles*theta - float64(phase)
 			sn, cs := math.Sincos(ang)
 			rad += float64(amplitude) * env * sn
-			drdf = float64(amplitude) * (dEnv*sn + env*cs*6*sweepRad)
+			drdf = float64(amplitude) * (dEnv*sn + env*cs*cycles*sweepRad)
 		}
 		sn, cs := math.Sincos(theta)
 		x = cx + float32(rad*sn)

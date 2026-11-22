@@ -188,7 +188,7 @@ func buildDatePicker(c *ui.Context, m datePickerModel, opts []DatePickerOptions)
 	}
 
 	th := CurrentTheme(c)
-	reduce := th.ReduceMotion
+	reduce := th.ReduceMotion || c.Preferences().ReduceMotion
 
 	now := c.Now()
 	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
@@ -197,8 +197,8 @@ func buildDatePicker(c *ui.Context, m datePickerModel, opts []DatePickerOptions)
 		// A docked picker keeps its state on the panel itself, so it adds no
 		// zero-width sibling that would take the caller's key or a layout gap.
 		panel := newDatePickerPanel(c, m, o)
-		st := ui.Local(panel, datePickerStateKey{}, func() datePickerState {
-			return datePickerState{view: dateViewCalendar}
+		st := localPtr(panel, datePickerStateKey{}, func() *datePickerState {
+			return &datePickerState{view: dateViewCalendar}
 		})
 		st.syncSelection(m, now)
 		fillDatePickerPanel(c, th, panel, st, m, o, today, nil)
@@ -208,7 +208,7 @@ func buildDatePicker(c *ui.Context, m datePickerModel, opts []DatePickerOptions)
 	// A modal keeps its state on a zero-width anchor in the caller's tree: the
 	// dialog itself lives in the window's overlay.
 	anchor := ui.Box(c).Size(0, 0)
-	st := ui.Local(anchor, datePickerStateKey{}, func() datePickerState { return datePickerState{view: dateViewCalendar} })
+	st := localPtr(anchor, datePickerStateKey{}, func() *datePickerState { return &datePickerState{view: dateViewCalendar} })
 	// An ancestor that disables the trigger disables the dialog too, though the
 	// dialog is no child of it.
 	if anchor.IsDisabled() {
@@ -422,6 +422,7 @@ func styleDatePickerPanel(th *Theme, panel ui.Element, m datePickerModel, o Date
 	panel.Width(datePickerWidth).Padding(datePickerPad).Gap(dateFieldGap).
 		Radius(th.Shapes.Radius(tokens.ShapeExtraLarge)).
 		Background(SurfaceColorForElevation(th, tokens.Level2)).
+		Border(1, resolveHairlineColor(th, ui.Color{})).
 		TextColor(th.Colors.OnSurface).
 		DimDisabled(false).Disabled(o.Disabled).
 		Label(name)
@@ -439,7 +440,7 @@ func fillDatePickerPanel(c *ui.Context, th *Theme, panel ui.Element, st *datePic
 		Divider(c)
 		switch st.view {
 		case dateViewYear:
-			buildDateYearGrid(c, th, st, disabled)
+			buildDateYearGrid(c, th, st, today.Year(), disabled)
 		case dateViewInput:
 			buildDateInputs(c, st, m, o, disabled)
 		default:
@@ -504,8 +505,11 @@ func buildDatePickerHeader(c *ui.Context, th *Theme, st *datePickerState, m date
 			Disabled: disabled,
 		})
 		title.Children(func() {
-			txt := ui.Text(c, st.monthTitle()).NoWrap().TextColor(cs.OnSurface)
-			applyTypeStyleWithTheme(th, txt, tokens.TitleSmall)
+			ui.Row(c).AlignItems(ui.Center).Gap(4).Children(func() {
+				txt := ui.Text(c, st.monthTitle()).NoWrap().TextColor(cs.OnSurface)
+				applyTypeStyleWithTheme(th, txt, tokens.TitleSmall)
+				drawIconBox(c, mdicon.ChevronDown.Draw, 16, cs.OnSurfaceVariant)
+			})
 		})
 		if title.Clicked() {
 			st.yearPage = st.cursor.Year() / 12 * 12
@@ -606,9 +610,14 @@ func buildDateCalendar(c *ui.Context, th *Theme, st *datePickerState, m datePick
 						day := start.AddDate(0, 0, w*7+d)
 						inMonth := day.Month() == month.Month() && day.Year() == month.Year()
 						chosen, inRange := datePickerDayState(m, day)
+						hasSpan := m.rangeMode() && !m.start.IsZero() && !m.end.IsZero() && !sameCalendarDay(*m.start, *m.end)
+						rangeStart := hasSpan && sameCalendarDay(day, *m.start)
+						rangeEnd := hasSpan && sameCalendarDay(day, *m.end)
 						visual := dateCellPaint{
 							band:       inRange && !chosen,
 							selected:   chosen,
+							rangeStart: rangeStart,
+							rangeEnd:   rangeEnd,
 							inMonth:    inMonth,
 							today:      sameCalendarDay(day, today) && !chosen,
 							bandStart:  inRange && !chosen && d == 0,
@@ -623,6 +632,7 @@ func buildDateCalendar(c *ui.Context, th *Theme, st *datePickerState, m datePick
 							todayInk:   cs.Primary,
 							disabled:   disabled,
 							rtl:        rtl,
+							reduce:     th.ReduceMotion || c.Preferences().ReduceMotion,
 						}
 						if visual.bandBg.A == 0 {
 							visual.bandBg = cs.SecondaryContainer
@@ -683,6 +693,8 @@ type dateCellPaint struct {
 	bandStart  bool
 	bandEnd    bool
 	selected   bool
+	rangeStart bool
+	rangeEnd   bool
 	inMonth    bool
 	today      bool
 	hoverInk   ui.Color
@@ -695,26 +707,61 @@ type dateCellPaint struct {
 	todayInk   ui.Color
 	disabled   bool
 	rtl        bool
+	reduce     bool
 }
 
 // drawDateCell paints a day cell's range band, selection circle, state layer,
 // today ring and day number.
 func drawDateCell(cell ui.Element, v dateCellPaint, dayNum int) {
+	hoverSt := localHaloFade(cell, animChan0)
 	cell.Draw(func(p *ui.Painter, r ui.Rect) {
 		if r.W <= 0 || r.H <= 0 {
 			return
 		}
 		live := cell.Valid()
-		circle := ui.Rect{X: r.X + 4, Y: r.Y + 4, W: r.W - 8, H: r.H - 8}
+		// Unified 36 DIP circle and band height aligns range endpoint circles
+		// seamlessly with the connecting ribbon with zero vertical step or gap.
+		circle := ui.Rect{X: r.X + 2, Y: r.Y + 2, W: r.W - 4, H: r.H - 4}
+		bandR := ui.Rect{X: r.X, Y: r.Y + 2, W: r.W, H: r.H - 4}
 		disabledInk := v.ink.Alpha(float32(tokens.DisabledContentOpacity))
 		disabledContainer := v.ink.Alpha(float32(tokens.DisabledContainerOpacity))
 		ink := v.ink
+		weight := 500
 		if !v.inMonth {
 			ink = v.inkOutside
+		}
+		if v.today && !v.disabled {
+			ink = v.todayInk
+			weight = 600
 		}
 		if v.disabled {
 			ink = disabledInk
 		}
+
+		// Paint half-width connecting ribbon underneath range start/end circles.
+		if v.selected && (v.rangeStart || v.rangeEnd) {
+			ribbonCol := v.bandBg
+			if v.disabled {
+				ribbonCol = disabledContainer
+			}
+			halfW := r.W * 0.5
+			if v.rangeStart {
+				rx := r.X + halfW
+				if v.rtl {
+					rx = r.X
+				}
+				p.Fill(ui.Rect{X: rx, Y: bandR.Y, W: halfW, H: bandR.H}, ribbonCol, 0)
+			}
+			if v.rangeEnd {
+				rx := r.X
+				if v.rtl {
+					rx = r.X + halfW
+				}
+				p.Fill(ui.Rect{X: rx, Y: bandR.Y, W: halfW, H: bandR.H}, ribbonCol, 0)
+			}
+		}
+
+		stateInk := v.hoverInk
 		switch {
 		case v.selected && v.disabled:
 			p.Fill(circle, disabledContainer, circle.W/2)
@@ -722,32 +769,52 @@ func drawDateCell(cell ui.Element, v dateCellPaint, dayNum int) {
 		case v.selected:
 			p.Fill(circle, v.selectedBg, circle.W/2)
 			ink = v.onSelected
+			stateInk = v.onSelected
+			weight = 600
 		case v.band && v.disabled:
-			p.FillRadii(r, dateBandRadii(v), disabledContainer)
+			p.FillRadii(bandR, dateBandRadii(v, bandR.H/2), disabledContainer)
 			ink = disabledInk
 		case v.band:
-			p.FillRadii(r, dateBandRadii(v), v.bandBg)
+			p.FillRadii(bandR, dateBandRadii(v, bandR.H/2), v.bandBg)
 			if v.inMonth {
 				ink = v.onBand
 			}
+			stateInk = v.onBand
 		}
-		if live && !v.disabled && !v.selected && !v.band {
-			if cell.Pressed() {
-				p.Fill(circle, v.hoverInk.Alpha(float32(tokens.StatePressedOpacity)), circle.W/2)
-			} else if cell.Hovered() {
-				p.Fill(circle, v.hoverInk.Alpha(float32(tokens.StateHoverOpacity)), circle.W/2)
+
+		if !v.disabled {
+			var alpha float32
+			if live {
+				target := float32(0)
+				if cell.Pressed() {
+					target = float32(tokens.StatePressedOpacity)
+				} else if cell.Hovered() {
+					target = float32(tokens.StateHoverOpacity)
+				}
+				var needFrame bool
+				alpha, needFrame = hoverSt.step(target, p.Now(), v.reduce || p.Preferences().ReduceMotion)
+				if needFrame && rectIntersects(r, p.Visible()) {
+					p.After(16 * time.Millisecond)
+				}
+			} else {
+				alpha = hoverSt.alpha
 			}
+			if alpha > 0.002 {
+				p.Fill(circle, stateInk.Alpha(alpha), circle.W/2)
+			}
+		} else {
+			hoverSt.reset()
 		}
+
 		if v.today {
-			ring := ui.Rect{X: r.X + 2, Y: r.Y + 2, W: r.W - 4, H: r.H - 4}
 			color := v.todayInk
 			if v.disabled {
 				color = disabledInk
 			}
-			p.Stroke(ring, color, ring.W/2, 1)
+			p.Stroke(circle, color, circle.W/2, 1.5)
 		}
 		paintCenteredSpan(p, r.X+r.W/2, r.Y+r.H/2,
-			ui.Span{Text: dateDayText(dayNum), Size: 13, Weight: 500, Color: ink})
+			ui.Span{Text: dateDayText(dayNum), Size: 13, Weight: weight, Color: ink})
 	})
 }
 
@@ -783,8 +850,7 @@ func (st *datePickerState) monthDayLabels(month, start time.Time, first time.Wee
 
 // dateBandRadii rounds a range band's outer edge at the row's ends, on the
 // visual start or end side, mirrored right to left.
-func dateBandRadii(v dateCellPaint) [4]float32 {
-	r := float32(dateCellHeight) / 2
+func dateBandRadii(v dateCellPaint, r float32) [4]float32 {
 	var radii [4]float32
 	if v.bandStart {
 		if v.rtl {
@@ -804,19 +870,20 @@ func dateBandRadii(v dateCellPaint) [4]float32 {
 }
 
 // buildDateYearGrid builds the 12-year page that the title opens.
-func buildDateYearGrid(c *ui.Context, th *Theme, st *datePickerState, disabled bool) {
+func buildDateYearGrid(c *ui.Context, th *Theme, st *datePickerState, todayYear int, disabled bool) {
 	cs := th.Colors
 	centered := ui.Row(c).FillWidth().Justify(ui.Center)
 	centered.Children(func() {
-		grid := ui.Column(c).Gap(4).Role(ui.RoleGrid).Label("Choose year").
+		grid := ui.Column(c).Gap(6).Role(ui.RoleGrid).Label("Choose year").
 			RowCount(dateYearRows).ColumnCount(dateYearColumns)
 		grid.Children(func() {
 			for rowIdx := range dateYearRows {
-				row := ui.Row(c).Height(dateYearCellH).Gap(4).Role(ui.RoleRow)
+				row := ui.Row(c).Height(dateYearCellH).Gap(6).Role(ui.RoleRow)
 				row.Children(func() {
 					for col := range dateYearColumns {
 						year := st.yearPage + rowIdx*dateYearColumns + col
 						selected := year == st.cursor.Year()
+						isCurrent := year == todayYear && !selected
 						cell := ui.Box(c).Size(dateYearCellW, dateYearCellH).Shrink(0).
 							Role(ui.RoleCell).
 							Label(strconv.Itoa(year)).
@@ -827,23 +894,37 @@ func buildDateYearGrid(c *ui.Context, th *Theme, st *datePickerState, disabled b
 								return
 							}
 							live := cell.Valid()
+							pillR := r.H * 0.5
 							ink := cs.OnSurface
+							weight := 500
+							if isCurrent && !disabled {
+								ink = cs.Primary
+								weight = 600
+							}
 							switch {
 							case selected && disabled:
-								p.Fill(r, cs.OnSurface.Alpha(float32(tokens.DisabledContainerOpacity)),
-									float32(th.Shapes.Radius(tokens.ShapeSmall)))
+								p.Fill(r, cs.OnSurface.Alpha(float32(tokens.DisabledContainerOpacity)), pillR)
 								ink = cs.OnSurface.Alpha(float32(tokens.DisabledContentOpacity))
 							case selected:
-								p.Fill(r, cs.Primary, float32(th.Shapes.Radius(tokens.ShapeSmall)))
+								p.Fill(r, cs.Primary, pillR)
 								ink = cs.OnPrimary
+								weight = 600
 							case disabled:
 								ink = cs.OnSurface.Alpha(float32(tokens.DisabledContentOpacity))
+							case live && cell.Pressed():
+								p.Fill(r, cs.OnSurface.Alpha(float32(tokens.StatePressedOpacity)), pillR)
 							case live && cell.Hovered():
-								p.Fill(r, cs.OnSurface.Alpha(float32(tokens.StateHoverOpacity)),
-									float32(th.Shapes.Radius(tokens.ShapeSmall)))
+								p.Fill(r, cs.OnSurface.Alpha(float32(tokens.StateHoverOpacity)), pillR)
+							}
+							if isCurrent {
+								ringCol := cs.Primary
+								if disabled {
+									ringCol = cs.OnSurface.Alpha(float32(tokens.DisabledContentOpacity))
+								}
+								p.Stroke(insetRect(r, 0.75), ringCol, max(0, pillR-0.75), 1.5)
 							}
 							paintCenteredSpan(p, r.X+r.W/2, r.Y+r.H/2,
-								ui.Span{Text: strconv.Itoa(year), Size: 14, Weight: 500, Color: ink})
+								ui.Span{Text: strconv.Itoa(year), Size: 14, Weight: weight, Color: ink})
 						})
 						if cell.Clicked() && !disabled {
 							st.cursor = time.Date(year, st.cursor.Month(), 1,
@@ -924,14 +1005,15 @@ func buildDateInputs(c *ui.Context, st *datePickerState, m datePickerModel, o Da
 
 // buildDatePickerActions builds a modal's Cancel and OK buttons.
 func buildDatePickerActions(c *ui.Context, o DatePickerOptions, onConfirm func()) {
+	Divider(c)
 	row := ui.Row(c).FillWidth().Justify(ui.End).Gap(8).Margin(4, 0, 0, 0)
 	row.Children(func() {
-		if Button(c, "Cancel", ButtonOptions{Variant: ButtonText, Size: tokens.SizeXS}).Clicked() {
+		if Button(c, "Cancel", ButtonOptions{Variant: ButtonText, Size: tokens.SizeS}).Clicked() {
 			if o.Open != nil {
 				*o.Open = false
 			}
 		}
-		if Button(c, "OK", ButtonOptions{Variant: ButtonFilled, Size: tokens.SizeXS}).Clicked() && onConfirm != nil {
+		if Button(c, "OK", ButtonOptions{Variant: ButtonFilled, Size: tokens.SizeS}).Clicked() && onConfirm != nil {
 			onConfirm()
 		}
 	})

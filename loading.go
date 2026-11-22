@@ -98,16 +98,63 @@ type loadingState struct {
 }
 
 // rebuild prebuilds one morph per adjacent shape pair; a single shape morphs
-// to itself, which keeps one reusable path for it.
+// to itself, which keeps one reusable path for it. Each polygon is centered on
+// its true centroid and inscribed within r <= 0.5 around (0.5, 0.5) so odd-sided
+// shapes such as Pentagon rotate without wobble and custom square shapes never
+// clip against a LoadingContained circle at 45°.
 func (s *loadingState) rebuild(polys []*shape.RoundedPolygon) {
 	s.polys = slices.Clone(polys)
+	fitted := make([]*shape.RoundedPolygon, len(polys))
+	for i, poly := range polys {
+		fitted[i] = centerLoadingPolygon(poly)
+	}
 	if s.morphs == nil {
-		s.morphs = make([]*shape.Morph, 0, len(polys))
+		s.morphs = make([]*shape.Morph, 0, len(fitted))
 	}
 	s.morphs = s.morphs[:0]
-	for i := range polys {
-		s.morphs = append(s.morphs, shape.NewMorph(polys[i], polys[(i+1)%len(polys)]))
+	for i := range fitted {
+		s.morphs = append(s.morphs, shape.NewMorph(fitted[i], fitted[(i+1)%len(fitted)]))
 	}
+}
+
+// centerLoadingPolygon moves poly's true centroid to (0.5, 0.5) and uniformly
+// scales it down only when any outline point exceeds radius 0.5 from the
+// centroid, eliminating rotational wobble and 45° corner clipping while leaving
+// already-inscribed symmetric shapes unchanged.
+func centerLoadingPolygon(poly *shape.RoundedPolygon) *shape.RoundedPolygon {
+	if poly == nil {
+		return nil
+	}
+	cubics := poly.Cubics()
+	if len(cubics) == 0 {
+		return poly
+	}
+	c := poly.Center()
+	if math.IsNaN(c.X) || math.IsInf(c.X, 0) || math.IsNaN(c.Y) || math.IsInf(c.Y, 0) {
+		return poly
+	}
+	var maxR float64
+	for _, cb := range cubics {
+		for k := 0; k <= 4; k++ {
+			pt := cb.Point(float64(k) * 0.25)
+			if d := pt.Distance(c); d > maxR {
+				maxR = d
+			}
+		}
+	}
+	if !(maxR > 1e-6) {
+		return poly
+	}
+	scale := 1.0
+	if maxR > 0.5 {
+		scale = 0.5 / maxR
+	}
+	dx := 0.5 - c.X*scale
+	dy := 0.5 - c.Y*scale
+	if math.Abs(scale-1) < 1e-4 && math.Abs(dx) < 1e-4 && math.Abs(dy) < 1e-4 {
+		return poly
+	}
+	return poly.Transformed(shape.Scale(scale, scale).Then(shape.Translate(dx, dy)))
 }
 
 // sameLoadingPolys reports whether two sequences hold geometrically identical
@@ -196,8 +243,8 @@ func LoadingIndicator(c *ui.Context, opts ...LoadingOptions) ui.Element {
 	el.Range(0, 1, -1)
 	disabled := el.IsDisabled()
 
-	st := ui.Local(el, loadingStateKey{}, func() loadingState {
-		var s loadingState
+	st := localPtr(el, loadingStateKey{}, func() *loadingState {
+		s := &loadingState{}
 		s.rebuild(polys)
 		return s
 	})
@@ -205,7 +252,7 @@ func LoadingIndicator(c *ui.Context, opts ...LoadingOptions) ui.Element {
 		st.rebuild(polys)
 	}
 
-	clock := ui.Local(el, loadingClockKey{}, func() loadingClock { return loadingClock{} })
+	clock := localPtr(el, loadingClockKey{}, func() *loadingClock { return &loadingClock{} })
 	paused := o.Paused || disabled
 	thReduce := th.ReduceMotion
 	contained := o.Style == LoadingContained
@@ -250,12 +297,14 @@ func LoadingIndicator(c *ui.Context, opts ...LoadingOptions) ui.Element {
 		circle := ui.Rect{X: cx - side/2, Y: cy - side/2, W: side, H: side}
 
 		var step int
-		var progress, rotation float32
+		var progress, rotation, breathe float32
+		breathe = 1
 		if len(st.morphs) > 1 && !reduceMotion {
 			step = int(elapsed / loadingStepDuration)
 			phase := elapsed - time.Duration(step)*loadingStepDuration
 			springT := float32(morphSpring.Progress(phase))
 			progress = clampF32(springT, 0, 1)
+			breathe = 1 + 0.045*(springT-progress)
 			globalAngle := float32(elapsed) / float32(loadingGlobalDuration) * 360
 			rotation = float32(math.Mod(float64(globalAngle+(float32(step)+springT)*loadingStepDegrees), 360))
 		}
@@ -271,7 +320,11 @@ func LoadingIndicator(c *ui.Context, opts ...LoadingOptions) ui.Element {
 			if path == nil {
 				return
 			}
-			p.Transform(ui.Rotation(rotation), cx, cy, func() {
+			xform := ui.Rotation(rotation)
+			if breathe != 1 {
+				xform = ui.Scaling(breathe, breathe).Then(xform)
+			}
+			p.Transform(xform, cx, cy, func() {
 				p.FillPath(path, ink)
 			})
 		}

@@ -137,24 +137,11 @@ func (s *SnackbarState) finish() {
 	s.version++
 }
 
-// snackbarHostKey is the Local holding a host's seen version and entry state.
-type snackbarHostKey struct{}
-
 // snackbarHostState tracks the currently displayed snackbar's entry state.
 type snackbarHostState struct {
 	seq      uint64
 	appeared bool
 }
-
-// snackbarShowKey is the AnimateTo channel of a snackbar's show progress.
-type snackbarShowKey struct{}
-
-// snackbarSwipeKey is the Local holding a snackbar's horizontal drag offset.
-type snackbarSwipeKey struct{}
-
-// snackbarSwipeOffsetKey is the AnimateTo channel of a snackbar's horizontal
-// offset, which springs back to zero when a short drag is let go.
-type snackbarSwipeOffsetKey struct{}
 
 // SnackbarHost draws state's snackbars in a ui.Overlay, inheriting the active
 // ThemeScope, and returns a zero-size element that takes no room in its parent.
@@ -168,7 +155,7 @@ func SnackbarHost(c *ui.Context, state *SnackbarState) ui.Element {
 	if state == nil {
 		return host
 	}
-	hs := ui.Local(host, snackbarHostKey{}, func() snackbarHostState { return snackbarHostState{} })
+	hs := localPtr(host, animChan0, func() *snackbarHostState { return &snackbarHostState{} })
 	item := state.current
 	if item == nil {
 		hs.seq = 0
@@ -242,23 +229,31 @@ func SnackbarHost(c *ui.Context, state *SnackbarState) ui.Element {
 
 			// A horizontal drag past the threshold dismisses it; a shorter one
 			// springs back as it is let go.
-			swipe := ui.Local(sb, snackbarSwipeKey{}, func() float32 { return 0 })
+			swipe := localFloat32(sb, animChan0)
 			var offset float32
 			if !item.exiting {
 				if dx, _, ok := sb.Dragged(); ok {
 					*swipe += dx
 					// Track the pointer at once while dragging; the spring takes
 					// over from the last offset once it is released.
-					offset = sb.Jump(snackbarSwipeOffsetKey{}, *swipe)
+					offset = sb.Jump(animChan1, *swipe)
 				} else {
-					offset = animateValue(sb, snackbarSwipeOffsetKey{}, 0, th.Animation(motion.FastSpatial), reduce)
+					offset = animateValue(sb, animChan1, 0, th.Animation(motion.FastSpatial), reduce)
 					*swipe = 0
 				}
 				if absF32(*swipe) >= snackbarSwipeThreshold {
 					state.dismiss()
 				}
 			} else {
-				offset = animateValue(sb, snackbarSwipeOffsetKey{}, *swipe, th.Animation(motion.FastSpatial), reduce)
+				exitOffset := *swipe
+				if absF32(exitOffset) >= snackbarSwipeThreshold {
+					if exitOffset > 0 {
+						exitOffset = snackbarMaxWidth * 0.65
+					} else {
+						exitOffset = -snackbarMaxWidth * 0.65
+					}
+				}
+				offset = animateValue(sb, animChan1, exitOffset, th.Animation(motion.FastEffects), reduce)
 			}
 
 			target := float32(1)
@@ -268,15 +263,28 @@ func SnackbarHost(c *ui.Context, state *SnackbarState) ui.Element {
 				c.Invalidate()
 			}
 			hs.appeared = true
+			showAnim := th.Animation(motion.FastSpatial)
 			if item.exiting {
 				target = 0
+				// Critically damped exit prevents spring rebound opacity flash
+				// and queue promotion delay.
+				showAnim = th.Animation(motion.FastEffects)
 			}
-			show := animateValue(sb, snackbarShowKey{}, target, th.Animation(motion.FastSpatial), reduce)
-			if item.exiting && (reduce && show <= 0.001 || sb.Arrived(snackbarShowKey{}) || (sb.Settled(snackbarShowKey{}) && show <= 0.001)) {
+			show := animateValue(sb, animChan2, target, showAnim, reduce)
+			if item.exiting && (reduce && show <= 0.001 || sb.Arrived(animChan2) || (sb.Settled(animChan2) && show <= 0.001)) {
 				state.finish()
 				c.Invalidate()
 			}
-			sb.Opacity(show).Translate(offset, (1-show)*snackbarEnterOffset)
+			opacity := clampF32(show, 0, 1)
+			if absF32(offset) > 0.5 {
+				dragFade := clampF32(1-absF32(offset)/(snackbarSwipeThreshold*1.8), 0.25, 1)
+				opacity *= dragFade
+			}
+			yOffset := (1 - show) * snackbarEnterOffset
+			if item.exiting && absF32(*swipe) >= snackbarSwipeThreshold {
+				yOffset = 0
+			}
+			sb.Opacity(opacity).Translate(offset, yOffset)
 		})
 	})
 
@@ -310,13 +318,14 @@ func snackbarSurface(c *ui.Context, th *Theme, o SnackbarOptions, onAction, onCl
 
 	var sb ui.Element
 	if o.DoubleLine {
-		sb = ui.Column(c).MinHeight(48).Padding(12, 16).Gap(4).AlignItems(ui.Start)
+		sb = ui.Column(c).MinHeight(48).Padding(14, 16, 8, 16).Gap(4).AlignItems(ui.Start)
 	} else {
 		sb = ui.Row(c).MinHeight(48).PaddingY(8).PaddingStart(16).
 			PaddingEnd(endPad).Gap(8).AlignItems(ui.Center)
 	}
 	sb.WidthPercent(100).MaxWidth(snackbarMaxWidth).Radius(4).
-		Background(bg).TextColor(ink).Role(ui.RoleStatus).Label(o.Message)
+		Background(bg).TextColor(ink).Border(1, ink.Alpha(0.10)).
+		Role(ui.RoleStatus).Label(o.Message)
 	ApplyElevationShadows(th, sb, tokens.Level3)
 
 	sb.Children(func() {
@@ -328,7 +337,7 @@ func snackbarSurface(c *ui.Context, th *Theme, o SnackbarOptions, onAction, onCl
 			})
 			return
 		}
-		msg := ui.Text(c, o.Message).Grow(1)
+		msg := ui.Text(c, o.Message).Grow(1).MinWidth(0)
 		applyTypeStyleWithTheme(th, msg, tokens.BodyMedium)
 		snackbarActions(c, th, o, ink, actionInk, onAction, onClose)
 	})
@@ -344,7 +353,7 @@ func snackbarActions(c *ui.Context, th *Theme, o SnackbarOptions, ink, actionInk
 			FocusRing(false).DimDisabled(false).Label(o.ActionLabel)
 		act.TextColor(actionInk)
 		applyTypeStyleWithTheme(th, act, tokens.LabelLarge)
-		attachRippleWithTheme(th, act, StateLayerOptions{Color: actionInk, Radius: 16})
+		attachRippleWithContext(c, th, act, StateLayerOptions{Color: actionInk, Radius: 16})
 		clicked := act.Clicked()
 		act.Children(func() {
 			ui.Text(c, o.ActionLabel).NoWrap()
@@ -357,7 +366,7 @@ func snackbarActions(c *ui.Context, th *Theme, o SnackbarOptions, ink, actionInk
 		close := ui.ButtonBase(c).Size(32, 32).Radius(16).
 			FocusRing(false).DimDisabled(false).Label("Dismiss")
 		close.TextColor(ink)
-		attachRippleWithTheme(th, close, StateLayerOptions{Color: ink, Radius: 16})
+		attachRippleWithContext(c, th, close, StateLayerOptions{Color: ink, Radius: 16})
 		clicked := close.Clicked()
 		close.Children(func() {
 			drawIconBox(c, mdicon.Close.Draw, 18, ink)

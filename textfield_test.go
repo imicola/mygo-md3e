@@ -43,6 +43,17 @@ func fieldRect(t *testing.T, tt *ui.Tester, name string, height float32) (ui.Rec
 	}, info
 }
 
+// filledFieldRect returns the 280-wide container rect of a Filled TextField
+// with a floating label placed at the canvas' (20, 20) padding, where the input
+// is intentionally shifted downward by filledTopPad/2 to clear the floated label.
+func filledFieldRect(t *testing.T, tt *ui.Tester, name string, height float32) (ui.Rect, ui.AccessInfo) {
+	t.Helper()
+	r, info := fieldRect(t, tt, name, height)
+	dm := textFieldMetricsForDensity(tokens.DensityComfortable)
+	r.Y -= dm.filledTopPad / 2
+	return r, info
+}
+
 // inkIn counts pixels of col inside r, within tol, and returns their vertical
 // extent.
 func inkIn(tt *ui.Tester, r ui.Rect, col ui.Color, tol int) (count, minY, maxY int) {
@@ -186,7 +197,7 @@ func TestTextFieldFilledIndicator(t *testing.T) {
 			OnSubmitted: func(s string) { submitted = append(submitted, s) },
 		}).Width(280)
 	})
-	field, info := fieldRect(t, tt, "Email", textFieldHeight)
+	field, info := filledFieldRect(t, tt, "Email", textFieldHeight)
 	img := tt.Image()
 	if px := img.RGBAAt(int(field.X+field.W/2), int(field.Y+8)); !colorMatches(px, cs.SurfaceContainerHighest, 5) {
 		t.Fatalf("filled container %+v is not SurfaceContainerHighest", px)
@@ -477,7 +488,7 @@ func TestTextFieldDisabledAndReduceMotion(t *testing.T) {
 	if !info.Disabled {
 		t.Fatal("disabled field does not report itself disabled")
 	}
-	field, _ := fieldRect(t, disabled, "Email", textFieldHeight)
+	field, _ := filledFieldRect(t, disabled, "Email", textFieldHeight)
 	want := cs.OnSurface.Alpha(float32(tokens.DisabledContainerOpacity)).Over(canvasRGB)
 	if px := disabled.Image().RGBAAt(int(field.X+field.W/2), int(field.Y+8)); !colorMatches(px, want, 8) {
 		t.Fatalf("disabled filled container %+v, want OnSurface 12%% over the canvas %+v", px, rgbOf(want))

@@ -2,6 +2,7 @@ package md3e
 
 import (
 	"fmt"
+	"time"
 	"unicode/utf16"
 
 	"github.com/egoist/mygo/ui"
@@ -94,17 +95,6 @@ type TextFieldOptions struct {
 	// OnSubmitted runs with the value when Enter submits a single-line field.
 	OnSubmitted func(string)
 }
-
-// textFieldInputKey keys the input inside a field's row, so that a caller's
-// c.Key on the TextField or TextArea stays on the outer element while the
-// stateful input base keeps its own stable identity in that row. Sibling
-// fields may share the key: each input sits under its own field row.
-type (
-	textFieldInputKey     struct{}
-	textFieldTrailingKey  struct{}
-	textFieldLabelKey     struct{}
-	textFieldIndicatorKey struct{}
-)
 
 // TextField builds a Material Design 3 Expressive single-line text field over
 // *value, filled or outlined, around a ui.TextInputBase keyed internally in the
@@ -214,20 +204,31 @@ func buildTextField(c *ui.Context, value *string, multiline bool, o TextFieldOpt
 			field.Radius(textFieldRadius, textFieldRadius, 0, 0)
 		}
 		if multiline {
-			field.Padding(dm.iconSize*scaleUp, 0, 8*scaleUp, 0)
+			topPad := dm.iconSize * scaleUp
+			if outlined || o.Label == "" {
+				topPad = dm.pad * scaleUp
+			}
+			field.Padding(topPad, 0, 8*scaleUp, 0)
 		}
-		field.PaddingStart(dm.pad).PaddingEnd(dm.pad)
+		padEnd := dm.pad
+		if o.TrailingIcon != nil && o.OnTrailing != nil {
+			padEnd = max(dm.pad-(dm.trailingBtn-dm.iconSize)/2, 4)
+		}
+		field.PaddingStart(dm.pad).PaddingEnd(padEnd)
 		// Affixes show while the field is focused or holds text. Skip FocusWithin
 		// completely when neither affix is configured.
 		showAffix := (o.Prefix != "" || o.Suffix != "") && (*value != "" || field.FocusWithin())
-		field.Children(func() {
-			if o.LeadingIcon != nil {
-				drawIconBox(c, o.LeadingIcon, dm.iconSize, variationInk)
-			}
+		caretInk := cs.Primary
+		trailingInk := variationInk
+		if o.Error && !disabled {
+			caretInk = cs.Error
+			trailingInk = cs.Error
+		}
+		buildInputGroup := func() {
 			if showAffix && o.Prefix != "" {
 				applyTypeStyleWithTheme(th, ui.Text(c, o.Prefix).NoWrap().Shrink(0).TextColor(variationInk), dm.textRole)
 			}
-			c.Key(textFieldInputKey{})
+			c.Key(animChan3)
 			if multiline {
 				input = ui.TextAreaBase(c, value)
 			} else {
@@ -237,9 +238,10 @@ func buildTextField(c *ui.Context, value *string, multiline bool, o TextFieldOpt
 				FocusRing(false).
 				Disabled(disabled).
 				TextColor(contentInk).
-				CaretColor(cs.Primary).
+				CaretColor(caretInk).
 				PlaceholderColor(variationInk).
-				Grow(1)
+				Grow(1).
+				MinWidth(0)
 			applyTypeStyleWithTheme(th, input, dm.textRole)
 			if multiline {
 				input.AlignSelf(ui.Stretch)
@@ -276,27 +278,41 @@ func buildTextField(c *ui.Context, value *string, multiline bool, o TextFieldOpt
 			if showAffix && o.Suffix != "" {
 				applyTypeStyleWithTheme(th, ui.Text(c, o.Suffix).NoWrap().Shrink(0).TextColor(variationInk), dm.textRole)
 			}
+		}
+		field.Children(func() {
+			if o.LeadingIcon != nil {
+				drawIconBox(c, o.LeadingIcon, dm.iconSize, variationInk)
+			}
+			if !outlined && !multiline && o.Label != "" {
+				// Shift single-line Filled text downward so it clears the floated
+				// label cleanly while leading/trailing icons remain centered.
+				ui.Row(c).Grow(1).MinWidth(0).AlignItems(ui.Center).Gap(textFieldGap).
+					Padding(dm.filledTopPad*scaleUp, 0, 0, 0).
+					Children(buildInputGroup)
+			} else {
+				buildInputGroup()
+			}
 			if o.TrailingIcon != nil {
 				if o.OnTrailing != nil {
 					hasTrailing = true
-					trailing = ui.ButtonBase(c.Key(textFieldTrailingKey{})).
+					trailing = ui.ButtonBase(c.Key(animChan4)).
 						DimDisabled(false).
 						FocusRing(false).
 						Size(dm.trailingBtn, dm.trailingBtn).
 						Shrink(0).
 						Disabled(disabled).
 						Label(labelOr(o.TrailingLabel, "Action")).
-						TextColor(variationInk)
-					attachRippleWithTheme(th, trailing, StateLayerOptions{
-						Color:    variationInk,
+						TextColor(trailingInk)
+					attachRippleWithContext(c, th, trailing, StateLayerOptions{
+						Color:    trailingInk,
 						Radius:   dm.trailingBtn / 2,
 						Disabled: disabled,
 					})
 					trailing.Children(func() {
-						drawIconBox(c, o.TrailingIcon, dm.iconSize, variationInk)
+						drawIconBox(c, o.TrailingIcon, dm.iconSize, trailingInk)
 					})
 				} else {
-					drawIconBox(c, o.TrailingIcon, dm.iconSize, variationInk)
+					drawIconBox(c, o.TrailingIcon, dm.iconSize, trailingInk)
 				}
 			}
 		})
@@ -316,9 +332,9 @@ func buildTextField(c *ui.Context, value *string, multiline bool, o TextFieldOpt
 
 	var labelT float32
 	if o.Label != "" {
-		labelT = clampF32(animateValue(field, textFieldLabelKey{}, boolFloat(floated), spatial, th.ReduceMotion), 0, 1.1)
+		labelT = clampF32(animateValue(field, animChan1, boolFloat(floated), spatial, th.ReduceMotion), 0, 1.1)
 	}
-	indicatorT := clampF32(animateValue(field, textFieldIndicatorKey{}, boolFloat(focused && !disabled), effects, th.ReduceMotion), 0, 1)
+	indicatorT := clampF32(animateValue(field, animChan2, boolFloat(focused && !disabled), effects, th.ReduceMotion), 0, 1)
 
 	if field.Clicked() && !disabled {
 		// Any part of the field, its padding and its floating label too,
@@ -334,7 +350,8 @@ func buildTextField(c *ui.Context, value *string, multiline bool, o TextFieldOpt
 
 	// The label anchor is the content start, shifted past a leading icon.
 	labelInset := dm.pad
-	if o.LeadingIcon != nil {
+	hasLeadIcon := o.LeadingIcon != nil
+	if hasLeadIcon {
 		labelInset += dm.iconSize + textFieldGap
 	}
 	bg := cs.SurfaceContainerHighest
@@ -344,25 +361,26 @@ func buildTextField(c *ui.Context, value *string, multiline bool, o TextFieldOpt
 	if disabled && !outlined {
 		bg = cs.OnSurface.Alpha(float32(tokens.DisabledContainerOpacity))
 	}
-	borderInk := cs.Outline
-	switch {
-	case disabled:
-		borderInk = cs.OnSurface.Alpha(float32(tokens.DisabledContainerOpacity))
-	case o.Error:
-		borderInk = cs.Error
-	case focused:
-		borderInk = cs.Primary
-	}
-	// The label is OnSurfaceVariant at rest, Primary over a focused field, and
-	// Error while the value is invalid; disabled fields use 38% content.
-	labelColor := cs.OnSurfaceVariant
-	switch {
-	case disabled:
-		labelColor = cs.OnSurface.Alpha(float32(tokens.DisabledContentOpacity))
-	case o.Error:
-		labelColor = cs.Error
-	case focused:
-		labelColor = cs.Primary
+	restBorderInk := cs.Outline
+	hoverBorderInk := cs.OnSurface
+	activeBorderInk := cs.Primary
+	restLabelInk := cs.OnSurfaceVariant
+	activeLabelInk := cs.Primary
+	if disabled {
+		restBorderInk = cs.OnSurface.Alpha(float32(tokens.DisabledContainerOpacity))
+		hoverBorderInk = restBorderInk
+		activeBorderInk = restBorderInk
+		restLabelInk = cs.OnSurface.Alpha(float32(tokens.DisabledContentOpacity))
+		activeLabelInk = restLabelInk
+	} else if o.Error {
+		restBorderInk = cs.Error
+		hoverBorderInk = cs.OnErrorContainer
+		if hoverBorderInk.A == 0 {
+			hoverBorderInk = cs.Error
+		}
+		activeBorderInk = cs.Error
+		restLabelInk = cs.Error
+		activeLabelInk = cs.Error
 	}
 	label := o.Label
 	style := labelStyle
@@ -374,18 +392,68 @@ func buildTextField(c *ui.Context, value *string, multiline bool, o TextFieldOpt
 	if outlined && label != "" {
 		outline = localDrawPath(field)
 	}
+	hoverSt := localHaloFade(field, animChan0)
+	thReduce := th.ReduceMotion
 	field.Draw(func(p *ui.Painter, r ui.Rect) {
 		if r.W <= 0 || r.H <= 0 {
 			return
 		}
+		live := field.Valid()
+		hovered := false
+		if live && !disabled && !focused {
+			hovered = field.Hovered()
+		}
+		targetHover := float32(0)
+		if hovered {
+			targetHover = 1
+		}
+		reduceMotion := thReduce || p.Preferences().ReduceMotion
+		var hoverT float32
+		var hoverMore bool
+		if live {
+			hoverT, hoverMore = hoverSt.step(targetHover, p.Now(), reduceMotion)
+		} else {
+			hoverT = hoverSt.alpha
+		}
+
+		// Smoothly interpolate border, stroke weight, and label color with
+		// focus indicator progress and pointer hover.
+		curBorderInk := restBorderInk
+		if hoverT > 0.001 && !disabled {
+			curBorderInk = restBorderInk.MixOklab(hoverBorderInk, hoverT)
+		}
+		if indicatorT > 0.001 && !disabled {
+			curBorderInk = curBorderInk.MixOklab(activeBorderInk, indicatorT)
+		}
+		curLabelInk := restLabelInk
+		if indicatorT > 0.001 && !disabled {
+			curLabelInk = restLabelInk.MixOklab(activeLabelInk, indicatorT)
+		}
+
 		if !outlined {
 			radii := [4]float32{textFieldRadius, textFieldRadius, 0, 0}
 			p.FillRadii(ui.Rect{X: r.X, Y: r.Y, W: r.W, H: r.H}, radii, bg)
+			if hoverT > 0.001 && !disabled {
+				p.FillRadii(ui.Rect{X: r.X, Y: r.Y, W: r.W, H: r.H}, radii, cs.OnSurface.Alpha(float32(tokens.StateHoverOpacity)*hoverT))
+			}
 		}
+
+		clampedLabelT := clampF32(labelT, 0, 1)
 		sc := 1 - (1-textFieldFloatScale)*labelT
-		anchor := r.X + labelInset
+		// In Outlined fields with a leading icon, the floating label glides
+		// horizontally back to the container start padding as it rises to the
+		// top border; Filled labels stay aligned with the input text.
+		curInset := labelInset
+		floatInset := labelInset
+		if outlined && hasLeadIcon {
+			floatInset = dm.pad
+			curInset = labelInset + (dm.pad-labelInset)*clampedLabelT
+		}
+		anchor := r.X + curInset
+		floatAnchor := r.X + floatInset
 		if rtl {
-			anchor = r.X + r.W - labelInset
+			anchor = r.X + r.W - curInset
+			floatAnchor = r.X + r.W - floatInset
 		}
 		floatCenter := r.Y + floatOffset
 		if outlined {
@@ -400,9 +468,9 @@ func buildTextField(c *ui.Context, value *string, multiline bool, o TextFieldOpt
 			if hasEndIcon {
 				restEndInset += dm.iconSize + textFieldGap
 			}
-			endInset := restEndInset + (dm.pad-restEndInset)*clampF32(labelT, 0, 1)
-			maxLabelW := max(0, r.W-labelInset-endInset)
-			drawLabel, labelW = fitTextFieldLabel(p, label, labelColor, style, maxLabelW, sc)
+			endInset := restEndInset + (dm.pad-restEndInset)*clampedLabelT
+			maxLabelW := max(0, r.W-curInset-endInset)
+			drawLabel, labelW = fitTextFieldLabel(p, label, curLabelInk, style, maxLabelW, sc)
 			clipX := anchor
 			if rtl {
 				clipX = r.X + endInset
@@ -413,58 +481,69 @@ func buildTextField(c *ui.Context, value *string, multiline bool, o TextFieldOpt
 		}
 
 		if outlined {
-			if drawLabel != "" && labelT > 0.001 {
-				notchW := labelW*sc + 2*textFieldNotchPad*labelT
-				var notchStart, notchEnd float32
+			baseStrokeW := float32(1)
+			if isErr && !disabled {
+				baseStrokeW = 2
+			}
+			strokeW := baseStrokeW + (2-baseStrokeW)*indicatorT
+			notchOpen := textFieldSmoothstep(0.22, 0.85, clampedLabelT)
+			if drawLabel != "" && notchOpen > 0.001 {
+				finalNotchW := labelW*textFieldFloatScale + 2*textFieldNotchPad
+				var targetStart, targetEnd float32
 				if rtl {
-					notchEnd = anchor + textFieldNotchPad*labelT
-					notchStart = notchEnd - notchW
+					targetEnd = floatAnchor + textFieldNotchPad
+					targetStart = targetEnd - finalNotchW
 				} else {
-					notchStart = anchor - textFieldNotchPad*labelT
-					notchEnd = notchStart + notchW
+					targetStart = floatAnchor - textFieldNotchPad
+					targetEnd = targetStart + finalNotchW
 				}
-				notchStart = max(notchStart, r.X+textFieldRadius)
-				notchEnd = min(notchEnd, r.X+r.W-textFieldRadius)
+				targetStart = max(targetStart, r.X+textFieldRadius)
+				targetEnd = min(targetEnd, r.X+r.W-textFieldRadius)
+				notchCenter := (targetStart + targetEnd) * 0.5
+				halfW := (targetEnd - targetStart) * 0.5 * notchOpen
+				notchStart := notchCenter - halfW
+				notchEnd := notchCenter + halfW
 				if notchEnd > notchStart {
-					strokeW := outlinedWidth(isErr, focused)
 					if path := outlinedFieldPath(outline, r, textFieldRadius, strokeW, notchStart, notchEnd); path != nil {
-						p.StrokePath(path, strokeW, borderInk)
+						p.StrokePath(path, strokeW, curBorderInk)
 					} else {
-						p.Stroke(r, borderInk, textFieldRadius, strokeW)
+						p.Stroke(r, curBorderInk, textFieldRadius, strokeW)
 					}
 				} else {
-					p.Stroke(r, borderInk, textFieldRadius, outlinedWidth(isErr, focused))
+					p.Stroke(r, curBorderInk, textFieldRadius, strokeW)
 				}
 			} else {
-				p.Stroke(r, borderInk, textFieldRadius, outlinedWidth(isErr, focused))
+				p.Stroke(r, curBorderInk, textFieldRadius, strokeW)
 			}
 		} else {
 			indicator := cs.OnSurfaceVariant
+			if hoverT > 0.001 && !disabled {
+				indicator = indicator.MixOklab(cs.OnSurface, hoverT)
+			}
 			if disabled {
 				indicator = cs.OnSurface.Alpha(float32(tokens.DisabledContentOpacity))
 			}
-			h := float32(1)
-			if !isErr {
-				p.Fill(ui.Rect{X: r.X, Y: r.Y + r.H - h, W: r.W, H: h}, indicator, 0)
-				if indicatorT > 0.001 {
-					activeW := r.W * indicatorT
-					p.Fill(ui.Rect{
-						X: r.X + (r.W-activeW)/2,
-						Y: r.Y + r.H - 2,
-						W: activeW,
-						H: 2,
-					}, disabledContent(disabled, cs.Primary), 0)
-				}
-			} else {
-				h = 1
-				if focused {
-					h = 2
-				}
-				p.Fill(ui.Rect{X: r.X, Y: r.Y + r.H - h, W: r.W, H: h}, disabledContent(disabled, cs.Error), 0)
+			activeInk := cs.Primary
+			if isErr {
+				indicator = disabledContent(disabled, cs.Error)
+				activeInk = indicator
+			}
+			p.Fill(ui.Rect{X: r.X, Y: r.Y + r.H - 1, W: r.W, H: 1}, indicator, 0)
+			if indicatorT > 0.001 {
+				activeW := r.W * indicatorT
+				p.Fill(ui.Rect{
+					X: r.X + (r.W-activeW)/2,
+					Y: r.Y + r.H - 2,
+					W: activeW,
+					H: 2,
+				}, disabledContent(disabled, activeInk), 0)
 			}
 		}
 		if drawLabel != "" {
-			drawTextFieldLabel(p, r, drawLabel, labelW, labelColor, style, labelT, anchor, floatCenter, restCenterOffset, clipR, rtl)
+			drawTextFieldLabel(p, r, drawLabel, labelW, curLabelInk, style, labelT, anchor, floatCenter, restCenterOffset, clipR, rtl)
+		}
+		if live && hoverMore {
+			p.After(16 * time.Millisecond)
 		}
 	})
 
@@ -599,13 +678,16 @@ func drawTextFieldLabel(p *ui.Painter, r ui.Rect, text string, w float32, ink ui
 	paintLabel()
 }
 
-// outlinedWidth returns a text field border's stroke width: 2 DIP while
-// focused or in error, 1 DIP otherwise.
-func outlinedWidth(err, focused bool) float32 {
-	if err || focused {
-		return 2
+// textFieldSmoothstep maps x smoothly from 0 at edge0 to 1 at edge1.
+func textFieldSmoothstep(edge0, edge1, x float32) float32 {
+	if edge1 <= edge0 {
+		if x >= edge1 {
+			return 1
+		}
+		return 0
 	}
-	return 1
+	t := clampF32((x-edge0)/(edge1-edge0), 0, 1)
+	return t * t * (3 - 2*t)
 }
 
 // disabledContent returns c, faded to MD3E's disabled content opacity when
@@ -651,16 +733,18 @@ func outlinedFieldPath(p *ui.Path, r ui.Rect, radius, strokeW, notchStart, notch
 	p.LineTo(x0, y0+innerR)
 	p.CubeTo(x0, y0+innerR-k, x0+innerR-k, y0, x0+innerR, y0)
 	p.LineTo(notchStart, y0)
+	p.Cap(ui.ButtCap)
 	return p
 }
 
 type textFieldDensityMetrics struct {
-	height      float32
-	pad         float32
-	iconSize    float32
-	trailingBtn float32
-	floatOffset float32
-	textRole    tokens.TypeRole
+	height       float32
+	pad          float32
+	iconSize     float32
+	trailingBtn  float32
+	floatOffset  float32
+	filledTopPad float32
+	textRole     tokens.TypeRole
 }
 
 func textFieldMetricsForDensity(d tokens.Density) textFieldDensityMetrics {
@@ -668,30 +752,33 @@ func textFieldMetricsForDensity(d tokens.Density) textFieldDensityMetrics {
 	switch d.Normalize() {
 	case tokens.DensityDesktop:
 		return textFieldDensityMetrics{
-			height:      h,
-			pad:         12,
-			iconSize:    20,
-			trailingBtn: 32,
-			floatOffset: 9,
-			textRole:    tokens.BodyMedium,
+			height:       h,
+			pad:          12,
+			iconSize:     20,
+			trailingBtn:  32,
+			floatOffset:  9,
+			filledTopPad: 10,
+			textRole:     tokens.BodyMedium,
 		}
 	case tokens.DensityCompact:
 		return textFieldDensityMetrics{
-			height:      h,
-			pad:         10,
-			iconSize:    18,
-			trailingBtn: 28,
-			floatOffset: 8,
-			textRole:    tokens.BodyMedium,
+			height:       h,
+			pad:          10,
+			iconSize:     18,
+			trailingBtn:  28,
+			floatOffset:  8,
+			filledTopPad: 8,
+			textRole:     tokens.BodyMedium,
 		}
 	default:
 		return textFieldDensityMetrics{
-			height:      h,
-			pad:         textFieldPad,
-			iconSize:    textFieldIconSize,
-			trailingBtn: 40,
-			floatOffset: 12,
-			textRole:    tokens.BodyLarge,
+			height:       h,
+			pad:          textFieldPad,
+			iconSize:     textFieldIconSize,
+			trailingBtn:  40,
+			floatOffset:  12,
+			filledTopPad: 14,
+			textRole:     tokens.BodyLarge,
 		}
 	}
 }

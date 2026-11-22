@@ -26,6 +26,9 @@ type BadgeOptions struct {
 	ContainerColor ui.Color
 	// ContentColor overrides the OnError content color.
 	ContentColor ui.Color
+	// CutoutColor optionally paints a crisp 1.5 DIP outer separation halo
+	// around the badge when overlaid on saturated icons or avatars.
+	CutoutColor ui.Color
 }
 
 // badgeMetrics are the Material Design 3 badge sizes in DIP.
@@ -75,9 +78,15 @@ func Badge(c *ui.Context, text string, opts ...BadgeOptions) ui.Element {
 		PaddingX(4).Radius(largeBadgeHigh / 2).
 		Background(container).TextColor(content).
 		Justify(ui.Center).AlignItems(ui.Center)
+	if o.CutoutColor.A > 0 {
+		el.Border(1.5, o.CutoutColor)
+	}
 	applyTypeStyleWithTheme(th, el, tokens.LabelSmall)
 	el.Children(func() {
-		ui.Text(c, label).NoWrap()
+		txt := TabularNums(ui.Text(c, label).NoWrap())
+		if len(label) == 1 {
+			txt.LetterSpacing(0)
+		}
 	})
 	if o.Label != "" {
 		el.Label(o.Label)
@@ -113,6 +122,9 @@ func SmallBadge(c *ui.Context, opts ...BadgeOptions) ui.Element {
 	}
 	el := ui.Box(c).Size(smallBadgeSide, smallBadgeSide).Shrink(0).
 		Radius(smallBadgeSide / 2).Background(container)
+	if o.CutoutColor.A > 0 {
+		el.Border(1.5, o.CutoutColor)
+	}
 	if o.Label != "" {
 		el.Label(o.Label)
 	}

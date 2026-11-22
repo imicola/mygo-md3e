@@ -93,6 +93,7 @@ type (
 	imageSkeletonKey   struct{}
 	imageRetryBtnKey   struct{}
 	imageCustomSlotKey struct{}
+	imagePolyBorderKey struct{}
 )
 
 type imageFadeState struct {
@@ -184,11 +185,12 @@ func Image(c *ui.Context, src ui.ImageSource, opts ...ImageOptions) ui.Element {
 			o.OnClick()
 		}
 		attachRippleWithContext(c, th, host, StateLayerOptions{
-			Color:    cs.OnSurface,
-			Radii:    radii,
-			HasRadii: radii != [4]float32{},
-			Shape:    poly,
-			Disabled: disabled,
+			Color:          cs.OnSurface,
+			Radii:          radii,
+			HasRadii:       radii != [4]float32{},
+			Shape:          poly,
+			FocusHaloColor: cs.Surface,
+			Disabled:       disabled,
 		})
 	} else if o.Label != "" {
 		host.Role(ui.RoleImage).Label(o.Label)
@@ -325,6 +327,19 @@ func Image(c *ui.Context, src ui.ImageSource, opts ...ImageOptions) ui.Element {
 			}
 		})
 
+		paintBorderOverlay := func() {
+			if borderW > 0 && borderCol.A > 0 {
+				// Paint the polygon stroke in a PassThrough child overlay rather than
+				// host.DrawOver so interactive polygon images keep their StateLayer/Ripple.
+				ui.Box(c.Key(imagePolyBorderKey{})).Absolute().Fill().PassThrough().Draw(func(p *ui.Painter, r ui.Rect) {
+					if !isPositiveFiniteF32(r.W) || !isPositiveFiniteF32(r.H) {
+						return
+					}
+					p.StrokePath(poly.WriteTo(scratch, insetRect(r, borderW*0.5)), borderW, borderCol)
+				})
+			}
+		}
+
 		if hasImage {
 			host.Children(func() {
 				layer := ui.Box(c.Key(imageChildKey{})).Absolute().Fill().PassThrough()
@@ -337,26 +352,30 @@ func Image(c *ui.Context, src ui.ImageSource, opts ...ImageOptions) ui.Element {
 					}
 					shape.ClipShapeTo(p, scratch, poly, r, func() {
 						drawImageInRect(p, src, r, fit, objPos, o.HasObjectPosition)
-						if o.Grayscale {
+						if disabled {
+							p.Fill(r, cs.Surface.Alpha(0.38), 0)
+						} else if o.Grayscale {
 							p.Fill(r, cs.Surface.Alpha(0.28), 0)
 						}
 					})
 				})
+				paintBorderOverlay()
 			})
 		} else if isLoading && o.LoadingContent != nil {
 			host.Clip().Children(func() {
 				ui.Box(c.Key(imageCustomSlotKey{})).Absolute().Fill().Center().Children(o.LoadingContent)
+				paintBorderOverlay()
 			})
 		} else if isError {
 			buildImageErrorSlot(c, th, host, o, w, h, true)
-		}
-
-		if borderW > 0 && borderCol.A > 0 {
-			host.DrawOver(func(p *ui.Painter, r ui.Rect) {
-				if !isPositiveFiniteF32(r.W) || !isPositiveFiniteF32(r.H) {
-					return
-				}
-				p.StrokePath(poly.WriteTo(scratch, r), borderW, borderCol)
+			if borderW > 0 && borderCol.A > 0 {
+				host.Children(func() {
+					paintBorderOverlay()
+				})
+			}
+		} else if borderW > 0 && borderCol.A > 0 {
+			host.Children(func() {
+				paintBorderOverlay()
 			})
 		}
 		return host

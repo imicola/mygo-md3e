@@ -99,6 +99,8 @@ func TestDatePickerClickAndToday(t *testing.T) {
 		t.Fatal("the chosen day does not read as selected")
 	}
 	info := cellInfo(t, tt, pickerDayLabel(target))
+	tt.Move(4, 4)
+	tt.Advance(250 * time.Millisecond)
 	px := tt.Image().RGBAAt(int(info.Bounds.X)+8, int(info.Bounds.Y+info.Bounds.H/2))
 	if !colorMatches(px, cs.Primary, 24) {
 		t.Fatalf("the chosen day's circle pixel %+v is not Primary %+v", px, rgbOf(cs.Primary))
