@@ -19,6 +19,50 @@ func solidImageNRGBA(w, h int, c color.NRGBA) *image.NRGBA {
 	return img
 }
 
+type countedImage struct {
+	image.Image
+	bounds image.Rectangle
+	calls  int
+}
+
+func (img *countedImage) Bounds() image.Rectangle { return img.bounds }
+
+func (img *countedImage) At(x, y int) color.Color {
+	if !image.Pt(x, y).In(img.bounds) {
+		panic("sample outside image bounds")
+	}
+	img.calls++
+	return img.Image.At(x, y)
+}
+
+func TestImageSamplingRespectsBudget(t *testing.T) {
+	const limit = 16384
+	ink := color.NRGBA{R: 120, G: 40, B: 200, A: 255}
+	for _, bounds := range []image.Rectangle{
+		image.Rect(0, 0, 1, 1000000),
+		image.Rect(-11, 7, 1000000-11, 10),
+		image.Rect(11, 20, 11+1024, 20+1024),
+		image.Rect(math.MaxInt-1000000, -32, math.MaxInt, -31),
+	} {
+		img := &countedImage{Image: image.NewUniform(ink), bounds: bounds}
+		samples := sampleImagePixels(img)
+		if len(samples) != 1 || samples[0].count != img.calls || img.calls == 0 || img.calls > limit {
+			t.Errorf("%v: visited %d pixels and got %v, want 1..%d visits of the same color", bounds, img.calls, samples, limit)
+		}
+		if got, want := SeedFromImage(img), SeedFromImage(img); got != want {
+			t.Errorf("%v: non-deterministic seed %v, %v", bounds, got, want)
+		}
+	}
+	// The direct NRGBA path uses the same grid and respects nonzero origins.
+	raw := image.NewNRGBA(image.Rect(-8, 3, -7, 100003))
+	for y := raw.Rect.Min.Y; y < raw.Rect.Max.Y; y++ {
+		raw.SetNRGBA(-8, y, ink)
+	}
+	if got := sampleImagePixels(raw); len(got) != 1 || got[0].count > limit {
+		t.Errorf("NRGBA fast path exceeded its sampling budget: %v", got)
+	}
+}
+
 func TestSeedFromImageNilEmptyTransparentMonochrome(t *testing.T) {
 	if got := SeedFromImage(nil); got != defaultExtractSeed {
 		t.Fatalf("nil image seed = %v, want %v", got, defaultExtractSeed)

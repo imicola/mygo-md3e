@@ -84,6 +84,7 @@ func SeedFromImage(img image.Image, opts ...ExtractOptions) ui.Color {
 // PaletteFromImage extracts up to Desired diverse, Material-scored seed colors
 // ordered from highest score to lowest. Always returns at least one color
 // (Fallback when no valid candidates survive).
+// The sampling grid visits at most 16,384 pixels, including for elongated images.
 func PaletteFromImage(img image.Image, opts ...ExtractOptions) []ui.Color {
 	o := normalizeExtractOptions(opts...)
 	pixels := sampleImagePixels(img)
@@ -126,22 +127,36 @@ func sampleImagePixels(img image.Image) []rgbCount {
 		return nil
 	}
 
-	step := 1
-	total := int64(w) * int64(h)
-	if total > extractMaxSamples {
-		step = max(1, int(math.Ceil(math.Sqrt(float64(total)/float64(extractMaxSamples)))))
+	stepX, stepY := 1, 1
+	if area := float64(w) * float64(h); area > extractMaxSamples {
+		stepX = int(math.Ceil(math.Sqrt(area / extractMaxSamples)))
+		stepY = stepX
+	}
+	cols, rows := 1+(w-1)/stepX, 1+(h-1)/stepY
+	if cols > extractMaxSamples/rows {
+		// Rounding each axis to a whole sample can put the grid over budget.
+		// Keep the short axis intact and increase the stride on the long axis.
+		if w >= h {
+			stepX = 1 + (w-1)/(extractMaxSamples/rows)
+			cols = 1 + (w-1)/stepX
+		} else {
+			stepY = 1 + (h-1)/(extractMaxSamples/cols)
+			rows = 1 + (h-1)/stepY
+		}
 	}
 
-	counts := make(map[uint32]int, min(int(total), 4096))
+	counts := make(map[uint32]int, min(cols*rows, 4096))
 	addOpaque := func(r, g, b uint8) {
 		counts[packRGB(r, g, b)]++
 	}
 
 	switch m := img.(type) {
 	case *image.RGBA:
-		for y := bounds.Min.Y; y < bounds.Max.Y; y += step {
+		for row := range rows {
+			y := bounds.Min.Y + row*stepY
 			rowOff := m.PixOffset(bounds.Min.X, y)
-			for x := bounds.Min.X; x < bounds.Max.X; x += step {
+			for col := range cols {
+				x := bounds.Min.X + col*stepX
 				off := rowOff + (x-bounds.Min.X)*4
 				a := m.Pix[off+3]
 				if a < 128 {
@@ -158,9 +173,11 @@ func sampleImagePixels(img image.Image) []rgbCount {
 			}
 		}
 	case *image.NRGBA:
-		for y := bounds.Min.Y; y < bounds.Max.Y; y += step {
+		for row := range rows {
+			y := bounds.Min.Y + row*stepY
 			rowOff := m.PixOffset(bounds.Min.X, y)
-			for x := bounds.Min.X; x < bounds.Max.X; x += step {
+			for col := range cols {
+				x := bounds.Min.X + col*stepX
 				off := rowOff + (x-bounds.Min.X)*4
 				if m.Pix[off+3] < 128 {
 					continue
@@ -169,8 +186,10 @@ func sampleImagePixels(img image.Image) []rgbCount {
 			}
 		}
 	case *image.YCbCr:
-		for y := bounds.Min.Y; y < bounds.Max.Y; y += step {
-			for x := bounds.Min.X; x < bounds.Max.X; x += step {
+		for row := range rows {
+			y := bounds.Min.Y + row*stepY
+			for col := range cols {
+				x := bounds.Min.X + col*stepX
 				yi := m.YOffset(x, y)
 				ci := m.COffset(x, y)
 				r, g, b := color.YCbCrToRGB(m.Y[yi], m.Cb[ci], m.Cr[ci])
@@ -187,9 +206,11 @@ func sampleImagePixels(img image.Image) []rgbCount {
 				palValid[i] = true
 			}
 		}
-		for y := bounds.Min.Y; y < bounds.Max.Y; y += step {
+		for row := range rows {
+			y := bounds.Min.Y + row*stepY
 			rowOff := m.PixOffset(bounds.Min.X, y)
-			for x := bounds.Min.X; x < bounds.Max.X; x += step {
+			for col := range cols {
+				x := bounds.Min.X + col*stepX
 				idx := int(m.Pix[rowOff+(x-bounds.Min.X)])
 				if idx < len(palValid) && palValid[idx] {
 					counts[palRGB[idx]]++
@@ -197,16 +218,20 @@ func sampleImagePixels(img image.Image) []rgbCount {
 			}
 		}
 	case *image.Gray:
-		for y := bounds.Min.Y; y < bounds.Max.Y; y += step {
+		for row := range rows {
+			y := bounds.Min.Y + row*stepY
 			rowOff := m.PixOffset(bounds.Min.X, y)
-			for x := bounds.Min.X; x < bounds.Max.X; x += step {
+			for col := range cols {
+				x := bounds.Min.X + col*stepX
 				v := m.Pix[rowOff+(x-bounds.Min.X)]
 				addOpaque(v, v, v)
 			}
 		}
 	default:
-		for y := bounds.Min.Y; y < bounds.Max.Y; y += step {
-			for x := bounds.Min.X; x < bounds.Max.X; x += step {
+		for row := range rows {
+			y := bounds.Min.Y + row*stepY
+			for col := range cols {
+				x := bounds.Min.X + col*stepX
 				r16, g16, b16, a16 := img.At(x, y).RGBA()
 				if a16 < 0x8000 {
 					continue
