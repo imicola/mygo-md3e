@@ -204,7 +204,7 @@ func buildCheckbox(c *ui.Context, el ui.Element, on, mixed bool, o CheckboxOptio
 				haloSt.reset()
 			}
 			halo, needFrame := haloSt.step(targetHalo, p.Now(), thReduceMotion || p.Preferences().ReduceMotion)
-			if needFrame {
+			if needFrame && rectIntersects(r, p.Visible()) {
 				p.After(16 * time.Millisecond)
 			}
 			paintCfg := paintSnap

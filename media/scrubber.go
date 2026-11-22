@@ -176,7 +176,7 @@ func mediaScrubber(c *ui.Context, o scrubberOptions) ui.Element {
 	}
 
 	sl.Draw(func(p *ui.Painter, r ui.Rect) {
-		if !isPositiveFiniteF32(r.W) || !isPositiveFiniteF32(r.H) {
+		if !isPositiveFiniteF32(r.W) || !isPositiveFiniteF32(r.H) || !rectIntersects(r, p.Visible()) {
 			return
 		}
 		trackLen := r.W - 2*scrubberPadX
@@ -188,7 +188,6 @@ func mediaScrubber(c *ui.Context, o scrubberOptions) ui.Element {
 		cy := r.Y + r.H*0.5
 
 		live := sl.Valid()
-		vis := rectIntersects(r, p.Visible())
 		red := snap.reduce || p.Preferences().ReduceMotion
 
 		curFrac := st.lastFrac
@@ -224,7 +223,7 @@ func mediaScrubber(c *ui.Context, o scrubberOptions) ui.Element {
 				}
 				if math.Abs(float64(targetW-curThumbW)) <= 0.02 {
 					curThumbW = targetW
-				} else if vis {
+				} else {
 					p.AnimationFrame()
 				}
 			}
@@ -237,9 +236,7 @@ func mediaScrubber(c *ui.Context, o scrubberOptions) ui.Element {
 				elapsed := max(now.Sub(st.waveStart), 0)
 				curPhase = (float64(elapsed%scrubberWavePeriod) / float64(scrubberWavePeriod)) * 2 * math.Pi
 				st.lastPhase = curPhase
-				if vis {
-					p.AnimationFrame()
-				}
+				p.AnimationFrame()
 			}
 		}
 

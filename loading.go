@@ -130,24 +130,27 @@ func sameLoadingPolys(a, b []*shape.RoundedPolygon) bool {
 	return true
 }
 
-// loadingClock tracks the indicator's start and any pause, so resuming plays
-// on from the shape it froze on rather than jumping ahead.
+// loadingClock advances from the last painted phase. After a pause, the
+// first visible frame uses that phase again.
 type loadingClock struct {
-	start       time.Time
-	paused      bool
-	pausedAt    time.Time
-	offset      time.Duration
+	lastAt      time.Time
 	lastElapsed time.Duration
 }
 
-// elapsed returns how much animation time has passed at now.
-func (c *loadingClock) elapsed(now time.Time) time.Duration {
-	end := now
-	if c.paused {
-		end = c.pausedAt
+func (c *loadingClock) tick(now time.Time, running bool) time.Duration {
+	if !running {
+		c.lastAt = time.Time{}
+		return c.lastElapsed
 	}
-	d := end.Sub(c.start) - c.offset
-	return max(d, 0)
+	if !c.lastAt.IsZero() {
+		// MyGo can cull the draw callback completely. Treat a gap of more
+		// than 100 ms between requested frames as an interruption.
+		if dt := now.Sub(c.lastAt); dt > 0 && dt <= 100*time.Millisecond {
+			c.lastElapsed += dt
+		}
+	}
+	c.lastAt = now
+	return c.lastElapsed
 }
 
 // LoadingIndicator builds a Material Design 3 Expressive shape-morphing loading
@@ -156,8 +159,8 @@ func (c *loadingClock) elapsed(now time.Time) time.Duration {
 // turning 45° per step around its center. LoadingStandard paints the shape in
 // Primary with no container; LoadingContained paints a PrimaryContainer circle
 // with the shape inset in OnPrimaryContainer. Paused freezes it, and ReduceMotion
-// (the theme's or the desktop's) shows the first shape still, asking for no
-// frames.
+// (the theme's or the desktop's) shows the first shape still. The indicator
+// pauses while outside the viewport.
 //
 // It reports assistive technology a progress indicator of unknown length,
 // named by Label:
@@ -202,19 +205,10 @@ func LoadingIndicator(c *ui.Context, opts ...LoadingOptions) ui.Element {
 		st.rebuild(polys)
 	}
 
-	clock := ui.Local(el, loadingClockKey{}, func() loadingClock {
-		return loadingClock{start: c.Now()}
-	})
+	clock := ui.Local(el, loadingClockKey{}, func() loadingClock { return loadingClock{} })
 	paused := o.Paused || disabled
-	if paused != clock.paused {
-		if paused {
-			clock.pausedAt = c.Now()
-		} else {
-			clock.offset += c.Now().Sub(clock.pausedAt)
-			clock.pausedAt = time.Time{}
-		}
-		clock.paused = paused
-	}
+	thReduce := th.ReduceMotion
+	contained := o.Style == LoadingContained
 
 	cs := th.Colors
 	container := cs.PrimaryContainer
@@ -233,19 +227,21 @@ func LoadingIndicator(c *ui.Context, opts ...LoadingOptions) ui.Element {
 	morphSpring := motion.Spring(th.Motion, motion.SlowSpatial)
 
 	el.Draw(func(p *ui.Painter, r ui.Rect) {
-		if r.W <= 0 || r.H <= 0 || len(st.morphs) == 0 {
+		if !isPositiveFiniteF32(r.W) || !isPositiveFiniteF32(r.H) || len(st.morphs) == 0 {
 			return
 		}
 		live := el.Valid()
-		reduceMotion := th.ReduceMotion || p.Preferences().ReduceMotion
+		visible := rectIntersects(r, p.Visible())
+		reduceMotion := thReduce || p.Preferences().ReduceMotion
+		running := visible && !paused && !reduceMotion && len(st.morphs) > 1
 		elapsed := clock.lastElapsed
 		if live {
-			elapsed = clock.elapsed(p.Now())
-			if reduceMotion {
-				elapsed = 0
-			}
-			clock.lastElapsed = elapsed
-		} else if reduceMotion {
+			elapsed = clock.tick(p.Now(), running)
+		}
+		if !visible {
+			return
+		}
+		if reduceMotion {
 			elapsed = 0
 		}
 
@@ -268,7 +264,7 @@ func LoadingIndicator(c *ui.Context, opts ...LoadingOptions) ui.Element {
 		graphic := ui.Rect{X: cx - gside/2, Y: cy - gside/2, W: gside, H: gside}
 
 		draw := func() {
-			if o.Style == LoadingContained && container.A > 0 {
+			if contained && container.A > 0 {
 				p.Fill(circle, container, side/2)
 			}
 			path := st.morphs[step%len(st.morphs)].AsPath(progress, graphic)
@@ -279,13 +275,13 @@ func LoadingIndicator(c *ui.Context, opts ...LoadingOptions) ui.Element {
 				p.FillPath(path, ink)
 			})
 		}
-		if o.Style == LoadingContained {
+		if contained {
 			p.Clip(circle, side/2, draw)
 		} else {
 			p.Clip(r, 0, draw)
 		}
 
-		if live && !reduceMotion && !clock.paused && !disabled && len(st.morphs) > 1 {
+		if live && running {
 			p.AnimationFrame()
 		}
 	})

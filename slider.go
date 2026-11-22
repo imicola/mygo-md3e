@@ -219,7 +219,7 @@ func Slider(c *ui.Context, value *float64, lo, hi float64, opts ...SliderOptions
 			haloSt.reset()
 		}
 		alpha, needFrame := haloSt.step(targetHalo, p.Now(), thReduceMotion || p.Preferences().ReduceMotion)
-		if needFrame {
+		if needFrame && rectIntersects(r, p.Visible()) {
 			p.After(16 * time.Millisecond)
 		}
 		paintCfg := paintSnap
@@ -777,7 +777,7 @@ func RangeSlider(c *ui.Context, low, high *float64, lo, hi float64, opts ...Rang
 		now := p.Now()
 		lowAlpha, lowNeed := halosSt.low.step(lowTarget, now, rm)
 		highAlpha, highNeed := halosSt.high.step(highTarget, now, rm)
-		if lowNeed || highNeed {
+		if (lowNeed || highNeed) && rectIntersects(r, p.Visible()) {
 			p.After(16 * time.Millisecond)
 		}
 		paintCfg := paintSnap

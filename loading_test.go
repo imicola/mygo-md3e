@@ -432,3 +432,49 @@ func TestLoadingIndicatorExitTransitionGhostStaysVisibleAndSettles(t *testing.T)
 		t.Fatalf("exiting LoadingIndicator ghost painted only %d differing pixels vs settled canvas", diff)
 	}
 }
+
+func TestLoadingIndicatorScrollPausesAndResumesPhase(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor)
+	tt := ui.NewTester(func(c *ui.Context) {
+		ThemeScope(c, th, func() {
+			ui.Scroll(c).Fill().Scrollbars(false).Background(canvasRGB).Children(func() {
+				ui.Column(c).Children(func() {
+					LoadingIndicator(c, LoadingOptions{Label: "Scroll loading", Size: 42})
+					ui.Box(c).Size(120, 320)
+				})
+			})
+		}).Fill()
+	}, 120, 100)
+
+	if !tt.FramePending() {
+		t.Fatal("visible loading indicator should request an animation frame")
+	}
+	tt.Advance(250 * time.Millisecond)
+	box := loadingInfo(t, tt, "Scroll loading").Bounds
+	before := tt.Image()
+	tt.Scroll(80, 50, 0, 180)
+	if tt.FramePending() {
+		t.Fatal("loading indicator requested a frame after scrolling out of view")
+	}
+	tt.Advance(2 * time.Second)
+	if tt.FramePending() {
+		t.Fatal("offscreen loading indicator requested a frame as time advanced")
+	}
+
+	tt.Scroll(80, 50, 0, -180)
+	if !tt.FramePending() {
+		t.Fatal("loading indicator should resume when scrolled back into view")
+	}
+	if got := indicatorBoxDiff(before, tt.Image(), box); got != 0 {
+		t.Fatalf("loading phase jumped across an offscreen pause: %d pixels changed", got)
+	}
+	tt.Advance(140 * time.Millisecond)
+	if got := indicatorBoxDiff(before, tt.Image(), box); got == 0 {
+		t.Fatal("loading phase did not advance after becoming visible")
+	}
+
+	tt.SetPreferences(ui.Preferences{ReduceMotion: true})
+	if tt.FramePending() {
+		t.Fatal("reduced motion should stop the loading animation on the first frame")
+	}
+}

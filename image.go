@@ -288,28 +288,25 @@ func Image(c *ui.Context, src ui.ImageSource, opts ...ImageOptions) ui.Element {
 		highlightCol := bg.Mix(cs.OnSurface, 0.08)
 
 		host.Draw(func(p *ui.Painter, r ui.Rect) {
-			if !isPositiveFiniteF32(r.W) || !isPositiveFiniteF32(r.H) {
+			if !rectIntersects(r, p.Visible()) {
 				return
 			}
 			path := poly.WriteTo(scratch, r)
 			if isLoading && o.LoadingContent == nil {
 				live := host.Valid()
-				vis := rectIntersects(r, p.Visible())
 				red := reduce || p.Preferences().ReduceMotion
 				pulse := float32(0)
 				if !red {
 					if live {
-						if vis {
-							now := p.Now()
-							if polyClock.start.IsZero() {
-								polyClock.start = now
-							}
-							elapsed := max(now.Sub(polyClock.start), 0)
-							phase := float64(elapsed%skeletonPulsePeriod) / float64(skeletonPulsePeriod)
-							pulse = float32(0.5 - 0.5*math.Cos(2*math.Pi*phase))
-							polyClock.lastPulse = pulse
-							p.AnimationFrame()
+						now := p.Now()
+						if polyClock.start.IsZero() {
+							polyClock.start = now
 						}
+						elapsed := max(now.Sub(polyClock.start), 0)
+						phase := float64(elapsed%skeletonPulsePeriod) / float64(skeletonPulsePeriod)
+						pulse = float32(0.5 - 0.5*math.Cos(2*math.Pi*phase))
+						polyClock.lastPulse = pulse
+						p.AnimationFrame()
 					} else {
 						pulse = polyClock.lastPulse
 					}

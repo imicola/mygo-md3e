@@ -175,7 +175,7 @@ func Switch(c *ui.Context, on *bool, opts ...SwitchOptions) ui.Element {
 				haloSt.reset()
 			}
 			halo, needFrame := haloSt.step(targetHalo, p.Now(), thReduceMotion || p.Preferences().ReduceMotion)
-			if needFrame {
+			if needFrame && rectIntersects(r, p.Visible()) {
 				p.After(16 * time.Millisecond)
 			}
 			paintCfg := paintSnap

@@ -226,7 +226,7 @@ func SnackbarHost(c *ui.Context, state *SnackbarState) ui.Element {
 				item.syncPause(now, item.hovered || item.focused)
 			}
 			sb.DrawOver(func(p *ui.Painter, r ui.Rect) {
-				if !sb.Valid() || item.exiting {
+				if !sb.Valid() || item.exiting || !rectIntersects(r, p.Visible()) {
 					return
 				}
 				item.hovered = sb.Hovered()

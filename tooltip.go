@@ -247,7 +247,7 @@ func RichTooltip(c *ui.Context, anchor ui.Element, opts ...RichTooltipOptions) u
 			if !anchor.Valid() || r.W <= 0 || r.H <= 0 {
 				return
 			}
-			st.anchorHover = !anchor.IsDisabled() && anchor.Hovered()
+			st.anchorHover = rectIntersects(r, p.Visible()) && !anchor.IsDisabled() && anchor.Hovered()
 			st.stepOpenHover(p, p.Now())
 		})
 	}
@@ -269,7 +269,7 @@ func RichTooltip(c *ui.Context, anchor ui.Element, opts ...RichTooltipOptions) u
 				Margin(0, 0, 8, 0).AttachEdgeMargin(8)
 			st.panelFocused = panel.FocusWithin()
 			panel.DrawOver(func(p *ui.Painter, r ui.Rect) {
-				if !panel.Valid() || r.W <= 0 || r.H <= 0 {
+				if !panel.Valid() || !rectIntersects(r, p.Visible()) {
 					return
 				}
 				st.panelHovered = panel.Hovered()

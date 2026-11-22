@@ -405,8 +405,9 @@ func attachOverlayFeedbackWithTheme(c *ui.Context, th *Theme, el ui.Element, wit
 		reduceMotion := thReduceMotion || p.Preferences().ReduceMotion
 		now := p.Now()
 		hovered := el.Hovered()
+		visible := rectIntersects(r, p.Visible())
 		if st.hoverHook != nil {
-			st.hoverHook(p, now, hovered)
+			st.hoverHook(p, now, visible && hovered)
 		}
 		pressed := el.Pressed()
 		focused := el.FocusVisible()
@@ -435,7 +436,7 @@ func attachOverlayFeedbackWithTheme(c *ui.Context, th *Theme, el ui.Element, wit
 		}
 		clipRect := insetRect(box, inset)
 		clipRadii := insetRadii(boxRadii, inset)
-		if clipRect.W <= 0 || clipRect.H <= 0 {
+		if clipRect.W <= 0 || clipRect.H <= 0 || !rectIntersects(clipRect, p.Visible()) {
 			return
 		}
 

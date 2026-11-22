@@ -173,7 +173,7 @@ func Radio[T comparable](c *ui.Context, selected *T, value T, label string, opts
 			}
 			rm := thReduceMotion || p.Preferences().ReduceMotion
 			halo, needFrame := haloSt.step(targetHalo, p.Now(), rm)
-			if needFrame {
+			if needFrame && rectIntersects(r, p.Visible()) {
 				p.After(16 * time.Millisecond)
 			}
 			paintCfg := paintSnap
@@ -229,7 +229,9 @@ func drawRadio(p *ui.Painter, r ui.Rect, s radioPaint) {
 				p.Fill(ui.Rect{X: ox - waveR, Y: oy - waveR, W: 2 * waveR, H: 2 * waveR},
 					s.haloInk.Alpha(alpha), waveR)
 			})
-			p.After(16 * time.Millisecond)
+			if rectIntersects(r, p.Visible()) {
+				p.After(16 * time.Millisecond)
+			}
 		}
 	}
 

@@ -318,11 +318,19 @@ func VideoPlayer(c *ui.Context, player *ui.VideoPlayer, opts ...VideoPlayerOptio
 		if elapsed < 0 {
 			elapsed = 0
 		}
-		if elapsed < delay {
-			controlsActive = true
-			c.After(delay - elapsed)
-		} else {
-			controlsActive = false
+		controlsActive = elapsed < delay
+		if controlsActive {
+			host.DrawOver(func(p *ui.Painter, r ui.Rect) {
+				if !host.Valid() || !rectIntersects(r, p.Visible()) {
+					return
+				}
+				remaining := delay - max(p.Now().Sub(st.lastInteract), 0)
+				if remaining > 0 {
+					p.After(remaining)
+				} else {
+					srv.Invalidate()
+				}
+			})
 		}
 	}
 	st.controlsVis = controlsActive

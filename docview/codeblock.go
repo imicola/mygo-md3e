@@ -330,7 +330,7 @@ func buildCodeCopyButton(c *ui.Context, th *md3e.Theme, m docCodeMetrics, o code
 		FocusRing(false).
 		Height(m.copyHeight).
 		Padding(0, 10).
-		Radius(m.copyHeight/2).
+		Radius(m.copyHeight / 2).
 		Disabled(o.copyDisabled).
 		Role(ui.RoleButton).
 		Unselectable()
@@ -343,10 +343,6 @@ func buildCodeCopyButton(c *ui.Context, th *md3e.Theme, m docCodeMetrics, o code
 	if !st.copiedAt.IsZero() && !copied {
 		st.copiedAt = time.Time{}
 	}
-	if copied {
-		c.After(codeBlockCopyDuration - now.Sub(st.copiedAt))
-	}
-
 	ink := pickColor(cs.OnSurfaceVariant, cs.OnSurface)
 	if copied {
 		ink = pickColor(th.Success, cs.Primary, ink)
@@ -371,7 +367,7 @@ func buildCodeCopyButton(c *ui.Context, th *md3e.Theme, m docCodeMetrics, o code
 	})
 
 	srv := c.Services()
-	btn.DrawOver(func(p *ui.Painter, _ ui.Rect) {
+	btn.DrawOver(func(p *ui.Painter, r ui.Rect) {
 		if !btn.Valid() || st.copiedAt.IsZero() {
 			return
 		}
@@ -381,7 +377,11 @@ func buildCodeCopyButton(c *ui.Context, th *md3e.Theme, m docCodeMetrics, o code
 			srv.Invalidate()
 			return
 		}
-		p.After(rem)
+		vis := p.Visible()
+		if min(r.X+r.W, vis.X+vis.W) > max(r.X, vis.X) &&
+			min(r.Y+r.H, vis.Y+vis.H) > max(r.Y, vis.Y) {
+			p.After(rem)
+		}
 	})
 
 	btn.Row().
@@ -404,7 +404,6 @@ func buildCodeCopyButton(c *ui.Context, th *md3e.Theme, m docCodeMetrics, o code
 	if btn.Clicked() && !o.copyDisabled {
 		c.WriteClipboard(o.codeToCopy)
 		st.copiedAt = now
-		c.After(codeBlockCopyDuration)
 		c.Announce(copiedText)
 		if o.snackbar != nil {
 			msg := o.copiedMessage
