@@ -69,6 +69,8 @@ func TestBuiltinIconsRenderBoundsAndCentering(t *testing.T) {
 		{"Clock", Clock},
 		{"ErrorOutline", ErrorOutline},
 		{"Star", Star},
+		{"Refresh", Refresh},
+		{"Photo", Photo},
 	}
 
 	bg := ui.RGB(255, 255, 255)
