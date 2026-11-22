@@ -1,6 +1,8 @@
 package md3e
 
 import (
+	"math"
+
 	"github.com/egoist/mygo/ui"
 
 	"github.com/imicola/mygo-md3e/motion"
@@ -91,20 +93,11 @@ func fabPaletteOf(th *Theme, scheme FABColorScheme, disabled bool) buttonColors 
 	case FABTertiary:
 		return buttonColors{container: cs.TertiaryContainer, content: cs.OnTertiaryContainer}
 	case FABSurface:
-		return buttonColors{container: cs.Surface, content: cs.Primary}
+		return buttonColors{container: SurfaceColorForElevation(th, tokens.Level3), content: cs.Primary}
 	default:
 		return buttonColors{container: cs.PrimaryContainer, content: cs.OnPrimaryContainer}
 	}
 }
-
-// fabCornerKey is the AnimateTo channel of a FAB's corner radius.
-type fabCornerKey struct{}
-
-// fabScaleKey is the AnimateTo channel of a FAB's hidden/visible scale.
-type fabScaleKey struct{}
-
-// fabFadeKey is the AnimateTo channel of a FAB's hidden/visible opacity.
-type fabFadeKey struct{}
 
 // FAB builds a Material Design 3 Expressive floating action button: a
 // ui.ButtonBase of exact Small (40×40), Medium (56×56) or Large (96×96) size,
@@ -141,36 +134,42 @@ func FAB(c *ui.Context, label string, icon IconDraw, opts ...FABOptions) ui.Elem
 		FocusRing(false).
 		Size(spec.Side, spec.Side).
 		Label(label)
-	// A disabled ancestor also disables the button: paint MD3E's disabled
-	// palette rather than leaving an apparently enabled button that ignores
-	// input.
-	disabled := o.Disabled || !visible || el.IsDisabled()
-	pal := fabPaletteOf(th, o.Color, disabled)
+	// Separate visual disabled styling from !visible input gating so hiding a
+	// FAB fades and scales it cleanly without flashing gray or dropping shadows.
+	visuallyDisabled := o.Disabled || (visible && el.IsDisabled())
+	inputDisabled := o.Disabled || !visible || el.IsDisabled()
+	pal := fabPaletteOf(th, o.Color, visuallyDisabled)
 	el.Disabled(o.Disabled || !visible).TextColor(pal.content)
 	if pal.container.A > 0 {
 		el.Background(pal.container)
 	}
+	if o.Color == FABSurface && th.Dark && !visuallyDisabled {
+		el.Border(1, resolveHairlineColor(th, ui.Color{}))
+	}
 
 	elevation := tokens.Level3
-	if el.Pressed() {
+	if !inputDisabled && el.Pressed() {
 		// MD3E lifts a pressed FAB one elevation step.
 		elevation = tokens.Level4
 	}
-	if !disabled {
+	if !visuallyDisabled {
 		ApplyElevationShadows(th, el, elevation)
 	}
 
 	radius := spec.Radius
-	if el.Pressed() {
+	if !inputDisabled && el.Pressed() {
 		radius = spec.PressedRadius
 	}
-	corner := animateWithTheme(el, th, fabCornerKey{}, radius, motion.FastSpatial)
+	corner := max(animateWithTheme(el, th, animChan0, radius, motion.FastSpatial), 0)
 	el.Radius(corner)
+	if !visuallyDisabled && elevation == tokens.Level3 {
+		attachHoverElevation(el, th, tokens.Level3, tokens.Level4, corner, inputDisabled)
+	}
 
 	attachRippleWithContext(c, th, el, StateLayerOptions{
 		Color:    pal.content,
 		Radius:   corner,
-		Disabled: disabled,
+		Disabled: inputDisabled,
 	})
 
 	if o.Visible != nil {
@@ -178,8 +177,8 @@ func FAB(c *ui.Context, label string, icon IconDraw, opts ...FABOptions) ui.Elem
 		if !visible {
 			scaleTarget, fadeTarget = 0.6, 0
 		}
-		scale := animateWithTheme(el, th, fabScaleKey{}, scaleTarget, motion.DefaultSpatial)
-		fade := animateWithTheme(el, th, fabFadeKey{}, fadeTarget, motion.FastEffects)
+		scale := animateWithTheme(el, th, animChan1, scaleTarget, motion.DefaultSpatial)
+		fade := clampF32(animateWithTheme(el, th, animChan2, fadeTarget, motion.FastEffects), 0, 1)
 		el.Scale(scale, scale).Opacity(fade)
 	}
 
@@ -209,12 +208,6 @@ type ExtendedFABOptions struct {
 	// default.
 	Label string
 }
-
-// extFabOpenKey is the AnimateTo channel of an extended FAB's expansion.
-type extFabOpenKey struct{}
-
-// extFabFadeKey is the AnimateTo channel of an extended FAB label's opacity.
-type extFabFadeKey struct{}
 
 // ExtendedFAB builds a Material Design 3 Expressive extended floating action
 // button: a ui.ButtonBase 56 DIP high (or 96 for the large size) carrying an
@@ -282,34 +275,52 @@ func ExtendedFAB(c *ui.Context, label string, icon IconDraw, opts ...ExtendedFAB
 	if pal.container.A > 0 {
 		el.Background(pal.container)
 	}
+	if o.Color == FABSurface && th.Dark && !disabled {
+		el.Border(1, resolveHairlineColor(th, ui.Color{}))
+	}
+	elevation := tokens.Level3
 	if !disabled {
-		elevation := tokens.Level3
 		if el.Pressed() {
 			elevation = tokens.Level4
 		}
 		ApplyElevationShadows(th, el, elevation)
 	}
 
-	p := animateWithTheme(el, th, extFabOpenKey{}, progress, motion.DefaultSpatial)
+	reduce := th.ReduceMotion || c.Preferences().ReduceMotion
+	p := animateWithTheme(el, th, animChan0, progress, motion.DefaultSpatial)
+	pLayout := max(p, 0)
 	radiusTarget := spec.Radius
-	if el.Pressed() {
+	if !disabled && el.Pressed() {
 		radiusTarget = spec.PressedRadius
 	}
-	radius := animateWithTheme(el, th, extFabRadiusKey{}, radiusTarget, motion.FastSpatial)
+	radius := max(animateWithTheme(el, th, animChan1, radiusTarget, motion.FastSpatial), 0)
 	el.Radius(radius)
+	if !disabled && elevation == tokens.Level3 {
+		attachHoverElevation(el, th, tokens.Level3, tokens.Level4, radius, disabled)
+	}
 
 	// The width springs between the square icon-only button and the full
-	// icon-label pill; the row clips the label while it collapses, and only
-	// reserves icon and gap room when there is an icon.
+	// icon-label pill; clamp spring undershoot so the button never crushes
+	// narrower than spec.Side, and give expanded text optical trailing clearance.
 	iconW, gapNow := float32(0), float32(0)
 	if icon != nil {
-		iconW, gapNow = spec.IconSize, p*gap
+		iconW, gapNow = spec.IconSize, pLayout*gap
 	}
-	width := 2*pad + iconW + gapNow + p*textW
-	el.Width(width).PaddingX(pad).Gap(gapNow).Justify(ui.Start)
+	textCeil := float32(math.Ceil(float64(textW)))
+	extraEnd := float32(0)
+	if icon != nil {
+		extraEnd = 4 * clampF32(pLayout, 0, 1)
+	}
+	width := max(2*pad+iconW+gapNow+pLayout*textCeil+extraEnd, spec.Side)
+	el.Width(width).PaddingStart(pad).PaddingEnd(pad + extraEnd).Gap(gapNow).Justify(ui.Start)
 	labelFade := float32(1)
 	if o.Expanded != nil {
-		labelFade = animateWithTheme(el, th, extFabFadeKey{}, progress, motion.FastEffects)
+		labelFade = clampF32(animateWithTheme(el, th, animChan2, progress, motion.FastEffects), 0, 1)
+		if !reduce && progress == 1 {
+			// Gate label reveal by actual opening width so text does not slice
+			// hard against Clip() while the spatial spring is still opening.
+			labelFade = min(labelFade, clampF32((pLayout-0.15)/0.65, 0, 1))
+		}
 	}
 
 	attachRippleWithContext(c, th, el, StateLayerOptions{
@@ -329,9 +340,6 @@ func ExtendedFAB(c *ui.Context, label string, icon IconDraw, opts ...ExtendedFAB
 	})
 	return el
 }
-
-// extFabRadiusKey is the AnimateTo channel of an extended FAB's corner radius.
-type extFabRadiusKey struct{}
 
 // labelOr returns s when set, fallback otherwise.
 func labelOr(s, fallback string) string {

@@ -428,14 +428,17 @@ func renderShapeButton(c *ui.Context, th *Theme, el ui.Element, cfg shapeButtonR
 	el.TextColor(contentCol)
 
 	// Pick the active morph & progress for this frame (captured by value so
-	// exit ghost-draws remain completely pure and safe).
+	// exit ghost-draws remain completely pure and safe). When a toggle flips
+	// while pressT is still receding from a custom PressedShape, morph directly
+	// from PressedShape toward the new target shape instead of snapping back to
+	// selMorph on frame 1.
 	var activeMorph *shape.Morph
 	var activeProgress float32
 	switch {
-	case cfg.hasPressPoly && pressT > 0.001 && (selT <= 0.01 || cfg.selPoly == nil) && cache.pressMorph != nil:
+	case cfg.hasPressPoly && pressT > 0.001 && (!cfg.selected || cfg.selPoly == nil) && cache.pressMorph != nil:
 		activeMorph = cache.pressMorph
 		activeProgress = clampF32(pressT, 0, 1)
-	case cfg.hasPressPoly && pressT > 0.001 && selT >= 0.99 && cache.selPressMorph != nil:
+	case cfg.hasPressPoly && pressT > 0.001 && cfg.selected && cache.selPressMorph != nil:
 		activeMorph = cache.selPressMorph
 		activeProgress = clampF32(pressT, 0, 1)
 	case cache.selMorph != nil:
@@ -464,7 +467,7 @@ func renderShapeButton(c *ui.Context, th *Theme, el ui.Element, cfg shapeButtonR
 	// callback can reuse its storage, even when the ripple uses an inset.
 	borderInset := float32(0)
 	if borderCol.A > 0 {
-		borderInset = 0.5
+		borderInset = 1.0
 	}
 	attachRippleWithContext(c, th, el, StateLayerOptions{
 		Color:       contentCol,
@@ -479,7 +482,12 @@ func renderShapeButton(c *ui.Context, th *Theme, el ui.Element, cfg shapeButtonR
 		if !isPositiveFiniteF32(r.W) || !isPositiveFiniteF32(r.H) {
 			return
 		}
-		path := pathForRect(r)
+		drawRect := r
+		if borderCol.A > 0 {
+			// Inset by half the 1 DIP stroke width so flat edges never clip 0.5px.
+			drawRect = insetRect(r, 0.5)
+		}
+		path := pathForRect(drawRect)
 		if path != nil {
 			if containerCol.A > 0 {
 				p.FillPath(path, containerCol)
@@ -515,15 +523,16 @@ func drawMorphCrossfadeIcon(p *ui.Painter, r ui.Rect, size float32, icon, select
 		return
 	}
 
-	if offA := 1 - t; offA > 0.01 && icon != nil {
-		s := side * (0.75 + 0.25*offA)
+	// Staged crossfade avoids muddy 50/50 overlap at the midpoint.
+	if offA := clampF32(1-t/0.45, 0, 1); offA > 0.01 && icon != nil {
+		s := side * (0.72 + 0.28*offA)
 		dst := ui.Rect{X: cx - s/2, Y: cy - s/2, W: s, H: s}
 		icon(p, dst, ink.Alpha(offA))
 	}
-	if t > 0.01 {
-		s := side * (0.75 + 0.25*t)
+	if onA := clampF32((t-0.35)/0.65, 0, 1); onA > 0.01 {
+		s := side * (0.72 + 0.28*onA)
 		dst := ui.Rect{X: cx - s/2, Y: cy - s/2, W: s, H: s}
-		selectedIcon(p, dst, ink.Alpha(t))
+		selectedIcon(p, dst, ink.Alpha(onA))
 	}
 }
 

@@ -47,7 +47,7 @@ func TestFABSizesAndSchemes(t *testing.T) {
 		{"Primary", FABPrimary, th.Colors.PrimaryContainer},
 		{"Secondary", FABSecondary, th.Colors.SecondaryContainer},
 		{"Tertiary", FABTertiary, th.Colors.TertiaryContainer},
-		{"Surface", FABSurface, th.Colors.Surface},
+		{"Surface", FABSurface, SurfaceColorForElevation(th, tokens.Level3)},
 	}
 
 	for _, size := range sizes {

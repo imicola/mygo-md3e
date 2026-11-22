@@ -65,9 +65,6 @@ type ButtonOptions struct {
 	Label string
 }
 
-// buttonCornerKey is the AnimateTo channel of a button's corner radius.
-type buttonCornerKey struct{}
-
 // Button builds a Material Design 3 Expressive button: a ui.ButtonBase with
 // the variant's container, border, elevation and content colors, the size
 // tier's exact height, padding, icon geometry and typography, an MD3E
@@ -114,14 +111,19 @@ func Button(c *ui.Context, label string, opts ...ButtonOptions) ui.Element {
 	disabled := o.Disabled || el.IsDisabled()
 	pal := buttonPaletteOf(th, o.Variant, disabled)
 	el.Disabled(o.Disabled).TextColor(pal.content)
-	if pal.container.A > 0 {
-		el.Background(pal.container)
+	pressed := el.Pressed()
+	container := pal.container
+	if pressed && o.Variant == ButtonElevated && !disabled {
+		container = SurfaceColorForElevation(th, tokens.Level2)
 	}
-	if pal.border.A > 0 {
-		el.Border(1, pal.border)
+	if container.A > 0 {
+		el.Background(container)
+	}
+	border := resolveButtonBorder(th, o.Variant, pal.border, disabled)
+	if border.A > 0 {
+		el.Border(1, border)
 	}
 
-	pressed := el.Pressed()
 	elevation := pal.elevation
 	if pressed && elevation > tokens.Level0 && elevation < tokens.Level5 {
 		// MD3E lifts the Elevated variant while it is pressed.
@@ -135,11 +137,13 @@ func Button(c *ui.Context, label string, opts ...ButtonOptions) ui.Element {
 	if pressed {
 		target = float32(spec.PressedRadius)
 	}
-	radius := animateWithTheme(el, th, buttonCornerKey{}, target, motion.FastSpatial)
+	radius := max(animateWithTheme(el, th, animChan0, target, motion.FastSpatial), 0)
 	el.Radius(radius)
 
+	applyButtonHoverElevation(el, th, o.Variant, radius, disabled || pressed)
+
 	borderInset := float32(0)
-	if o.Variant == ButtonOutlined {
+	if border.A > 0 {
 		borderInset = 1
 	}
 	attachRippleWithContext(c, th, el, StateLayerOptions{
@@ -157,24 +161,48 @@ func Button(c *ui.Context, label string, opts ...ButtonOptions) ui.Element {
 		el.Label(name)
 	}
 
-	role := buttonTypeRole(o.Size)
 	el.Children(func() {
 		if o.LeadingIcon != nil {
 			drawIconBox(c, o.LeadingIcon, float32(spec.IconSize), pal.content)
 		}
-		if label != "" {
-			txt := applyTypeStyleWithTheme(th, ui.Text(c, label).NoWrap(), role)
-			if th.Density.Normalize() != tokens.DensityComfortable {
-				scale := th.EffectiveTextScale()
-				txt.FontSize(float32(spec.TextSize) * scale).
-					FixedLineHeight(float32(spec.TextSize+4) * scale)
-			}
-		}
+		buildButtonLabel(c, th, label, o.Size, spec)
 		if o.TrailingIcon != nil {
 			drawIconBox(c, o.TrailingIcon, float32(spec.IconSize), pal.content)
 		}
 	})
 	return el
+}
+
+func resolveButtonBorder(th *Theme, variant ButtonVariant, border ui.Color, disabled bool) ui.Color {
+	if border.A == 0 && variant == ButtonElevated && !disabled && th.Dark {
+		return resolveHairlineColor(th, ui.Color{})
+	}
+	return border
+}
+
+func applyButtonHoverElevation(el ui.Element, th *Theme, variant ButtonVariant, radius float32, suppressed bool) {
+	if suppressed {
+		return
+	}
+	switch variant {
+	case ButtonElevated:
+		attachHoverElevation(el, th, tokens.Level1, tokens.Level2, radius, false)
+	case ButtonFilled, ButtonTonal:
+		attachHoverElevation(el, th, tokens.Level0, tokens.Level1, radius, false)
+	}
+}
+
+func buildButtonLabel(c *ui.Context, th *Theme, label string, size tokens.SizeTier, spec tokens.SizeSpec) {
+	if label == "" {
+		return
+	}
+	txt := applyTypeStyleWithTheme(th, ui.Text(c, label).NoWrap(), buttonTypeRole(size))
+	if th.Density.Normalize() != tokens.DensityComfortable {
+		scale := th.EffectiveTextScale()
+		lh := max(float32(spec.TextSize+4), float32(spec.TextSize)*1.25)
+		txt.FontSize(float32(spec.TextSize) * scale).
+			FixedLineHeight(lh * scale)
+	}
 }
 
 // buttonColors are the resolved colors and elevation of a button variant in
@@ -222,7 +250,11 @@ func buttonPaletteOf(th *Theme, v ButtonVariant, disabled bool) buttonColors {
 			elevation: tokens.Level1,
 		}
 	case ButtonOutlined:
-		return buttonColors{content: cs.Primary, border: cs.Outline}
+		border := cs.OutlineVariant
+		if th.Contrast >= tokens.ContrastHigh || border.A == 0 {
+			border = cs.Outline
+		}
+		return buttonColors{content: cs.Primary, border: border}
 	default:
 		return buttonColors{content: cs.Primary}
 	}
@@ -303,11 +335,13 @@ func iconLabelGap(t tokens.SizeTier) float32 {
 // drawIconBox adds a square icon slot of side size that paints draw in ink. A
 // nil icon draws nothing, and the slot never shrinks, so a collapsing container
 // clips it instead of squeezing it to zero width.
-func drawIconBox(c *ui.Context, draw IconDraw, size float32, ink ui.Color) {
+func drawIconBox(c *ui.Context, draw IconDraw, size float32, ink ui.Color) ui.Element {
 	if draw == nil {
-		return
+		return ui.Element{}
 	}
-	ui.Box(c).Size(size, size).Shrink(0).Draw(func(p *ui.Painter, r ui.Rect) {
+	el := ui.Box(c).Size(size, size).Shrink(0)
+	el.Draw(func(p *ui.Painter, r ui.Rect) {
 		draw(p, r, ink)
 	})
+	return el
 }

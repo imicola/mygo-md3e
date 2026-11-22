@@ -52,17 +52,6 @@ const (
 	fabMenuTriggerTo = 12
 )
 
-// fabMenuOpenKey is the Local holding a FABMenu's expansion state when the
-// caller does not own it.
-type fabMenuOpenKey struct{}
-
-// fabMenuHandleKey is the Local holding the trigger's handle, so that closing
-// can give the keyboard focus back to it.
-type fabMenuHandleKey struct{}
-
-// fabMenuPoseKey marks an overlay element that has played its entry pose.
-type fabMenuPoseKey struct{ i int }
-
 // FABMenu builds a Material Design 3 Expressive FAB menu: a standard 56 DIP
 // FAB that opens a scrim-covered menu of two to six large pill items, each with
 // an icon and a label, in place of the old speed dial. While the menu shows,
@@ -111,9 +100,9 @@ func FABMenu(c *ui.Context, items []FABMenuItem, opts ...FABMenuOptions) ui.Elem
 	trigger := FAB(c, label, icon, FABOptions{Color: o.Color, Disabled: o.Disabled})
 	open := o.Open
 	if open == nil {
-		open = ui.Local(trigger, fabMenuOpenKey{}, func() bool { return false })
+		open = localBool(trigger, animChan1)
 	}
-	handle := ui.Local(trigger, fabMenuHandleKey{}, func() ui.Handle { return ui.Handle{} })
+	handle := localHandle(trigger, animChan2)
 	disabled := o.Disabled || trigger.IsDisabled()
 	if disabled {
 		*open = false
@@ -123,80 +112,116 @@ func FABMenu(c *ui.Context, items []FABMenuItem, opts ...FABMenuOptions) ui.Elem
 	if trigger.Clicked() && !disabled {
 		*open = !*open
 	}
+	reduce := th.ReduceMotion || c.Preferences().ReduceMotion
 	if inExitingOverlay(c) {
 		if *open {
 			*open = false
 		}
 		return trigger
 	}
-	if !*open || disabled {
+	wantOpen := *open && !disabled
+	showTarget := float32(0)
+	if wantOpen {
+		showTarget = 1
+	}
+	show := clampF32(animateValue(trigger, animChan3, showTarget, th.Animation(motion.FastEffects), reduce), 0, 1)
+	if !wantOpen && (reduce || show <= 0.01) {
 		return trigger
 	}
-	// The circular close button covers the trigger while the menu shows. Hide
-	// the trigger's own rounded square, icon and shadows so they do not show
-	// around the circle, even while the close button is still scaling in;
-	// Opacity keeps the trigger's layout, bounds and handle, so closing can
-	// give the keyboard focus back to it. FABOptions.Visible would disable it
-	// instead and lose that focus.
-	trigger.Opacity(0)
+	exiting := !wantOpen
+	// Hide the trigger while the menu is open so its rounded square never shows
+	// behind the circular close button; while exiting, cross-fade it cleanly back in.
+	if exiting {
+		trigger.Opacity(clampF32(1-show, 0, 1))
+	} else {
+		trigger.Opacity(0)
+	}
 
 	scrim := th.Colors.Scrim
 	if scrim.A == 0 {
 		scrim = ui.RGB(0, 0, 0)
 	}
+	closePal, itemPal := fabMenuPalettes(th, o.Color)
 
 	ui.Overlay(c, func() {
 		back := ui.Row(c).Absolute().Left(0).Top(0).Right(0).Bottom(0).
-			Background(scrim.Alpha(0.32)).
-			Modal()
-		back.Children(func() {
-			// A plain anchor inside the modal keeps the panel and the close
-			// button in the dialog's focus scope: an AttachTo(trigger) would
-			// scope them to the trigger outside the modal, where Tab cannot
-			// reach the items at all. It mirrors the trigger's last box.
-			tb := trigger.Bounds()
-			var anchor ui.Element
-			if tb.W > 0 && tb.H > 0 {
-				anchor = ui.Box(c).Absolute().Left(tb.X).Top(tb.Y).Size(tb.W, tb.H)
-			} else {
-				// A menu open on the first frame has no previous trigger box
-				// to mirror yet.
-				anchor = ui.Box(c).Size(1, 1).AttachTo(trigger, ui.AnchorCenter, ui.AnchorCenter)
-			}
-			closeBtn := fabMenuCloseButton(c, th, anchor, closeLabel)
-			panel := ui.Column(c).
-				AttachTo(anchor, ui.AnchorTopEnd, ui.AnchorBottomEnd).
-				Margin(0, 0, fabMenuTriggerTo, 0).
-				Gap(fabMenuGap).
-				AlignItems(ui.End).
-				Role(ui.RoleMenu).
-				FocusGroup(ui.Vertical).
-				Label(menuLabel)
-			panel.Children(func() {
-				// Build from the far end down, so that the first item sits
-				// nearest the trigger and rises first.
-				for i := len(items) - 1; i >= 0; i-- {
-					if fabMenuItem(c, th, &items[i], i, th.ReduceMotion) {
-						if items[i].OnClick != nil {
-							items[i].OnClick()
+			Background(scrim.Alpha(0.32 * show)).
+			IgnoreInput(exiting).
+			AccessHidden(exiting)
+		if !exiting {
+			back.Modal()
+		}
+		withExitingOverlay(c, exiting, func() {
+			back.Children(func() {
+				// A plain anchor inside the modal keeps the panel and the close
+				// button in the dialog's focus scope: an AttachTo(trigger) would
+				// scope them to the trigger outside the modal, where Tab cannot
+				// reach the items at all. It mirrors the trigger's last box.
+				tb := trigger.Bounds()
+				var anchor ui.Element
+				if tb.W > 0 && tb.H > 0 {
+					anchor = ui.Box(c).Absolute().Left(tb.X).Top(tb.Y).Size(tb.W, tb.H)
+				} else {
+					// A menu open on the first frame has no previous trigger box
+					// to mirror yet.
+					anchor = ui.Box(c).Size(1, 1).AttachTo(trigger, ui.AnchorCenter, ui.AnchorCenter)
+				}
+				closeBtn := fabMenuCloseButton(c, th, anchor, closeLabel, closePal, reduce, exiting, show)
+				panel := ui.Column(c).
+					AttachTo(anchor, ui.AnchorTopEnd, ui.AnchorBottomEnd).
+					Margin(0, 0, fabMenuTriggerTo, 0).
+					Gap(fabMenuGap).
+					AlignItems(ui.End).
+					Role(ui.RoleMenu).
+					FocusGroup(ui.Vertical).
+					Label(menuLabel)
+				if exiting {
+					panel.Opacity(show).Translate(0, (1-show)*14)
+				}
+				panel.Children(func() {
+					// Build from the far end down, so that the first item sits
+					// nearest the trigger and rises first.
+					for i := len(items) - 1; i >= 0; i-- {
+						if fabMenuItem(c, th, &items[i], i, itemPal, reduce, exiting) && !exiting {
+							if items[i].OnClick != nil {
+								items[i].OnClick()
+							}
+							*open = false
+							handle.Focus(c)
 						}
-						*open = false
-						handle.Focus(c)
 					}
+				})
+
+				// Absorb clicks on gaps within the menu column and dismiss via back.Clicked()
+				// rather than PressedOutside() so concurrent overlays (e.g. SnackbarHost)
+				// rendered above the FAB menu are unaffected.
+				panel.Clicked()
+				if !exiting && (closeBtn.Clicked() || back.Clicked() || back.OverlayShortcut(0, ui.KeyEscape)) {
+					*open = false
+					handle.Focus(c)
 				}
 			})
-
-			// Absorb clicks on gaps within the menu column and dismiss via back.Clicked()
-			// rather than PressedOutside() so concurrent overlays (e.g. SnackbarHost)
-			// rendered above the FAB menu are unaffected.
-			panel.Clicked()
-			if closeBtn.Clicked() || back.Clicked() || back.OverlayShortcut(0, ui.KeyEscape) {
-				*open = false
-				handle.Focus(c)
-			}
 		})
 	})
 	return trigger
+}
+
+func fabMenuPalettes(th *Theme, scheme FABColorScheme) (closePal, itemPal buttonColors) {
+	cs := th.Colors
+	switch scheme {
+	case FABSecondary:
+		return buttonColors{container: cs.Secondary, content: cs.OnSecondary},
+			buttonColors{container: cs.SecondaryContainer, content: cs.OnSecondaryContainer}
+	case FABTertiary:
+		return buttonColors{container: cs.Tertiary, content: cs.OnTertiary},
+			buttonColors{container: cs.TertiaryContainer, content: cs.OnTertiaryContainer}
+	case FABSurface:
+		return buttonColors{container: cs.Primary, content: cs.OnPrimary},
+			buttonColors{container: SurfaceColorForElevation(th, tokens.Level3), content: cs.OnSurface}
+	default:
+		return buttonColors{container: cs.Primary, content: cs.OnPrimary},
+			buttonColors{container: cs.PrimaryContainer, content: cs.OnPrimaryContainer}
+	}
 }
 
 // fabMenuItemMax is the most items a FABMenu takes.
@@ -205,71 +230,90 @@ const fabMenuItemMax = 6
 // fabMenuCloseButton builds the high-contrast circular close button that covers
 // the trigger while the menu shows, rotating its × in with the Fast Spatial
 // spring.
-func fabMenuCloseButton(c *ui.Context, th *Theme, trigger ui.Element, label string) ui.Element {
+func fabMenuCloseButton(c *ui.Context, th *Theme, trigger ui.Element, label string, pal buttonColors, reduceMotion, exiting bool, show float32) ui.Element {
 	btn := ui.ButtonBase(c).
 		DimDisabled(false).
 		FocusRing(false).
 		Size(fabMenuCloseSide, fabMenuCloseSide).
 		Label(label).
-		Background(th.Colors.Primary).
-		TextColor(th.Colors.OnPrimary).
-		Radius(fabMenuCloseSide / 2)
+		Background(pal.container).
+		TextColor(pal.content)
+	radTarget := float32(fabMenuCloseSide / 2)
+	if !exiting && btn.Pressed() {
+		radTarget = 16
+	}
+	rad := max(animateValue(btn, animChan0, radTarget, th.Animation(motion.FastSpatial), reduceMotion), 0)
+	btn.Radius(rad)
 	ApplyElevationShadows(th, btn, tokens.Level3)
-	attachRippleWithContext(c, th, btn, StateLayerOptions{Color: th.Colors.OnPrimary, Radius: fabMenuCloseSide / 2})
+	attachHoverElevation(btn, th, tokens.Level3, tokens.Level4, rad, exiting)
+	attachRippleWithContext(c, th, btn, StateLayerOptions{Color: pal.content, Radius: rad, Disabled: exiting})
 	btn.AttachTo(trigger, ui.AnchorCenter, ui.AnchorCenter)
 
-	entered := ui.Local(btn, fabMenuPoseKey{}, func() bool { return false })
-	pose := ui.Pose{}
-	if !*entered {
-		*entered = true
-		// ReduceMotion removes the entry pose entirely: posing Fade still
-		// animates under reduced motion and would ask for a needless frame.
-		if !th.ReduceMotion {
-			pose = ui.Pose{Rotate: -90, Scale: 0.6, Fade: 1}
-			c.Invalidate()
+	if exiting {
+		s := 0.8 + 0.2*show
+		btn.Opacity(show).Scale(s, s)
+	} else {
+		entered := localBool(btn, animChan1)
+		pose := ui.Pose{}
+		if !*entered {
+			*entered = true
+			// Start visible (Fade: 0) from 0.85 scale so there is no 1-frame empty
+			// hole over the hidden trigger while the × rotates into place.
+			if !reduceMotion {
+				pose = ui.Pose{Rotate: -90, Scale: 0.85}
+				c.Invalidate()
+			}
 		}
+		btn.AnimatePose(pose, fabMenuEntryAnimation(th, 0))
 	}
-	btn.AnimatePose(pose, fabMenuEntryAnimation(th, 0))
 
 	btn.Children(func() {
-		drawIconBox(c, mdicon.Close.Draw, 24, th.Colors.OnPrimary)
+		drawIconBox(c, mdicon.Close.Draw, 24, pal.content)
 	})
 	return btn
 }
 
 // fabMenuItem builds one pill item of a FAB menu and reports whether it was
 // chosen.
-func fabMenuItem(c *ui.Context, th *Theme, item *FABMenuItem, i int, reduceMotion bool) bool {
+func fabMenuItem(c *ui.Context, th *Theme, item *FABMenuItem, i int, basePal buttonColors, reduceMotion, exiting bool) bool {
 	cs := th.Colors
 
 	btn := ui.ButtonBase(c).
 		DimDisabled(false).
 		FocusRing(false).
 		Height(fabMenuItemSide).
-		PaddingX(16).
+		PaddingX(20).
 		Gap(12).
 		Label(item.Label).
 		Role(ui.RoleMenuItem)
-	disabled := item.Disabled || btn.IsDisabled()
-	pal := buttonColors{container: cs.SecondaryContainer, content: cs.OnSecondaryContainer}
-	if disabled {
+	disabled := item.Disabled || exiting || btn.IsDisabled()
+	pal := basePal
+	if item.Disabled {
 		pal = buttonColors{
 			container: cs.OnSurface.Alpha(float32(tokens.DisabledContainerOpacity)),
 			content:   cs.OnSurface.Alpha(float32(tokens.DisabledContentOpacity)),
 		}
 	}
+	radTarget := float32(fabMenuItemSide / 2)
+	if !disabled && btn.Pressed() {
+		radTarget = 12
+	}
+	rad := max(animateValue(btn, animChan0, radTarget, th.Animation(motion.FastSpatial), reduceMotion), 0)
 	btn.Disabled(item.Disabled).
 		TextColor(pal.content).
 		Background(pal.container).
-		Radius(fabMenuItemSide / 2)
-	ApplyElevationShadows(th, btn, tokens.Level2)
+		Radius(rad)
+	if !item.Disabled {
+		ApplyElevationShadows(th, btn, tokens.Level2)
+		attachHoverElevation(btn, th, tokens.Level2, tokens.Level3, rad, disabled)
+	}
 
-	entered := ui.Local(btn, fabMenuPoseKey{i: i + 1}, func() bool { return false })
+	entered := localBool(btn, animChan1)
 	pose := ui.Pose{}
 	if !*entered {
 		*entered = true
-		if !reduceMotion {
-			pose = ui.Pose{Y: 20, Scale: 0.85, Fade: 1}
+		if !reduceMotion && !exiting {
+			pose = ui.Pose{Y: 16, Scale: 0.88, Fade: 1}
 			c.Invalidate()
 		}
 	}
@@ -281,7 +325,7 @@ func fabMenuItem(c *ui.Context, th *Theme, item *FABMenuItem, i int, reduceMotio
 
 	attachRippleWithContext(c, th, btn, StateLayerOptions{
 		Color:    pal.content,
-		Radius:   fabMenuItemSide / 2,
+		Radius:   rad,
 		Disabled: disabled,
 	})
 

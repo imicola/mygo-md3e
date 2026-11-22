@@ -1,6 +1,8 @@
 package md3e
 
 import (
+	"time"
+
 	"github.com/egoist/mygo/ui"
 
 	"github.com/imicola/mygo-md3e/internal/mdicon"
@@ -33,16 +35,6 @@ type SplitButtonOptions struct {
 	// one the arrow has nothing to open.
 	Menu func(panel ui.Element)
 }
-
-// splitOpenKey is the local holding a split button's expansion state when the
-// caller does not own it.
-type splitOpenKey struct{}
-
-// splitChevronKey animates the arrow's chevron rotation in degrees.
-type splitChevronKey struct{}
-
-// splitCornerKey animates one corner of a split button segment.
-type splitCornerKey struct{ i int }
 
 // SplitButton builds a Material Design 3 Expressive split button: a leading
 // ui.ButtonBase doing the action joined to a trailing ui.ButtonBase whose
@@ -90,11 +82,12 @@ func SplitButton(c *ui.Context, label string, opts ...SplitButtonOptions) (group
 
 	th := CurrentTheme(c)
 	o.Size = normalizeSizeTier(o.Size)
-	spec := tierSpec(o.Size)
+	spec := tierSpecForDensity(th.Density, o.Size)
 	rtl := c.Direction() == ui.RightToLeft
 	outer := restingRadius(spec, ButtonShapeRound)
 	inner := float32(connectedInnerRadii)
 	pad := float32(spec.Padding)
+	iconGap := iconLabelGapForDensity(th.Density, o.Size)
 
 	group = ui.Row(c).
 		AlignItems(ui.Stretch).
@@ -117,10 +110,16 @@ func SplitButton(c *ui.Context, label string, opts ...SplitButtonOptions) (group
 
 	open = o.Open
 	if open == nil {
-		open = ui.Local(group, splitOpenKey{}, func() bool { return false })
+		open = localBool(group, animChan0)
 	}
 	if groupDisabled {
 		*open = false
+	}
+
+	arrowPal := pal
+	if *open && o.Variant == ButtonOutlined && !groupDisabled {
+		arrowPal.container = th.Colors.SecondaryContainer
+		arrowPal.content = th.Colors.OnSecondaryContainer
 	}
 
 	actionLabel := label
@@ -129,22 +128,32 @@ func SplitButton(c *ui.Context, label string, opts ...SplitButtonOptions) (group
 		arrowLabel = "More options"
 	}
 
+	// Optical balance on the D-shaped closed arrow: give slightly more padding
+	// on the curved outer side so the chevron sits centered in the visible mass.
+	arrowPadStart := pad * 0.68
+	arrowPadEnd := pad * 0.82
+	if *open {
+		arrowPadStart = pad * 0.75
+		arrowPadEnd = pad * 0.75
+	}
+
 	group.Children(func() {
 		action = ui.ButtonBase(c).
 			DimDisabled(false).
 			FocusRing(false).
 			PaddingX(pad).
-			Gap(iconLabelGap(o.Size)).
+			Gap(iconGap).
 			Disabled(o.Disabled || o.ActionDisabled).
 			Label(actionLabel).
 			TextColor(actionPal.content)
 		arrow = ui.ButtonBase(c).
 			DimDisabled(false).
 			FocusRing(false).
-			PaddingX(pad * 0.75).
+			PaddingStart(arrowPadStart).
+			PaddingEnd(arrowPadEnd).
 			Disabled(o.Disabled).
 			Label(arrowLabel).
-			TextColor(pal.content).
+			TextColor(arrowPal.content).
 			HasPopup(ui.PopupMenu).
 			Expanded(*open)
 	})
@@ -169,10 +178,12 @@ func SplitButton(c *ui.Context, label string, opts ...SplitButtonOptions) (group
 		}
 		return base
 	}
-	if action.Pressed() {
+	actionPressed := action.Pressed()
+	arrowPressed := arrow.Pressed()
+	if actionPressed {
 		actionTarget = press(actionTarget)
 	}
-	if arrow.Pressed() && !*open {
+	if arrowPressed && !*open {
 		arrowTarget = press(arrowTarget)
 	}
 
@@ -180,35 +191,37 @@ func SplitButton(c *ui.Context, label string, opts ...SplitButtonOptions) (group
 	// follows the arrow's pill and the seam's 2 DIP gap rather than the group's
 	// joint box; the pressed segment rises from Level1 to Level2.
 	actionElevation := actionPal.elevation
-	if action.Pressed() && actionElevation > tokens.Level0 && actionElevation < tokens.Level5 {
+	if actionPressed && actionElevation > tokens.Level0 && actionElevation < tokens.Level5 {
 		actionElevation++
 	}
-	arrowElevation := pal.elevation
-	if arrow.Pressed() && arrowElevation > tokens.Level0 && arrowElevation < tokens.Level5 {
+	arrowElevation := arrowPal.elevation
+	if arrowPressed && arrowElevation > tokens.Level0 && arrowElevation < tokens.Level5 {
 		arrowElevation++
 	}
 
-	styleSplitSegment(c, th, action, actionPal, actionTarget, actionElevation)
-	styleSplitSegment(c, th, arrow, pal, arrowTarget, arrowElevation)
+	arrowSpring := motion.DefaultSpatial
+	if arrowPressed && !*open {
+		arrowSpring = motion.FastSpatial
+	}
+	styleSplitSegment(c, th, action, o.Variant, actionPal, actionTarget, actionElevation, actionPressed, motion.FastSpatial)
+	styleSplitSegment(c, th, arrow, o.Variant, arrowPal, arrowTarget, arrowElevation, arrowPressed, arrowSpring)
 
 	// The chevron turns 180 degrees as the menu opens and back as it closes.
-	degrees := animateWithTheme(arrow, th, splitChevronKey{}, splitChevronDegrees(*open), motion.DefaultSpatial)
+	degrees := animateWithTheme(arrow, th, animChan4, splitChevronDegrees(*open), motion.DefaultSpatial)
 	action.Children(func() {
 		if o.LeadingIcon != nil {
 			drawIconBox(c, o.LeadingIcon, float32(spec.IconSize), actionPal.content)
 		}
-		if label != "" {
-			applyTypeStyleWithTheme(th, ui.Text(c, label).NoWrap(), buttonTypeRole(o.Size))
-		}
+		buildButtonLabel(c, th, label, o.Size, spec)
 	})
 	arrow.Children(func() {
 		ui.Box(c).Size(float32(spec.IconSize), float32(spec.IconSize)).Shrink(0).Draw(func(p *ui.Painter, r ui.Rect) {
 			if degrees == 0 {
-				mdicon.ChevronDown.Draw(p, r, pal.content)
+				mdicon.ChevronDown.Draw(p, r, arrowPal.content)
 				return
 			}
 			p.Transform(ui.Rotation(degrees), r.X+r.W/2, r.Y+r.H/2, func() {
-				mdicon.ChevronDown.Draw(p, r, pal.content)
+				mdicon.ChevronDown.Draw(p, r, arrowPal.content)
 			})
 		})
 	})
@@ -232,36 +245,58 @@ func SplitButton(c *ui.Context, label string, opts ...SplitButtonOptions) (group
 		if inExitingOverlay(c) && *open {
 			*open = false
 		}
-		ui.PopoverBase(c, arrow, open, func(panel ui.Element) {
-			panel.Background(SurfaceColorForElevation(th, tokens.Level2)).
-				Radius(th.Shapes.Radius(tokens.ShapeExtraSmall)).
-				Padding(8)
+		reduce := th.ReduceMotion || c.Preferences().ReduceMotion
+		panel := ui.PopoverBase(c, arrow, open, func(panel ui.Element) {
+			panel.MinWidth(112).
+				Background(SurfaceColorForElevation(th, tokens.Level2)).
+				TextColor(th.Colors.OnSurface).
+				Radius(th.Shapes.Radius(tokens.ShapeLarge)).
+				Padding(6)
+			if hl := resolveHairlineColor(th, ui.Color{}); hl.A > 0 {
+				panel.Border(1, hl)
+			}
 			ApplyElevationShadows(th, panel, tokens.Level2)
 			o.Menu(panel)
 		})
+		if panel.Valid() {
+			panel.AttachTo(arrow, ui.AnchorBottomEnd, ui.AnchorTopEnd).
+				AttachedOrigin().
+				Margin(4, 0, 4, 0).
+				AttachEdgeMargin(8)
+			if !reduce {
+				panel.Transition(ui.ElementTransition{
+					Duration: 140 * time.Millisecond,
+					Enter:    &ui.Motion{Opacity: 0, Scale: 0.94, Y: -4, Flip: true},
+				})
+			}
+		}
 	}
 	return group, action, arrow, open
 }
 
 // styleSplitSegment gives one segment its container, border, elevation, corner
 // morph and state layer, and stretches it to the group's height.
-func styleSplitSegment(c *ui.Context, th *Theme, el ui.Element, pal buttonColors, target [4]float32, elevation tokens.ElevationLevel) {
+func styleSplitSegment(c *ui.Context, th *Theme, el ui.Element, variant ButtonVariant, pal buttonColors, target [4]float32, elevation tokens.ElevationLevel, pressed bool, cornerRole motion.Token) {
+	disabled := el.IsDisabled()
 	if pal.container.A > 0 {
 		el.Background(pal.container)
 	}
-	if pal.border.A > 0 {
-		el.Border(1, pal.border)
+	border := resolveButtonBorder(th, variant, pal.border, disabled)
+	if border.A > 0 {
+		el.Border(1, border)
 	}
 	if elevation > tokens.Level0 {
 		ApplyElevationShadows(th, el, elevation)
 	}
 	var radii [4]float32
 	for i := 0; i < 4; i++ {
-		radii[i] = animateWithTheme(el, th, splitCornerKey{i: i}, target[i], motion.FastSpatial)
+		radii[i] = max(animateWithTheme(el, th, animChan0+animChanKey(i), target[i], cornerRole), 0)
 	}
 	el.Radius(radii[0], radii[1], radii[2], radii[3])
+	avgR := (radii[0] + radii[1] + radii[2] + radii[3]) * 0.25
+	applyButtonHoverElevation(el, th, variant, avgR, disabled || pressed)
 	borderInset := float32(0)
-	if pal.border.A > 0 {
+	if border.A > 0 {
 		borderInset = 1
 	}
 	attachRippleWithContext(c, th, el, StateLayerOptions{
@@ -269,7 +304,7 @@ func styleSplitSegment(c *ui.Context, th *Theme, el ui.Element, pal buttonColors
 		Radii:       radii,
 		HasRadii:    true,
 		BorderInset: borderInset,
-		Disabled:    el.IsDisabled(),
+		Disabled:    disabled,
 	})
 }
 

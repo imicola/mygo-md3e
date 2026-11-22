@@ -52,12 +52,6 @@ type ButtonGroupItem struct {
 	Disabled bool
 }
 
-// groupStateKey animates a segment's width-giving padding expansion.
-type groupStateKey struct{}
-
-// groupCornerKey animates one of a segment's four corners.
-type groupCornerKey struct{ i int }
-
 // Standard and Connected group geometry, in DIP.
 const (
 	standardGroupGap    = 8
@@ -125,12 +119,15 @@ func buttonGroupOptions(opts []ButtonGroupOptions) ButtonGroupOptions {
 func buildButtonGroup(c *ui.Context, items []ButtonGroupItem, o ButtonGroupOptions, isActive func(i int) bool, choose func(i int), act func(i int)) ui.Element {
 	th := CurrentTheme(c)
 	o.Size = normalizeSizeTier(o.Size)
-	spec := tierSpec(o.Size)
+	spec := tierSpecForDensity(th.Density, o.Size)
 	rtl := c.Direction() == ui.RightToLeft
 	selectable := choose != nil
 	outer := restingRadius(spec, o.Shape)
+	squareR := float32(spec.SquareRadius)
 	full := float32(spec.Height) / 2
 	pad := float32(spec.Padding)
+	iconGap := iconLabelGapForDensity(th.Density, o.Size)
+	expandDelta := groupExpandDeltaForSize(o.Size)
 
 	row := ui.Row(c).
 		Shrink(0).
@@ -160,7 +157,7 @@ func buildButtonGroup(c *ui.Context, items []ButtonGroupItem, o ButtonGroupOptio
 				FocusRing(false).
 				Height(float32(spec.Height)).
 				PaddingX(pad).
-				Gap(iconLabelGap(o.Size)).
+				Gap(iconGap).
 				Label(items[i].Label)
 			pressed[i] = els[i].Pressed()
 		}
@@ -175,20 +172,37 @@ func buildButtonGroup(c *ui.Context, items []ButtonGroupItem, o ButtonGroupOptio
 			// A disabled ancestor also disables every segment.
 			disabled := o.Disabled || item.Disabled || el.IsDisabled()
 			active := isActive(i)
-			pal := groupSegmentPalette(th, o.Variant, selectable, active, disabled)
-			el.Disabled(o.Disabled || item.Disabled).TextColor(pal.content)
-			if pal.container.A > 0 {
-				el.Background(pal.container)
+
+			var container, content, border ui.Color
+			var elevation tokens.ElevationLevel
+			if selectable && !disabled {
+				selT := clampF32(animateEffect(c, el, th, animChan0, boolFloat(active), motion.FastEffects), 0, 1)
+				offPal := groupSegmentPalette(th, o.Variant, true, false, false)
+				onPal := groupSegmentPalette(th, o.Variant, true, true, false)
+				container = mixOptionalColor(offPal.container, onPal.container, selT)
+				content = offPal.content.MixOklab(onPal.content, selT)
+				border = mixOptionalColor(offPal.border, onPal.border, selT)
+				elevation = offPal.elevation
+				if active {
+					elevation = onPal.elevation
+				}
+			} else {
+				pal := groupSegmentPalette(th, o.Variant, selectable, active, disabled)
+				container, content, border, elevation = pal.container, pal.content, pal.border, pal.elevation
 			}
-			if pal.border.A > 0 {
-				el.Border(1, pal.border)
+			border = resolveButtonBorder(th, o.Variant, border, disabled)
+			el.Disabled(o.Disabled || item.Disabled).TextColor(content)
+			if container.A > 0 {
+				el.Background(container)
 			}
-			elevation := pal.elevation
+			if border.A > 0 {
+				el.Border(1, border)
+			}
 			if pressed[i] && elevation > tokens.Level0 && elevation < tokens.Level5 {
 				// MD3E lifts a pressed Elevated segment one step.
 				elevation++
 			}
-			if o.Kind == ButtonGroupStandard && elevation > tokens.Level0 {
+			if elevation > tokens.Level0 {
 				ApplyElevationShadows(th, el, elevation)
 			}
 			if selectable {
@@ -198,13 +212,14 @@ func buildButtonGroup(c *ui.Context, items []ButtonGroupItem, o ButtonGroupOptio
 			// The Standard group widens the pressed button with the Fast
 			// Spatial spring, its neighbors giving way by the same total.
 			if o.Kind == ButtonGroupStandard {
-				expand := animateWithTheme(el, th, groupStateKey{}, groupExpandTarget(pressed[i], anyPressed, n), motion.FastSpatial)
+				expand := animateWithTheme(el, th, animChan5, groupExpandTargetFor(pressed[i], anyPressed, n, expandDelta), motion.FastSpatial)
 				el.PaddingX(max(pad+expand, 0))
 			}
 
-			// Corners: Standard keeps the resting shape and shrinks while
-			// pressed; Connected joins seams with small radii, morphs the
-			// chosen button into a full pill and shrinks when pressed.
+			// Corners: Standard keeps the resting shape (and morphs Round <->
+			// Square on selected toggles) while shrinking on press; Connected
+			// joins seams with small radii, morphs the chosen button into a
+			// full pill and shrinks when pressed.
 			var target [4]float32
 			switch o.Kind {
 			case ButtonGroupConnected:
@@ -213,7 +228,15 @@ func buildButtonGroup(c *ui.Context, items []ButtonGroupItem, o ButtonGroupOptio
 					target = [4]float32{full, full, full, full}
 				}
 			default:
-				target = [4]float32{outer, outer, outer, outer}
+				r := outer
+				if active && selectable {
+					if o.Shape == ButtonShapeSquare {
+						r = full
+					} else {
+						r = squareR
+					}
+				}
+				target = [4]float32{r, r, r, r}
 			}
 			if pressed[i] {
 				r := float32(spec.PressedRadius)
@@ -223,16 +246,19 @@ func buildButtonGroup(c *ui.Context, items []ButtonGroupItem, o ButtonGroupOptio
 			}
 			var radii [4]float32
 			for k := 0; k < 4; k++ {
-				radii[k] = animateWithTheme(el, th, groupCornerKey{i: k}, target[k], motion.FastSpatial)
+				radii[k] = max(animateWithTheme(el, th, animChan1+animChanKey(k), target[k], motion.FastSpatial), 0)
 			}
 			el.Radius(radii[0], radii[1], radii[2], radii[3])
 
+			avgR := (radii[0] + radii[1] + radii[2] + radii[3]) * 0.25
+			applyButtonHoverElevation(el, th, o.Variant, avgR, disabled || pressed[i])
+
 			borderInset := float32(0)
-			if pal.border.A > 0 {
+			if border.A > 0 {
 				borderInset = 1
 			}
-			attachRippleWithTheme(th, el, StateLayerOptions{
-				Color:       pal.content,
+			attachRippleWithContext(c, th, el, StateLayerOptions{
+				Color:       content,
 				Radii:       radii,
 				HasRadii:    true,
 				BorderInset: borderInset,
@@ -242,13 +268,11 @@ func buildButtonGroup(c *ui.Context, items []ButtonGroupItem, o ButtonGroupOptio
 			clicked := el.Clicked()
 			el.Children(func() {
 				if item.LeadingIcon != nil {
-					drawIconBox(c, item.LeadingIcon, float32(spec.IconSize), pal.content)
+					drawIconBox(c, item.LeadingIcon, float32(spec.IconSize), content)
 				}
-				if item.Label != "" {
-					applyTypeStyleWithTheme(th, ui.Text(c, item.Label).NoWrap(), buttonTypeRole(o.Size))
-				}
+				buildButtonLabel(c, th, item.Label, o.Size, spec)
 				if item.TrailingIcon != nil {
-					drawIconBox(c, item.TrailingIcon, float32(spec.IconSize), pal.content)
+					drawIconBox(c, item.TrailingIcon, float32(spec.IconSize), content)
 				}
 			})
 			if clicked {
@@ -264,6 +288,19 @@ func buildButtonGroup(c *ui.Context, items []ButtonGroupItem, o ButtonGroupOptio
 	return row
 }
 
+func groupExpandDeltaForSize(t tokens.SizeTier) float32 {
+	switch normalizeSizeTier(t) {
+	case tokens.SizeXS:
+		return 4
+	case tokens.SizeL:
+		return 8
+	case tokens.SizeXL:
+		return 10
+	default:
+		return groupExpandDelta
+	}
+}
+
 // groupGapOf returns the space between the buttons of a group kind.
 func groupGapOf(k ButtonGroupKind) float32 {
 	if k == ButtonGroupConnected {
@@ -276,13 +313,17 @@ func groupGapOf(k ButtonGroupKind) float32 {
 // Standard group: the pressed button widens by groupExpandDelta, the others
 // give way by the same total among them.
 func groupExpandTarget(pressed, anyPressed bool, n int) float32 {
+	return groupExpandTargetFor(pressed, anyPressed, n, groupExpandDelta)
+}
+
+func groupExpandTargetFor(pressed, anyPressed bool, n int, delta float32) float32 {
 	if pressed {
-		return groupExpandDelta
+		return delta
 	}
 	if !anyPressed || n <= 1 {
 		return 0
 	}
-	return -groupExpandDelta / float32(n-1)
+	return -delta / float32(n-1)
 }
 
 // connectedRadii returns the four corners of connected segment i of n: the
@@ -308,34 +349,75 @@ func connectedRadii(i, n int, outer, inner float32, rtl bool) [4]float32 {
 	}
 }
 
-// groupSegmentPalette resolves the colors of one group button.
+// groupSegmentPalette resolves the variant-aware colors of one group button.
 func groupSegmentPalette(th *Theme, variant ButtonVariant, selectable, active, disabled bool) buttonColors {
+	cs := th.Colors
 	if disabled {
-		onSurface := th.Colors.OnSurface
+		onSurface := cs.OnSurface
 		content := onSurface.Alpha(float32(tokens.DisabledContentOpacity))
-		if !selectable || active {
-			switch variant {
-			case ButtonOutlined:
-				return buttonColors{content: content, border: onSurface.Alpha(float32(tokens.DisabledContainerOpacity))}
-			case ButtonText:
-				// A Text button has no container, disabled or not.
-				return buttonColors{content: content}
+		fill := onSurface.Alpha(float32(tokens.DisabledContainerOpacity))
+		switch variant {
+		case ButtonOutlined:
+			if selectable && active {
+				return buttonColors{container: fill, content: content, border: fill}
 			}
-			return buttonColors{
-				container: onSurface.Alpha(float32(tokens.DisabledContainerOpacity)),
-				content:   content,
-			}
-		}
-		return buttonColors{
-			content: content,
-			border:  onSurface.Alpha(float32(tokens.DisabledContainerOpacity)),
+			return buttonColors{content: content, border: fill}
+		case ButtonText:
+			return buttonColors{content: content}
+		default:
+			return buttonColors{container: fill, content: content}
 		}
 	}
-	if !selectable || active {
+	if !selectable {
 		return buttonPaletteOf(th, variant, false)
 	}
-	return buttonColors{
-		content: th.Colors.OnSurfaceVariant,
-		border:  th.Colors.Outline,
+	if active {
+		switch variant {
+		case ButtonOutlined:
+			return buttonColors{
+				container: cs.SecondaryContainer,
+				content:   cs.OnSecondaryContainer,
+				border:    cs.SecondaryContainer,
+			}
+		case ButtonText:
+			return buttonColors{
+				container: cs.SecondaryContainer,
+				content:   cs.OnSecondaryContainer,
+			}
+		case ButtonElevated:
+			return buttonColors{
+				container: cs.Primary,
+				content:   cs.OnPrimary,
+				elevation: tokens.Level1,
+			}
+		default:
+			return buttonPaletteOf(th, variant, false)
+		}
+	}
+	// Unselected segment in a selectable group: stay harmonious with variant.
+	switch variant {
+	case ButtonOutlined:
+		border := cs.OutlineVariant
+		if th.Contrast >= tokens.ContrastHigh || border.A == 0 {
+			border = cs.Outline
+		}
+		return buttonColors{content: cs.OnSurfaceVariant, border: border}
+	case ButtonText:
+		return buttonColors{content: cs.OnSurfaceVariant}
+	case ButtonElevated:
+		return buttonColors{
+			container: SurfaceColorForElevation(th, tokens.Level1),
+			content:   cs.OnSurfaceVariant,
+			elevation: tokens.Level1,
+		}
+	default:
+		unselectedBg := cs.SurfaceContainerHigh
+		if unselectedBg.A == 0 {
+			unselectedBg = SurfaceColorForElevation(th, tokens.Level2)
+		}
+		return buttonColors{
+			container: unselectedBg,
+			content:   cs.OnSurfaceVariant,
+		}
 	}
 }
