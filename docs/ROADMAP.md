@@ -109,14 +109,14 @@ tokens  ──►  motion  ──►  shape  ──►  md3e (根包：核心美
 #### M11 — 大数据虚拟化与层级导航组件（根包补齐）
 > **目标**：补齐中后台、知识库、连接监控等数据密集场景的通用核心控件。
 
-- [ ] **M11.1 `VirtualList`（`virtuallist.go`）**
-  - 基于上游 `ui.List` 封装，支持万级/百万级条目流畅滚动、MD3E 分节圆角/行悬停（`Draw` 态层）、键盘导航与选中态。
-- [ ] **M11.2 `DataTable`（`datatable.go`）**
+- [x] **M11.1 `VirtualList`（`virtuallist.go`）**
+  - 基于上游 `ui.List` 封装，支持万级/百万级条目流畅滚动、MD3E 分节圆角/行悬停（`DrawOver` 态层与涟漪）、键盘导航与选中态。
+- [x] **M11.2 `DataTable`（`datatable.go`）**
   - 基于上游 `ui.Table` 封装 MD3E 数据表格：吸顶表头、列排序指示器、列宽拖拽、等宽数字右对齐、紧凑/舒适密度、行选中与右键菜单集成。
-- [ ] **M11.3 层级导航与分页**
-  - `TreeView`（基于上游 `ui.Tree` 封装 MD3E 缩进线、弹簧旋转展开箭头、选中胶囊高亮，适用于文件树/文档目录/配置树）。
-  - `Breadcrumb`（路径面包屑，窄屏自动折叠省略号菜单）。
-  - `Pagination`（基于 `ButtonGroup` / `IconButton` 组合的分页条）。
+- [x] **M11.3 层级导航与分页**
+  - `TreeView`（`treeview.go`，基于上游 `ui.TreeBase` 封装 MD3E `OutlineVariant` 缩进竖线、`motion.FastSpatial` 弹簧旋转展开箭头、`SecondaryContainer` 选中胶囊高亮及 `ui.Local` 展开态回退）。
+  - `Breadcrumb`（`breadcrumb.go`，响应式路径面包屑，支持 `MaxVisible` 与窄屏自动折叠至 `MoreHoriz` / `ui.MenuBase` 下拉菜单及 `CurrentPage` 静态当前项）。
+  - `Pagination`（`pagination.go`，基于 `ui.ButtonBase` 与 `TabularNums` / `motion.FastSpatial` 组合的 1-based 分页条，支持边界禁用、窗口省略号与 RTL 镜像）。
 
 ---
 

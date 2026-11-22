@@ -89,6 +89,11 @@ Go 模块路径：`github.com/imicola/mygo-md3e`（直接依赖上游 `github.co
 ├── status.go               # M10: SemanticTone、Tag、StatusPill（离屏零帧呼吸点）与 Avatar（异形/图片/状态点）
 ├── tiles.go                # M10: SwitchCard（Key 隔离防双切）与 ActionTile（RTL 自适应箭头）
 ├── feedback_extra.go       # M10: Skeleton（Tonal 柔和脉冲骨架屏）、EmptyState 与 Banner
+├── virtuallist.go          # M11: VirtualList（基于 ui.List 的万级虚拟化列表与 DrawOver 态层/涟漪）
+├── datatable.go            # M11: DataTable、DataTableCellText 与 ApplyDataTableMenuActions（基于 ui.Table）
+├── treeview.go             # M11: TreeView（基于 ui.TreeBase 的缩进引导线、弹簧旋转折叠箭头与本地展开态回退）
+├── breadcrumb.go           # M11: Breadcrumb（响应式路径面包屑与 MoreHoriz 溢出下拉菜单）
+├── pagination.go           # M11: Pagination（1-based 胶囊分页条、TabularNums 与窗口省略号折叠）
 ├── golden_test.go          # 纯几何 Golden 视觉基线测试（testdata/）
 └── examples/
     ├── m2-demo/            # M2: 独立可运行的令牌/动效/形状预览模块

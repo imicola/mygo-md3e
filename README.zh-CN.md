@@ -11,7 +11,7 @@
 - **物理弹簧动效（`motion`）**：12 组 Expressive / Standard 弹簧预设（Spatial 与 Effects），将 MD3E 的阻尼比 $\zeta$ 与刚度 $k$ 精确换算为 MyGo 物理阻尼系数 $c = 2\zeta\sqrt{k}$（$m=1$），Effects 类令牌启用 Oklab 插值与临界阻尼无过冲。
 - **35 种表现力形状与双向变形（`shape`）**：内置 `Circle` 至 `Heart` 共 35 种 `RoundedPolygon` 几何基元与双向 Cubic Bézier Morph，可直接通过 `ui.Path` 绘制与裁切。
 - **零膨胀矢量图标子包（`symbols`）**：内置 252 个 24×24 圆角矢量符号（分 7 个功能域），零 `init()`、零全局注册表，实现单图标级死代码消除；`symbols.<Name>.Draw` 可直接传入任意 `md3e.IconDraw` 槽位。
-- **全套 MD3E 原生组件（`md3e`）**：覆盖按钮/异形形变按钮（`ShapeButton` / `MorphIconButton`）/按钮组/SplitButton/FAB/FABMenu/工具栏/AppBar、选择控件/滑块/Chips/输入框、形状变形加载器/波浪进度条/Badge/Tooltip/Snackbar、卡片/`SwitchCard`/`ActionTile`/分割线/分段列表/导航栏-侧栏-抽屉/下划线与胶囊分段 Tabs、`Tag`/`StatusPill`/`Avatar`/`Skeleton`/`EmptyState`/`Banner`、Carousel/Dialog/BottomSheet/Menu、Date/Time Picker 与桌面 `WindowTitleBar`/Adaptive 布局。
+- **全套 MD3E 原生组件（`md3e`）**：覆盖按钮/异形形变按钮（`ShapeButton` / `MorphIconButton`）/按钮组/SplitButton/FAB/FABMenu/工具栏/AppBar、选择控件/滑块/Chips/输入框、形状变形加载器/波浪进度条/Badge/Tooltip/Snackbar、卡片/`SwitchCard`/`ActionTile`/分割线/分段与虚拟化列表表格（`VirtualList`、`DataTable`）/导航栏-侧栏-抽屉/`TreeView`/响应式 `Breadcrumb`/`Pagination`/下划线与胶囊分段 Tabs、`Tag`/`StatusPill`/`Avatar`/`Skeleton`/`EmptyState`/`Banner`、Carousel/Dialog/BottomSheet/Menu、Date/Time Picker 与桌面 `WindowTitleBar`/Adaptive 布局。
 - **按需链接（Zero-Bloat）**：无包级 `init()` 全局注册表，仅使用 `Button` 的应用不会链接进未使用的重型组件或多余内置图标。
 - **无障碍、RTL 与无头可测**：构建在 `ui.*Base` 原语之上，完整支持键盘导航、`ReduceMotion` 零空转帧收敛、从右到左（RTL）布局镜像，以及基于 `ui.NewTester` 虚拟时钟和 `ui/golden` 的自动化测试。
 
@@ -145,6 +145,11 @@ func main() {
 ├── status.go          # SemanticTone、Tag、StatusPill 与 Avatar
 ├── tiles.go           # SwitchCard 与 ActionTile
 ├── feedback_extra.go  # Skeleton、EmptyState 与 Banner
+├── virtuallist.go     # VirtualList（基于 ui.List 的虚拟化列表与 DrawOver 态层/涟漪）
+├── datatable.go       # DataTable、DataTableCellText 与 ApplyDataTableMenuActions（基于 ui.Table）
+├── treeview.go        # TreeView（基于 ui.TreeBase 的缩进竖线与弹簧旋转折叠箭头）
+├── breadcrumb.go      # Breadcrumb（响应式路径面包屑与 MoreHoriz 溢出下拉菜单）
+├── pagination.go      # Pagination（1-based 胶囊分页条、TabularNums 与窗口省略号折叠）
 ├── docs/              # 架构设计规范与 MD3E 技术规格基线
 └── examples/
     ├── gallery/       # 全量交互式展示画廊（属于根模块）
@@ -221,8 +226,9 @@ func main() {
 | --- | --- |
 | Card 与 Divider | `ElevatedCard`、`FilledCard`、`OutlinedCard`、`Card`、`Divider` |
 | 卡片式快捷开关与操作行 | `SwitchCard`、`ActionTile` |
-| Expressive 分段列表 | `List`、`ListItem` |
+| Expressive 分段与虚拟化列表/数据表 | `List`、`ListItem`、`VirtualList`、`DataTable`、`DataTableCellText`、`ApplyDataTableMenuActions` |
 | 导航组件 | `NavigationBar`、`NavigationRail`（`NavigationRailIndicatorStyle`）、`NavigationDrawer` |
+| 层级树、面包屑与分页条 | `TreeView`（`TreeNode`、`TreeViewOptions`）、`Breadcrumb`（`BreadcrumbItem`、`BreadcrumbOptions`）、`Pagination`（`PaginationOptions`） |
 | 页面切换过渡容器 | `PageTransition`、`AnimatedContent`（`TransitionFadeThrough` / `TransitionSharedAxisY` / `TransitionSharedAxisX` / `TransitionNone`） |
 | 滑动指示器与胶囊分段 Tabs | `PrimaryTabs`、`SecondaryTabs`、`PillTabs`、`SegmentedTabs` |
 | Carousel（Hero / MultiBrowse / Uncontained） | `Carousel` |
@@ -256,6 +262,20 @@ md3e.SwitchCard(c.Key("proxy"), "System Proxy", &proxyOn, md3e.SwitchCardOptions
 	LeadingIcon: symbols.Public.Draw,
 	Hairline:    true,
 })
+
+md3e.Breadcrumb(c.Key("path"), []md3e.BreadcrumbItem{
+	{Label: "Workspace", Icon: symbols.Home.Draw, OnClick: goHome},
+	{Label: "Docs", Icon: symbols.Folder.Draw, OnClick: goDocs},
+	{Label: "Navigation", Icon: symbols.Description.Draw},
+})
+
+md3e.TreeView(c.Key("files"), []md3e.TreeNode{
+	{Key: "docs", Label: "docs", Icon: symbols.Folder.Draw, Children: []md3e.TreeNode{
+		{Key: "docs/guide.md", Label: "guide.md", Icon: symbols.Description.Draw},
+	}},
+}, md3e.TreeViewOptions{Selected: &selectedKey, ShowIndentGuides: true})
+
+md3e.Pagination(c.Key("pager"), &page, 20, md3e.PaginationOptions{ShowEdges: true})
 ```
 
 ---

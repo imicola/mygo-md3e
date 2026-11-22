@@ -226,3 +226,16 @@ MD3E 将动效分为 **Spatial（空间：位移、缩放、尺寸、圆角、�
 ### 7.3 零膨胀符号子包（`symbols/`）
 - 独立公开子包 `github.com/imicola/mygo-md3e/symbols` 仅依赖标准库与 `github.com/egoist/mygo/ui`，导出 **252** 个 24×24 viewBox 圆角矢量符号（分 7 个功能域文件）与 `Custom`/`CustomEvenOdd` 扩展入口。
 - 零 `init()`、零全局注册表、零 `sync.OnceValue`；每个符号为独立包级 `*Symbol` 变量，内部使用零值 `sync.Once` 延迟解析 `ui.ParsePath` 并缓存，确保 Go 链接器实现单图标级死代码消除（DCE）。
+
+---
+
+## 8. 大数据虚拟化、层级导航与分页规格（M11）
+
+### 8.1 虚拟化列表与数据表格（`virtuallist.go` / `datatable.go`）
+- **`VirtualList`**：构建在 `ui.List` 之上，仅实例化视口附近条目，支持单选（`*int`）与多选（`ui.Selector`）、吸顶分区头、MD3E 分节圆角（首顶大圆角、末底大圆角、选中全大圆角 `SecondaryContainer`）、基于 `ui.ListRow.Hovered`/`Pressed`/`PointerPosition` 的 `DrawOver` 无重建态层与涟漪，以及 LTR/RTL 滚动条安全留白。
+- **`DataTable`**：构建在 `ui.Table` 之上，封装 MD3E `Surface` 容器（`Hairline`、默认 `ShapeMedium` 与 tonal `Level1`）、`Theme.Density` 自适应行高（Comfortable `48` / Desktop `38` / Compact `32` DIP）、列拖拽/调宽与双向 `ui.TableLayout` 同步、单/多列排序、`Numeric` 列 `TabularNums` 右对齐、`DataTableCellText` 与 `ApplyDataTableMenuActions` 菜单桥接。
+
+### 8.2 层级导航与分页（`treeview.go` / `breadcrumb.go` / `pagination.go`）
+- **`TreeView`**：基于 `ui.TreeBase` 构建，保留完整 `RoleTree` / `RoleTreeItem`（`Level`、`Expandable`、`Expanded`、`Selected`）、单次 Tab 停靠及 Up/Down/Left/Right/Home/End/首字母键入导航。分支披露箭头以 `motion.FastSpatial` 弹簧在 `0° ↔ ±90°` 平滑旋转（RTL 自动镜像箭头与方向键）；点击箭头仅切换展开态且不触发行选中与 `OnClick`；当 `TreeNode.Open == nil` 且存在 `Children` 时通过节点键隔离的 `ui.Local` 持久化展开态；`ShowIndentGuides` 在展开分支下方绘制对齐的 `OutlineVariant` `1` DIP 竖向引导线。
+- **`Breadcrumb`**：`ui.RoleNavigation` 地标（默认 `"Breadcrumb"`），祖先层级为 `ui.ButtonBase`，末尾当前项为静态 `RoleText` + `ui.CurrentPage` + `SecondaryContainer` 高亮胶囊；支持 `MaxVisible` 与基于容器 `LayoutBounds` 宽度的响应式自动折叠（中间层级收进 `MoreHoriz` 触发的 `ui.MenuBase` 下拉菜单，保留首项与末尾当前项），自带无限重排保护与 RTL 分隔符镜像。
+- **`Pagination`**：1-based（`1..totalPages`）`ui.RoleNavigation` 水平 `FocusGroup` 分页条，安全钳位越界 `*page` 与 `totalPages <= 0`；提供可选 `ShowEdges`（首页/末页）、上一页/下一页与边界禁用逻辑、基于 `SiblingCount`/`MaxButtons` 的对称窗口省略号折叠、`TabularNums` 等宽页码胶囊、`motion.FastSpatial` 按压圆角形变及 RTL 布局/方向键/图标镜像。

@@ -11,7 +11,7 @@ English | [简体中文](README.zh-CN.md)
 - **Physics-Driven Spring Motion (`motion`)**: 12 Expressive and Standard spring presets (Spatial & Effects) converting MD3E damping ratio $\zeta$ and stiffness $k$ to MyGo's viscous damping coefficient $c = 2\zeta\sqrt{k}$ (`Mass = 1`), with Oklab interpolation for effect tokens.
 - **35 Expressive Shapes & Bidirectional Morphing (`shape`)**: Built-in `RoundedPolygon` primitives (`Circle` through `Heart`) and bijective cubic Bézier morphing rendered and clipped via `ui.Path`.
 - **Zero-Bloat Vector Symbol Library (`symbols`)**: 252 rounded 24×24 vector symbols across 7 functional domains with zero `init()` or global registries for verified per-icon dead-code elimination; `symbols.<Name>.Draw` plugs directly into any `md3e.IconDraw` slot.
-- **Rich Component Suite (`md3e`)**: Action buttons, shape-morphing buttons (`ShapeButton` / `MorphIconButton`), split buttons, button groups, FABs & FAB menus, floating toolbars & app bars, selection controls, sliders, chips, text fields, shape-morphing loading indicators, wavy progress bars, tooltips, snackbars, cards, `SwitchCard`/`ActionTile`, segmented lists, navigation bar/rail/drawer, underline & pill/segmented tabs, `Tag`/`StatusPill`/`Avatar`/`Skeleton`/`EmptyState`/`Banner`, carousels, dialogs, bottom sheets, menus, date/time pickers, desktop `WindowTitleBar`, and adaptive layouts.
+- **Rich Component Suite (`md3e`)**: Action buttons, shape-morphing buttons (`ShapeButton` / `MorphIconButton`), split buttons, button groups, FABs & FAB menus, floating toolbars & app bars, selection controls, sliders, chips, text fields, shape-morphing loading indicators, wavy progress bars, tooltips, snackbars, cards, `SwitchCard`/`ActionTile`, segmented & virtualized lists (`VirtualList`, `DataTable`), navigation bar/rail/drawer, `TreeView`, responsive `Breadcrumb`, `Pagination`, underline & pill/segmented tabs, `Tag`/`StatusPill`/`Avatar`/`Skeleton`/`EmptyState`/`Banner`, carousels, dialogs, bottom sheets, menus, date/time pickers, desktop `WindowTitleBar`, and adaptive layouts.
 - **Zero-Bloat Dead-Code Elimination**: No package-level `init()` component or icon registries—applications only link the components and built-in vector icons they actually reference.
 - **Accessible, RTL-Ready, Headless-Testable**: Built over `ui.*Base` primitives with keyboard navigation, `ReduceMotion` frame-settling, right-to-left mirroring, and deterministic `ui.NewTester` + `ui/golden` verification.
 
@@ -145,6 +145,11 @@ Key conventions:
 ├── status.go          # SemanticTone, Tag, StatusPill, Avatar
 ├── tiles.go           # SwitchCard & ActionTile
 ├── feedback_extra.go  # Skeleton, EmptyState, Banner
+├── virtuallist.go     # VirtualList (ui.List virtualization + DrawOver state layers & ripples)
+├── datatable.go       # DataTable, DataTableCellText, ApplyDataTableMenuActions (ui.Table wrapper)
+├── treeview.go        # TreeView (ui.TreeBase wrapper + indent guides & spring disclosure)
+├── breadcrumb.go      # Breadcrumb (responsive path bar + MoreHoriz overflow dropdown menu)
+├── pagination.go      # Pagination (1-based pill bar + TabularNums & window ellipsis folding)
 ├── docs/              # Architecture guide & MD3E specification baseline
 └── examples/
     ├── gallery/       # Full interactive showcase application (part of root module)
@@ -221,8 +226,9 @@ Dependencies are strictly acyclic: `tokens` -> `motion` -> `shape` -> root `md3e
 | --- | --- |
 | Cards & Divider | `ElevatedCard`, `FilledCard`, `OutlinedCard`, `Card`, `Divider` |
 | Quick Toggle & Action Tiles | `SwitchCard`, `ActionTile` |
-| Expressive Segmented List | `List`, `ListItem` |
+| Expressive Segmented List & Virtualized Data | `List`, `ListItem`, `VirtualList`, `DataTable`, `DataTableCellText`, `ApplyDataTableMenuActions` |
 | Navigation Bar / Rail / Drawer | `NavigationBar`, `NavigationRail` (`NavigationRailIndicatorStyle`), `NavigationDrawer` |
+| Hierarchical Tree, Breadcrumb & Pagination | `TreeView` (`TreeNode`, `TreeViewOptions`), `Breadcrumb` (`BreadcrumbItem`, `BreadcrumbOptions`), `Pagination` (`PaginationOptions`) |
 | Page Transition Container | `PageTransition`, `AnimatedContent` (`TransitionFadeThrough` / `TransitionSharedAxisY` / `TransitionSharedAxisX` / `TransitionNone`) |
 | Sliding-Indicator & Pill Tabs | `PrimaryTabs`, `SecondaryTabs`, `PillTabs`, `SegmentedTabs` |
 | Carousel (Hero / MultiBrowse / Uncontained) | `Carousel` |
@@ -256,6 +262,20 @@ md3e.SwitchCard(c.Key("proxy"), "System Proxy", &proxyOn, md3e.SwitchCardOptions
 	LeadingIcon: symbols.Public.Draw,
 	Hairline:    true,
 })
+
+md3e.Breadcrumb(c.Key("path"), []md3e.BreadcrumbItem{
+	{Label: "Workspace", Icon: symbols.Home.Draw, OnClick: goHome},
+	{Label: "Docs", Icon: symbols.Folder.Draw, OnClick: goDocs},
+	{Label: "Navigation", Icon: symbols.Description.Draw},
+})
+
+md3e.TreeView(c.Key("files"), []md3e.TreeNode{
+	{Key: "docs", Label: "docs", Icon: symbols.Folder.Draw, Children: []md3e.TreeNode{
+		{Key: "docs/guide.md", Label: "guide.md", Icon: symbols.Description.Draw},
+	}},
+}, md3e.TreeViewOptions{Selected: &selectedKey, ShowIndentGuides: true})
+
+md3e.Pagination(c.Key("pager"), &page, 20, md3e.PaginationOptions{ShowEdges: true})
 ```
 
 ---
