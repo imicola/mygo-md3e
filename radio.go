@@ -34,23 +34,18 @@ type RadioOptions struct {
 	TouchTarget float32
 }
 
-// AnimateTo channels and locals of a radio button.
-type (
-	radioSelectKey struct{}
-	radioHaloKey   struct{}
-	radioRippleKey struct{}
+// radioRippleState is the press wave of a radio's heat area: where it began
+// in the touch target's DIPs, when, whether it still runs, and the row's
+// size as the last build laid it out, which tells where the target sits.
+type radioRippleState struct {
+	active bool
+	ox, oy float32
+	start  time.Time
+	rowW   float32
+	rowH   float32
+}
 
-	// radioRippleState is the press wave of a radio's heat area: where it began
-	// in the touch target's DIPs, when, whether it still runs, and the row's
-	// size as the last build laid it out, which tells where the target sits.
-	radioRippleState struct {
-		active bool
-		ox, oy float32
-		start  time.Time
-		rowW   float32
-		rowH   float32
-	}
-)
+func newRadioRippleState() *radioRippleState { return &radioRippleState{} }
 
 // Radio builds a Material Design 3 Expressive radio button over *selected,
 // choosing value: a ui.RadioBase[T] row whose key is the caller's c.Key, a
@@ -105,23 +100,26 @@ func Radio[T comparable](c *ui.Context, selected *T, value T, label string, opts
 
 	on := *selected == value
 	ringOff := cs.OnSurfaceVariant
+	ringHover := cs.OnSurface
 	ringOn := cs.Primary
 	dotInk := cs.Primary
 	if disabled {
 		ringOff = cs.OnSurface.Alpha(float32(tokens.DisabledContentOpacity))
+		ringHover = ringOff
 		ringOn = ringOff
 		dotInk = ringOff
 	}
 
-	thReduceMotion := th.ReduceMotion
+	thReduceMotion := th.ReduceMotion || c.Preferences().ReduceMotion
 	spatial := th.Animation(motion.FastSpatial)
-	sel := animateValue(el, radioSelectKey{}, boolFloat(on), spatial, thReduceMotion)
+	sel := animateValue(el, animChan0, boolFloat(on), spatial, thReduceMotion)
+	selColor := clampF32(sel, 0, 1)
+	dotScale := clampF32(sel, 0, 1.25)
 
-	haloSt := ui.Local(el, radioHaloKey{}, func() haloFadeState { return haloFadeState{} })
-	haloInk := cs.OnSurfaceVariant
+	haloSt := localHaloFade(el, animChan1)
+	haloInk := cs.OnSurface.MixOklab(cs.Primary, selColor)
 
-	// Press waves start only in the ring's touch target, not on the label.
-	rp := ui.Local(el, radioRippleKey{}, func() radioRippleState { return radioRippleState{} })
+	rp := localPtr(el, animChan2, newRadioRippleState)
 	if b := el.Bounds(); b.W > 0 {
 		rp.rowW, rp.rowH = b.W, b.H
 	}
@@ -132,27 +130,39 @@ func Radio[T comparable](c *ui.Context, selected *T, value T, label string, opts
 		if disabled {
 			return
 		}
-		if ev.Kind != ui.InputPointerDown || ev.Button != 0 || rp.rowW <= 0 {
-			return
+		switch ev.Kind {
+		case ui.InputPointerDown:
+			if ev.Button != 0 {
+				return
+			}
+			ox, oy := target/2, target/2
+			if rp.rowW > 0 {
+				slotX := float32(0)
+				if rtl {
+					slotX = rp.rowW - target
+				}
+				slotY := (rp.rowH - target) / 2
+				if ev.X >= slotX && ev.X <= slotX+target && ev.Y >= slotY && ev.Y <= slotY+target {
+					ox = clampF32(ev.X-slotX, 0, target)
+					oy = clampF32(ev.Y-slotY, 0, target)
+				}
+			}
+			rp.active = true
+			rp.ox, rp.oy, rp.start = ox, oy, ev.Time
+		case ui.InputKeyDown:
+			if ev.Key == ui.KeySpace && !ev.Repeat {
+				rp.active = true
+				rp.ox, rp.oy, rp.start = target/2, target/2, ev.Time
+			}
 		}
-		slotX := float32(0)
-		if rtl {
-			slotX = rp.rowW - target
-		}
-		slotY := (rp.rowH - target) / 2
-		if ev.X < slotX || ev.X > slotX+target || ev.Y < slotY || ev.Y > slotY+target {
-			return
-		}
-		rp.active = true
-		rp.ox = clampF32(ev.X-slotX, 0, target)
-		rp.oy = clampF32(ev.Y-slotY, 0, target)
-		rp.start = ev.Time
 	})
 
 	paintSnap := radioPaint{
-		sel:          clampF32(sel, 0, 1),
+		sel:          selColor,
+		dotScale:     dotScale,
 		haloInk:      haloInk,
 		ringOff:      ringOff,
+		ringHover:    ringHover,
 		ringOn:       ringOn,
 		dot:          dotInk,
 		ripple:       rp,
@@ -162,6 +172,9 @@ func Radio[T comparable](c *ui.Context, selected *T, value T, label string, opts
 	el.Children(func() {
 		ui.Box(c).Size(target, target).Shrink(0).Draw(func(p *ui.Painter, r ui.Rect) {
 			if !el.Valid() {
+				ghost := paintSnap
+				ghost.ripple = nil
+				drawRadio(p, r, ghost)
 				return
 			}
 			hovered := el.Hovered() && !disabled
@@ -178,6 +191,7 @@ func Radio[T comparable](c *ui.Context, selected *T, value T, label string, opts
 			}
 			paintCfg := paintSnap
 			paintCfg.halo = clampF32(halo, 0, 1)
+			paintCfg.focused = focused
 			paintCfg.reduceMotion = rm
 			drawRadio(p, r, paintCfg)
 		})
@@ -191,12 +205,15 @@ func Radio[T comparable](c *ui.Context, selected *T, value T, label string, opts
 // radioPaint is one frame of a radio button's ring.
 type radioPaint struct {
 	sel          float32
+	dotScale     float32
 	halo         float32
 	haloInk      ui.Color
 	ringOff      ui.Color
+	ringHover    ui.Color
 	ringOn       ui.Color
 	dot          ui.Color
 	ripple       *radioRippleState
+	focused      bool
 	reduceMotion bool
 }
 
@@ -207,8 +224,8 @@ func drawRadio(p *ui.Painter, r ui.Rect, s radioPaint) {
 		return
 	}
 	cx, cy := r.X+r.W/2, r.Y+r.H/2
-	radius := r.W / 2
-	paintHalo(p, cx, cy, radioHaloDiameter/2, s.haloInk, s.halo)
+	radius := min(float32(radioHaloDiameter)/2, min(r.W, r.H)/2)
+	paintHalo(p, cx, cy, radius, s.haloInk, s.halo)
 
 	if rp := s.ripple; rp != nil && rp.active && !s.reduceMotion {
 		elapsed := p.Now().Sub(rp.start)
@@ -236,9 +253,14 @@ func drawRadio(p *ui.Painter, r ui.Rect, s radioPaint) {
 	}
 
 	ring := ui.Rect{X: cx - radioRingSize/2, Y: cy - radioRingSize/2, W: radioRingSize, H: radioRingSize}
-	p.Stroke(ring, s.ringOff.MixOklab(s.ringOn, s.sel), radioRingSize/2, radioRingWidth)
+	if s.focused {
+		p.FocusRing(ring, [4]float32{radioRingSize / 2, radioRingSize / 2, radioRingSize / 2, radioRingSize / 2})
+	}
+	hoverMix := clampF32(s.halo/float32(tokens.StateHoverOpacity), 0, 1)
+	offCol := s.ringOff.MixOklab(s.ringHover, hoverMix)
+	p.Stroke(ring, offCol.MixOklab(s.ringOn, s.sel), radioRingSize/2, radioRingWidth)
 
-	dot := radioDotSize * s.sel
+	dot := radioDotSize * s.dotScale
 	if dot > 0.4 {
 		p.Fill(ui.Rect{X: cx - dot/2, Y: cy - dot/2, W: dot, H: dot}, s.dot, dot/2)
 	}

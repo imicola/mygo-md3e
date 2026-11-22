@@ -389,7 +389,7 @@ func TestCheckboxDisabled(t *testing.T) {
 	}
 	cx, cy := checkboxSlotCenter(info.Bounds, false, checkboxTouchTarget)
 	box := ui.Rect{X: cx - checkboxBoxSize/2, Y: cy - checkboxBoxSize/2, W: checkboxBoxSize, H: checkboxBoxSize}
-	want := cs.OnSurface.Alpha(float32(tokens.DisabledContainerOpacity)).Over(ui.RGB(255, 255, 255))
+	want := cs.OnSurface.Alpha(float32(tokens.DisabledContentOpacity)).Over(ui.RGB(255, 255, 255))
 	if px := tt.Image().RGBAAt(int(box.X+4), int(box.Y+4)); !colorMatches(px, want, 12) {
 		t.Fatalf("disabled checked fill %+v, want %+v", px, rgbOf(want))
 	}

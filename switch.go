@@ -41,14 +41,6 @@ type SwitchOptions struct {
 	OnIcon IconDraw
 }
 
-// AnimateTo channels of a switch.
-type (
-	switchOnKey    struct{}
-	switchPosKey   struct{}
-	switchThumbKey struct{}
-	switchHaloKey  struct{}
-)
-
 // Switch builds a Material Design 3 Expressive switch over *on: a
 // ui.SwitchBase row whose key is the caller's c.Key, carrying the 52x32 track
 // and its handle, and optionally the visible label that toggles it. The handle
@@ -120,8 +112,8 @@ func Switch(c *ui.Context, on *bool, opts ...SwitchOptions) ui.Element {
 	effects := th.Animation(motion.FastEffects)
 	spatial := th.Animation(motion.FastSpatial)
 
-	onP := animateValue(el, switchOnKey{}, boolFloat(onNow), effects, thReduceMotion)
-	pos := animateValue(el, switchPosKey{}, boolFloat(onNow), spatial, thReduceMotion)
+	onP := animateValue(el, animChan0, boolFloat(onNow), effects, thReduceMotion)
+	pos := animateValue(el, animChan1, boolFloat(onNow), spatial, thReduceMotion)
 	offSize := float32(switchThumbOff)
 	if o.OffIcon != nil {
 		offSize = switchThumbOn
@@ -134,9 +126,9 @@ func Switch(c *ui.Context, on *bool, opts ...SwitchOptions) ui.Element {
 	if pressed {
 		thumbTarget = switchThumbPressed
 	}
-	thumbSize := animateValue(el, switchThumbKey{}, thumbTarget, spatial, thReduceMotion)
+	thumbSize := animateValue(el, animChan2, thumbTarget, spatial, thReduceMotion)
 
-	haloSt := ui.Local(el, switchHaloKey{}, func() haloFadeState { return haloFadeState{} })
+	haloSt := localHaloFade(el, animChan3)
 
 	onIcon := o.OnIcon
 	if onIcon == nil {
@@ -144,27 +136,38 @@ func Switch(c *ui.Context, on *bool, opts ...SwitchOptions) ui.Element {
 	}
 	offIcon := o.OffIcon
 	rtl := c.Direction() == ui.RightToLeft
-	haloInk := cs.OnSurfaceVariant
+	onPClamped := clampF32(onP, 0, 1)
+	if !disabled && cs.OnPrimaryContainer.A > 0 {
+		onIconInk = cs.OnPrimaryContainer
+	}
+	haloInk := cs.OnSurface.MixOklab(cs.Primary, onPClamped)
+	offThumbHover := cs.OnSurfaceVariant
+	if disabled || offThumbHover.A == 0 {
+		offThumbHover = offThumb
+	}
 	paintSnap := switchPaint{
-		onP:        clampF32(onP, 0, 1),
-		pos:        clampF32(pos, 0, 1),
-		thumb:      clampF32(thumbSize, 0, switchTrackHeight),
-		haloInk:    haloInk,
-		onTrack:    onTrack,
-		offTrack:   offTrack,
-		onThumb:    onThumb,
-		offThumb:   offThumb,
-		offBorder:  offBorder,
-		onIcon:     onIcon,
-		offIcon:    offIcon,
-		onIconInk:  onIconInk,
-		offIconInk: offIconInk,
-		rtl:        rtl,
+		onP:           onPClamped,
+		pos:           clampF32(pos, -0.14, 1.14),
+		thumb:         clampF32(thumbSize, 0, switchTrackHeight),
+		haloInk:       haloInk,
+		onTrack:       onTrack,
+		offTrack:      offTrack,
+		onThumb:       onThumb,
+		offThumb:      offThumb,
+		offThumbHover: offThumbHover,
+		offBorder:     offBorder,
+		onIcon:        onIcon,
+		offIcon:       offIcon,
+		onIconInk:     onIconInk,
+		offIconInk:    offIconInk,
+		rtl:           rtl,
 	}
 
 	el.Children(func() {
 		ui.Box(c).Size(switchTrackWidth, switchTrackHeight).Shrink(0).Draw(func(p *ui.Painter, r ui.Rect) {
 			if !el.Valid() {
+				// Exit ghost draw: paint frozen snapshot without reading live state or scheduling frames.
+				drawSwitch(p, r, paintSnap)
 				return
 			}
 			hovered := el.Hovered() && !disabled
@@ -180,6 +183,7 @@ func Switch(c *ui.Context, on *bool, opts ...SwitchOptions) ui.Element {
 			}
 			paintCfg := paintSnap
 			paintCfg.halo = clampF32(halo, 0, 1)
+			paintCfg.focused = focusedDraw
 			drawSwitch(p, r, paintCfg)
 		})
 		if o.Label != "" {
@@ -191,21 +195,23 @@ func Switch(c *ui.Context, on *bool, opts ...SwitchOptions) ui.Element {
 
 // switchPaint is one frame of a switch's track.
 type switchPaint struct {
-	onP        float32
-	pos        float32
-	thumb      float32
-	halo       float32
-	haloInk    ui.Color
-	onTrack    ui.Color
-	offTrack   ui.Color
-	onThumb    ui.Color
-	offThumb   ui.Color
-	offBorder  ui.Color
-	onIcon     IconDraw
-	offIcon    IconDraw
-	onIconInk  ui.Color
-	offIconInk ui.Color
-	rtl        bool
+	onP           float32
+	pos           float32
+	thumb         float32
+	halo          float32
+	haloInk       ui.Color
+	onTrack       ui.Color
+	offTrack      ui.Color
+	onThumb       ui.Color
+	offThumb      ui.Color
+	offThumbHover ui.Color
+	offBorder     ui.Color
+	onIcon        IconDraw
+	offIcon       IconDraw
+	onIconInk     ui.Color
+	offIconInk    ui.Color
+	focused       bool
+	rtl           bool
 }
 
 // drawSwitch paints a switch's track, state layer, handle and handle icon in
@@ -219,33 +225,51 @@ func drawSwitch(p *ui.Painter, r ui.Rect, s switchPaint) {
 	track := s.offTrack.MixOklab(s.onTrack, s.onP)
 	p.Fill(r, track, radius)
 	if borderA := 1 - s.onP; borderA > 0.01 && s.offBorder.A > 0 {
-		p.Stroke(r, s.offBorder, radius, 2)
+		p.Stroke(r, s.offBorder.Alpha(borderA), radius, 2)
+	}
+	if s.focused {
+		p.FocusRing(r, [4]float32{radius, radius, radius, radius})
 	}
 
 	// Off, the 16 DIP handle sits 8 DIP in from the track's end, so its center
 	// is 16 DIP from there; on, the 24 DIP handle travels 20 DIP to lie 4 DIP
-	// in, its center 36 from the start.
+	// in, its center 36 from the start. Allow subtle FastSpatial spring overshoot
+	// while keeping the handle cleanly inside the 2 DIP track wall.
+	ts := s.thumb
 	cx := r.X + 16 + switchThumbTravel*s.pos
 	if s.rtl {
 		cx = r.X + r.W - 16 - switchThumbTravel*s.pos
+	}
+	minCX := r.X + ts*0.5 + 2
+	maxCX := r.X + r.W - ts*0.5 - 2
+	if maxCX >= minCX {
+		cx = clampF32(cx, minCX, maxCX)
 	}
 	if s.halo > 0.001 && s.haloInk.A > 0 {
 		h := float32(switchHaloDiameter) / 2
 		p.Fill(ui.Rect{X: cx - h, Y: cy - h, W: 2 * h, H: 2 * h}, s.haloInk.Alpha(s.halo), h)
 	}
 
-	ts := s.thumb
 	thumb := ui.Rect{X: cx - ts/2, Y: cy - ts/2, W: ts, H: ts}
-	thumbInk := s.offThumb.MixOklab(s.onThumb, s.onP)
+	hoverMix := clampF32(s.halo/float32(tokens.StateHoverOpacity), 0, 1)
+	offThumbCol := s.offThumb.MixOklab(s.offThumbHover, hoverMix)
+	thumbInk := offThumbCol.MixOklab(s.onThumb, s.onP)
 	p.Fill(thumb, thumbInk, ts/2)
 
 	iconSide := float32(16)
 	iconRect := ui.Rect{X: cx - iconSide/2, Y: cy - iconSide/2, W: iconSide, H: iconSide}
 	if s.onIcon != nil && s.onP > 0.02 {
-		s.onIcon(p, iconRect, s.onIconInk.Alpha(clampF32(s.onP, 0, 1)))
+		sc := 0.55 + 0.45*s.onP
+		p.Transform(ui.Scaling(sc, sc), cx, cy, func() {
+			s.onIcon(p, iconRect, s.onIconInk.Alpha(clampF32(s.onP, 0, 1)))
+		})
 	}
 	if s.offIcon != nil && s.onP < 0.98 {
-		s.offIcon(p, iconRect, s.offIconInk.Alpha(clampF32(1-s.onP, 0, 1)))
+		offP := clampF32(1-s.onP, 0, 1)
+		sc := 0.55 + 0.45*offP
+		p.Transform(ui.Scaling(sc, sc), cx, cy, func() {
+			s.offIcon(p, iconRect, s.offIconInk.Alpha(offP))
+		})
 	}
 }
 

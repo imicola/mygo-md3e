@@ -1,9 +1,12 @@
 package md3e
 
 import (
+	"time"
+
 	"github.com/egoist/mygo/ui"
 
 	"github.com/imicola/mygo-md3e/internal/mdicon"
+	"github.com/imicola/mygo-md3e/motion"
 	"github.com/imicola/mygo-md3e/tokens"
 )
 
@@ -80,12 +83,24 @@ func SwitchCard(c *ui.Context, title string, on *bool, opts ...SwitchCardOptions
 		PaddingEnd(m.padX).
 		Gap(m.gap).
 		AlignItems(ui.Center).
-		Radius(radius).
+		Clip().
 		DimDisabled(false)
 	disabled := o.Disabled || row.IsDisabled()
 	row.Disabled(o.Disabled)
 
 	bg, border, elevation := tileContainerPalette(th, o.Variant, o.HasVariant, o.Hairline, disabled)
+	onT := clampF32(animateEffect(c, row, th, animChan0, boolFloat(*on && !disabled), motion.FastEffects), 0, 1)
+	if onT > 0.001 && bg.A > 0 && cs.SecondaryContainer.A > 0 {
+		bg = bg.MixOklab(cs.SecondaryContainer, 0.28*onT)
+	}
+	rowPressed := !disabled && row.Pressed()
+	cornerTarget := radius
+	if rowPressed {
+		cornerTarget = max(radius-4, 8)
+	}
+	curRadius := max(animateWithTheme(row, th, animChan1, cornerTarget, motion.FastSpatial), 0)
+	row.Radius(curRadius)
+
 	if bg.A > 0 {
 		row.Background(bg)
 	}
@@ -94,6 +109,9 @@ func SwitchCard(c *ui.Context, title string, on *bool, opts ...SwitchCardOptions
 	}
 	if elevation > tokens.Level0 && !disabled {
 		ApplyElevationShadows(th, row, elevation)
+		if !rowPressed {
+			attachHoverElevation(row, th, elevation, min(elevation+1, tokens.Level5), curRadius, false)
+		}
 	}
 
 	titleInk := cs.OnSurface
@@ -110,7 +128,7 @@ func SwitchCard(c *ui.Context, title string, on *bool, opts ...SwitchCardOptions
 	}
 	attachRippleWithContext(c, th, row, StateLayerOptions{
 		Color:       titleInk,
-		Radius:      radius,
+		Radius:      curRadius,
 		BorderInset: borderInset,
 		Disabled:    disabled,
 	})
@@ -136,7 +154,7 @@ func SwitchCard(c *ui.Context, title string, on *bool, opts ...SwitchCardOptions
 			IconBadge(c, o.LeadingIcon, bo)
 		}
 
-		ui.Column(c).Grow(1).Gap(2).Children(func() {
+		ui.Column(c).Grow(1).Shrink(1).MinWidth(0).Gap(2).Children(func() {
 			if title != "" {
 				txt := applyTypeStyleWithTheme(th, ui.Text(c, title).MaxLines(1), m.titleRole)
 				txt.TextColor(titleInk)
@@ -246,11 +264,19 @@ func ActionTile(c *ui.Context, title string, opts ...ActionTileOptions) ui.Eleme
 		Gap(m.gap).
 		Justify(ui.Start).
 		AlignItems(ui.Center).
-		Radius(radius).
+		Clip().
 		DimDisabled(false).
 		FocusRing(false)
 	disabled := o.Disabled || el.IsDisabled()
 	el.Disabled(o.Disabled)
+
+	pressed := !disabled && el.Pressed()
+	cornerTarget := radius
+	if pressed {
+		cornerTarget = max(radius-4, 8)
+	}
+	curRadius := max(animateWithTheme(el, th, animChan0, cornerTarget, motion.FastSpatial), 0)
+	el.Radius(curRadius)
 
 	bg, border, elevation := tileContainerPalette(th, o.Variant, o.HasVariant, o.Hairline, disabled)
 	if bg.A > 0 {
@@ -261,6 +287,9 @@ func ActionTile(c *ui.Context, title string, opts ...ActionTileOptions) ui.Eleme
 	}
 	if elevation > tokens.Level0 && !disabled {
 		ApplyElevationShadows(th, el, elevation)
+		if !pressed {
+			attachHoverElevation(el, th, elevation, min(elevation+1, tokens.Level5), curRadius, false)
+		}
 	}
 
 	titleInk := cs.OnSurface
@@ -292,11 +321,12 @@ func ActionTile(c *ui.Context, title string, opts ...ActionTileOptions) ui.Eleme
 	}
 	attachRippleWithContext(c, th, el, StateLayerOptions{
 		Color:       titleInk,
-		Radius:      radius,
+		Radius:      curRadius,
 		BorderInset: borderInset,
 		Disabled:    disabled,
 	})
 
+	thReduce := th.ReduceMotion
 	el.Children(func() {
 		if o.Leading != nil {
 			o.Leading()
@@ -312,7 +342,7 @@ func ActionTile(c *ui.Context, title string, opts ...ActionTileOptions) ui.Eleme
 			IconBadge(c, o.LeadingIcon, bo)
 		}
 
-		ui.Column(c).Grow(1).Gap(2).Children(func() {
+		ui.Column(c).Grow(1).Shrink(1).MinWidth(0).Gap(2).Children(func() {
 			if title != "" {
 				txt := applyTypeStyleWithTheme(th, ui.Text(c, title).MaxLines(1), m.titleRole)
 				txt.TextColor(titleInk)
@@ -324,7 +354,7 @@ func ActionTile(c *ui.Context, title string, opts ...ActionTileOptions) ui.Eleme
 		})
 
 		if o.Meta != "" {
-			meta := applyTypeStyleWithTheme(th, ui.Text(c, o.Meta).NoWrap(), tokens.LabelMedium)
+			meta := applyTypeStyleWithTheme(th, ui.Text(c, o.Meta).NoWrap().Shrink(0), tokens.LabelMedium)
 			meta.TextColor(subInk)
 		}
 		if o.Badge != "" {
@@ -340,10 +370,40 @@ func ActionTile(c *ui.Context, title string, opts ...ActionTileOptions) ui.Eleme
 		}
 		if !o.HideChevron {
 			chev := mdicon.ChevronRight.Draw
+			nudgeSign := float32(1)
 			if rtl {
 				chev = mdicon.ChevronLeft.Draw
+				nudgeSign = -1
 			}
-			drawIconBox(c, chev, 18, subInk)
+			chevEl := ui.Box(c).Size(18, 18).Shrink(0)
+			chevHover := localHaloFade(chevEl, animChan0)
+			chevEl.Draw(func(p *ui.Painter, r ui.Rect) {
+				if r.W <= 0 || r.H <= 0 {
+					return
+				}
+				live := el.Valid() && chevEl.Valid()
+				reduce := thReduce || p.Preferences().ReduceMotion
+				var t float32
+				var more bool
+				if live && !disabled && rectIntersects(r, p.Visible()) {
+					target := float32(0)
+					if el.Hovered() {
+						target = 1
+					}
+					t, more = chevHover.step(target, p.Now(), reduce)
+				} else {
+					t = chevHover.alpha
+				}
+				dx := nudgeSign * 2 * t
+				ink := subInk
+				if t > 0.001 && !disabled {
+					ink = subInk.MixOklab(titleInk, 0.5*t)
+				}
+				chev(p, ui.Rect{X: r.X + dx, Y: r.Y, W: r.W, H: r.H}, ink)
+				if live && more {
+					p.After(16 * time.Millisecond)
+				}
+			})
 		}
 	})
 

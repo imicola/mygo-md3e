@@ -63,9 +63,6 @@ type CardOptions struct {
 	Backdrop func(p *ui.Painter, r ui.Rect)
 }
 
-// cardCornerKey is the AnimateTo channel of a card's corner radius.
-type cardCornerKey struct{}
-
 // cardPressedRadiusDelta is how much a pressed card's corners grow, in DIP.
 const cardPressedRadiusDelta = 4
 
@@ -151,15 +148,22 @@ func Card(c *ui.Context, content func(), opts ...CardOptions) ui.Element {
 		}
 	}
 	if disabled {
-		bg = cs.OnSurface.Alpha(float32(tokens.DisabledContainerOpacity))
-		border = ui.Transparent
+		if o.Variant == CardOutlined {
+			bg = cs.Surface
+			border = cs.OnSurface.Alpha(float32(tokens.DisabledContainerOpacity))
+		} else {
+			bg = cs.OnSurface.Alpha(float32(tokens.DisabledContainerOpacity))
+			border = ui.Transparent
+		}
 		elevation = tokens.Level0
 	}
 
+	pressed := false
 	radius := rest
 	if interactive {
 		target := rest
-		if !disabled && el.Pressed() {
+		pressed = !disabled && el.Pressed()
+		if pressed {
 			// MD3E lifts a pressed card and rounds its corners slightly.
 			target = rest + cardPressedRadiusDelta
 			if elevation > tokens.Level0 && elevation < tokens.Level5 {
@@ -167,7 +171,7 @@ func Card(c *ui.Context, content func(), opts ...CardOptions) ui.Element {
 				bg = SurfaceColorForElevation(th, elevation)
 			}
 		}
-		radius = animateWithTheme(el, th, cardCornerKey{}, target, motion.FastSpatial)
+		radius = max(animateWithTheme(el, th, animChan0, target, motion.FastSpatial), 0)
 	}
 
 	el.Padding(padding).Radius(radius)
@@ -191,7 +195,8 @@ func Card(c *ui.Context, content func(), opts ...CardOptions) ui.Element {
 			el.RadialGradient(*radGrad)
 		}
 	}
-	if (linGrad != nil && radGrad != nil) || o.Backdrop != nil {
+	hasCustomDraw := (linGrad != nil && radGrad != nil) || o.Backdrop != nil
+	if hasCustomDraw {
 		drawRadius := radius
 		backdrop := o.Backdrop
 		overlayRadial := linGrad != nil && radGrad != nil
@@ -208,6 +213,8 @@ func Card(c *ui.Context, content func(), opts ...CardOptions) ui.Element {
 				}
 			})
 		})
+	} else if interactive && !disabled && !pressed && o.Variant == CardElevated {
+		attachHoverElevation(el, th, tokens.Level1, tokens.Level2, radius, false)
 	}
 	if border.A > 0 {
 		el.Border(1, border)

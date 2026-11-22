@@ -39,14 +39,6 @@ type CheckboxOptions struct {
 	TouchTarget float32
 }
 
-// AnimateTo channels of a check box.
-type (
-	checkboxFillKey  struct{}
-	checkboxCheckKey struct{}
-	checkboxMixedKey struct{}
-	checkboxHaloKey  struct{}
-)
-
 // Checkbox builds a Material Design 3 Expressive check box over *checked: a
 // ui.CheckboxBase row whose key is the caller's c.Key, a centered 18 DIP box
 // with 2 DIP corners, the optional visible label, and MD3E hover, focus and
@@ -117,8 +109,12 @@ type checkboxPaint struct {
 	haloInk ui.Color
 	bgOff   ui.Color
 	bgOn    ui.Color
-	border  ui.Color
-	ink     ui.Color
+	border       ui.Color
+	borderHover  ui.Color
+	ink          ui.Color
+	ripple       *radioRippleState
+	focused      bool
+	reduceMotion bool
 }
 
 // buildCheckbox styles the base el, whose input ran as it was built, from the
@@ -126,6 +122,7 @@ type checkboxPaint struct {
 func buildCheckbox(c *ui.Context, el ui.Element, on, mixed bool, o CheckboxOptions) ui.Element {
 	th := CurrentTheme(c)
 	cs := th.Colors
+	rtl := c.Direction() == ui.RightToLeft
 
 	target := o.TouchTarget
 	if target < checkboxBoxSize {
@@ -159,41 +156,94 @@ func buildCheckbox(c *ui.Context, el ui.Element, on, mixed bool, o CheckboxOptio
 	bgOn := cs.Primary
 	content := cs.OnPrimary
 	border := cs.OnSurfaceVariant
+	borderHover := cs.OnSurface
 	if o.Error {
 		bgOn = cs.Error
 		content = cs.OnError
 		border = cs.Error
+		borderHover = cs.Error
 	}
 	if disabled {
-		bgOn = cs.OnSurface.Alpha(float32(tokens.DisabledContainerOpacity))
-		content = cs.OnSurface.Alpha(float32(tokens.DisabledContentOpacity))
+		// MD3 spec: disabled selected checkbox fills with OnSurface @ 38% and
+		// cuts the checkmark out in Surface for crisp legibility.
+		bgOn = cs.OnSurface.Alpha(float32(tokens.DisabledContentOpacity))
+		content = cs.Surface
 		border = cs.OnSurface.Alpha(float32(tokens.DisabledContentOpacity))
+		borderHover = border
 	}
 
-	thReduceMotion := th.ReduceMotion
+	thReduceMotion := th.ReduceMotion || c.Preferences().ReduceMotion
 	effects := th.Animation(motion.FastEffects)
 	spatial := th.Animation(motion.FastSpatial)
-	fill := animateValue(el, checkboxFillKey{}, boolFloat(on || mixed), effects, thReduceMotion)
-	check := animateValue(el, checkboxCheckKey{}, boolFloat(on), spatial, thReduceMotion)
-	dash := animateValue(el, checkboxMixedKey{}, boolFloat(mixed), spatial, thReduceMotion)
+	fill := animateValue(el, animChan0, boolFloat(on || mixed), effects, thReduceMotion)
+	check := animateValue(el, animChan1, boolFloat(on), spatial, thReduceMotion)
+	dash := animateValue(el, animChan2, boolFloat(mixed), spatial, thReduceMotion)
 
-	haloSt := ui.Local(el, checkboxHaloKey{}, func() haloFadeState { return haloFadeState{} })
+	haloSt := localHaloFade(el, animChan3)
+	rp := localPtr(el, animChan4, newRadioRippleState)
+	if b := el.Bounds(); b.W > 0 {
+		rp.rowW, rp.rowH = b.W, b.H
+	}
+	if disabled {
+		rp.active = false
+	}
+	el.ObserveInput(func(ev ui.InputEvent) {
+		if disabled {
+			return
+		}
+		switch ev.Kind {
+		case ui.InputPointerDown:
+			if ev.Button != 0 {
+				return
+			}
+			ox, oy := target/2, target/2
+			if rp.rowW > 0 {
+				slotX := float32(0)
+				if rtl {
+					slotX = rp.rowW - target
+				}
+				slotY := (rp.rowH - target) / 2
+				if ev.X >= slotX && ev.X <= slotX+target && ev.Y >= slotY && ev.Y <= slotY+target {
+					ox = clampF32(ev.X-slotX, 0, target)
+					oy = clampF32(ev.Y-slotY, 0, target)
+				}
+			}
+			rp.active = true
+			rp.ox, rp.oy, rp.start = ox, oy, ev.Time
+		case ui.InputKeyDown:
+			if ev.Key == ui.KeySpace && !ev.Repeat {
+				rp.active = true
+				rp.ox, rp.oy, rp.start = target/2, target/2, ev.Time
+			}
+		}
+	})
+
 	mark := localDrawPath(el)
-	haloInk := cs.OnSurfaceVariant
+	fillClamped := clampF32(fill, 0, 1)
+	haloInk := cs.OnSurface.MixOklab(cs.Primary, fillClamped)
+	if o.Error {
+		haloInk = cs.Error
+	}
 	paintSnap := checkboxPaint{
-		fill:    clampF32(fill, 0, 1),
-		check:   clampF32(check, 0, 1),
-		dash:    clampF32(dash, 0, 1),
-		haloInk: haloInk,
-		bgOff:   bgOff,
-		bgOn:    bgOn,
-		border:  border,
-		ink:     content,
+		fill:         fillClamped,
+		check:        clampF32(check, 0, 1),
+		dash:         clampF32(dash, 0, 1),
+		haloInk:      haloInk,
+		bgOff:        bgOff,
+		bgOn:         bgOn,
+		border:       border,
+		borderHover:  borderHover,
+		ink:          content,
+		ripple:       rp,
+		reduceMotion: thReduceMotion,
 	}
 
 	el.Children(func() {
 		ui.Box(c).Size(target, target).Shrink(0).Draw(func(p *ui.Painter, r ui.Rect) {
 			if !el.Valid() {
+				ghost := paintSnap
+				ghost.ripple = nil
+				drawCheckbox(p, r, ghost, mark)
 				return
 			}
 			hovered := el.Hovered() && !disabled
@@ -203,12 +253,15 @@ func buildCheckbox(c *ui.Context, el ui.Element, on, mixed bool, o CheckboxOptio
 			if disabled {
 				haloSt.reset()
 			}
-			halo, needFrame := haloSt.step(targetHalo, p.Now(), thReduceMotion || p.Preferences().ReduceMotion)
+			rm := thReduceMotion || p.Preferences().ReduceMotion
+			halo, needFrame := haloSt.step(targetHalo, p.Now(), rm)
 			if needFrame && rectIntersects(r, p.Visible()) {
 				p.After(16 * time.Millisecond)
 			}
 			paintCfg := paintSnap
 			paintCfg.halo = clampF32(halo, 0, 1)
+			paintCfg.focused = focused
+			paintCfg.reduceMotion = rm
 			drawCheckbox(p, r, paintCfg, mark)
 		})
 		if o.Label != "" {
@@ -218,35 +271,79 @@ func buildCheckbox(c *ui.Context, el ui.Element, on, mixed bool, o CheckboxOptio
 	return el
 }
 
-// drawCheckbox paints the state layer, box and mark of a check box in its
-// touch-target square r.
+// drawCheckbox paints the state layer, press wave, box and mark of a check box
+// in its touch-target square r.
 func drawCheckbox(p *ui.Painter, r ui.Rect, s checkboxPaint, mark *ui.Path) {
 	if r.W <= 0 || r.H <= 0 {
 		return
 	}
 	side := float32(checkboxBoxSize)
 	cx, cy := r.X+r.W/2, r.Y+r.H/2
-	paintHalo(p, cx, cy, checkboxHaloDiameter/2, s.haloInk, s.halo)
+	haloR := min(float32(checkboxHaloDiameter)/2, min(r.W, r.H)/2)
+	paintHalo(p, cx, cy, haloR, s.haloInk, s.halo)
+
+	if rp := s.ripple; rp != nil && rp.active && !s.reduceMotion {
+		elapsed := max(p.Now().Sub(rp.start), 0)
+		if elapsed >= radioRippleTime {
+			rp.active = false
+		} else {
+			t := float32(elapsed) / float32(radioRippleTime)
+			inv := 1 - t
+			grow := 1 - inv*inv*inv
+			waveR := 5 + (haloR-5)*grow
+			alpha := float32(tokens.StatePressedOpacity) * 1.4 * inv
+			ox, oy := r.X+rp.ox, r.Y+rp.oy
+			clip := ui.Rect{X: cx - haloR, Y: cy - haloR, W: 2 * haloR, H: 2 * haloR}
+			p.Clip(clip, haloR, func() {
+				p.Fill(ui.Rect{X: ox - waveR, Y: oy - waveR, W: 2 * waveR, H: 2 * waveR},
+					s.haloInk.Alpha(alpha), waveR)
+			})
+			if rectIntersects(r, p.Visible()) {
+				p.After(16 * time.Millisecond)
+			}
+		}
+	}
 
 	box := ui.Rect{X: cx - side/2, Y: cy - side/2, W: side, H: side}
+	if s.focused {
+		p.FocusRing(box, [4]float32{checkboxBoxRadius, checkboxBoxRadius, checkboxBoxRadius, checkboxBoxRadius})
+	}
 	bg := s.bgOff.MixOklab(s.bgOn, s.fill)
 	if bg.A > 0 {
 		p.Fill(box, bg, checkboxBoxRadius)
 	}
-	if a := 1 - s.fill; a > 0.01 && s.border.A > 0 {
-		p.Stroke(box, s.border.Alpha(a), checkboxBoxRadius, 2)
+	if a := clampF32(1-s.fill*1.8, 0, 1); a > 0.01 && s.border.A > 0 {
+		hoverMix := clampF32(s.halo/float32(tokens.StateHoverOpacity), 0, 1)
+		bCol := s.border.MixOklab(s.borderHover, hoverMix)
+		p.Stroke(box, bCol.Alpha(a), checkboxBoxRadius, 2)
 	}
 
-	if s.check > 0.001 {
+	markAlpha := clampF32(s.fill*1.3, 0, 1)
+	if markAlpha <= 0.01 {
+		return
+	}
+	markInk := s.ink.Alpha(markAlpha)
+	switch {
+	case s.check > 0.001 && s.dash > 0.001:
+		// Direct 3-point vector morph between indeterminate dash and checkmark.
+		t := s.check / (s.check + s.dash)
+		p0y := 0.50 + (0.53-0.50)*t
+		p1y := 0.50 + (0.71-0.50)*t
+		p2y := 0.50 + (0.31-0.50)*t
+		mark.Reset()
+		mark.MoveTo(box.X+box.W*0.24, box.Y+box.H*p0y).
+			LineTo(box.X+box.W*0.42, box.Y+box.H*p1y).
+			LineTo(box.X+box.W*0.76, box.Y+box.H*p2y)
+		p.StrokePath(mark, 2, markInk)
+	case s.check > 0.001:
 		path := checkboxCheckPath(mark, box)
 		path.Trim(0, s.check)
-		p.StrokePath(path, 2, s.ink)
-	}
-	if s.dash > 0.001 {
+		p.StrokePath(path, 2, markInk)
+	case s.dash > 0.001:
 		d := s.dash
 		path := checkboxDashPath(mark, box)
 		path.Trim((1-d)/2, (1+d)/2)
-		p.StrokePath(path, 2, s.ink)
+		p.StrokePath(path, 2, markInk)
 	}
 }
 

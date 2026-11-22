@@ -101,10 +101,15 @@ func buildActionChip(c *ui.Context, label string, o ChipOptions, panicMsg string
 	}
 	if pal.border.A > 0 {
 		el.Border(1, pal.border)
+	} else if o.Elevated && !disabled && th.Dark {
+		if hl := resolveHairlineColor(th, ui.Color{}); hl.A > 0 {
+			el.Border(1, hl)
+		}
 	}
 	el.Radius(chipRadius).TextColor(pal.content)
 	if o.Elevated && !disabled {
 		ApplyElevationShadows(th, el, tokens.Level1)
+		attachHoverElevation(el, th, tokens.Level1, tokens.Level2, chipRadius, disabled)
 	}
 
 	padStart, padEnd := float32(chipPad), float32(chipPad)
@@ -167,12 +172,6 @@ type FilterChipOptions struct {
 	OnChanged func(selected bool)
 }
 
-// FilterChip animation channels.
-type (
-	filterSelectKey struct{}
-	filterCheckKey  struct{}
-)
-
 // FilterChip builds a Material Design 3 Expressive filter chip over *selected,
 // as a tag filter: a ui.ToggleBase with the chip container, which a click, or
 // Space while it has the keyboard focus, toggles and Changed reports. Selecting
@@ -215,59 +214,88 @@ func FilterChip(c *ui.Context, selected *bool, label string, opts ...FilterChipO
 	pal := chipPaletteOf(th, o.Elevated, true, disabled)
 	el.Radius(chipRadius)
 
+	spatial := th.Animation(motion.FastSpatial)
+	effects := th.Animation(motion.FastEffects)
+	selectT := clampF32(animateValue(el, animChan0, boolFloat(*selected), effects, th.ReduceMotion), 0, 1)
+	checkT := clampF32(animateValue(el, animChan1, boolFloat(*selected), spatial, th.ReduceMotion), 0, 1.1)
+	slotT := clampF32(checkT, 0, 1)
+
 	padStart, padEnd := float32(chipPad), float32(chipPad)
 	if o.LeadingIcon != nil {
 		padStart = chipIconPad
+	} else if slotT > 0.001 {
+		// Smoothly tighten start padding as the checkmark slot opens so a
+		// label-only FilterChip never snaps +26 DIP on frame 1.
+		padStart = chipPad + (chipIconPad-chipPad)*slotT
 	}
 	if o.TrailingIcon != nil {
 		padEnd = chipIconPad
 	}
-	el.PaddingStart(padStart).PaddingEnd(padEnd)
-
-	spatial := th.Animation(motion.FastSpatial)
-	effects := th.Animation(motion.FastEffects)
-	selectT := clampF32(animateValue(el, filterSelectKey{}, boolFloat(*selected), effects, th.ReduceMotion), 0, 1)
-	checkT := clampF32(animateValue(el, filterCheckKey{}, boolFloat(*selected), spatial, th.ReduceMotion), 0, 1.1)
+	el.PaddingStart(padStart).PaddingEnd(padEnd).Gap(0)
 
 	if o.Elevated && !disabled {
 		ApplyElevationShadows(th, el, tokens.Level1)
 	}
 
+	var darkHairline ui.Color
+	if o.Elevated && !disabled && th.Dark {
+		darkHairline = resolveHairlineColor(th, ui.Color{})
+	}
 	el.Draw(func(p *ui.Painter, r ui.Rect) {
-		drawFilterChip(p, r, selectT, pal)
+		drawFilterChip(p, r, selectT, pal, darkHairline)
 	})
 	content := pal.content.MixOklab(pal.selectedContent, selectT)
 	iconColor := pal.icon.MixOklab(pal.selectedContent, selectT)
+	borderInset := float32(0)
+	if (pal.border.A > 0 && selectT < 0.5) || darkHairline.A > 0 {
+		borderInset = 1
+	}
 	attachRippleWithContext(c, th, el, StateLayerOptions{
-		Color:    content,
-		Radius:   chipRadius,
-		Disabled: disabled,
+		Color:       content,
+		Radius:      chipRadius,
+		BorderInset: borderInset,
+		Disabled:    disabled,
 	})
 
 	name := labelOr(o.Label, label)
 	el.Label(name)
 	changed := el.Changed()
-	showIcon := o.LeadingIcon != nil || checkT > 0.001
+	showIcon := o.LeadingIcon != nil || slotT > 0.001
 	el.Children(func() {
 		if showIcon {
-			ui.Box(c).Size(chipIconSize, chipIconSize).Shrink(0).Draw(func(p *ui.Painter, r ui.Rect) {
+			slotW := float32(chipIconSize)
+			slotGap := float32(chipIconGap)
+			if o.LeadingIcon == nil {
+				slotW = chipIconSize * slotT
+				slotGap = chipIconGap * slotT
+			}
+			ui.Box(c).Size(slotW, chipIconSize).MarginEnd(slotGap).Shrink(0).Draw(func(p *ui.Painter, r ui.Rect) {
+				if r.W <= 0.5 || r.H <= 0.5 {
+					return
+				}
+				iconR := ui.Rect{
+					X: r.X + (r.W-chipIconSize)/2,
+					Y: r.Y + (r.H-chipIconSize)/2,
+					W: chipIconSize,
+					H: chipIconSize,
+				}
 				if o.LeadingIcon != nil {
-					if alpha := 1 - checkT; alpha > 0.001 {
-						o.LeadingIcon(p, r, iconColor.Alpha(alpha))
+					if alpha := clampF32(1-checkT, 0, 1); alpha > 0.001 {
+						o.LeadingIcon(p, iconR, iconColor.Alpha(alpha))
 					}
 				}
 				if checkT > 0.001 {
-					cx, cy := r.X+r.W/2, r.Y+r.H/2
+					cx, cy := iconR.X+iconR.W/2, iconR.Y+iconR.H/2
 					s := 0.4 + 0.6*checkT
 					p.Transform(ui.Scaling(s, s), cx, cy, func() {
-						mdicon.Check.Draw(p, r, content)
+						mdicon.Check.Draw(p, iconR, content.Alpha(clampF32(checkT, 0, 1)))
 					})
 				}
 			})
 		}
 		applyTypeStyleWithTheme(th, ui.Text(c, label).NoWrap().Shrink(0).TextColor(content), tokens.LabelLarge)
 		if o.TrailingIcon != nil {
-			drawIconBox(c, o.TrailingIcon, chipIconSize, iconColor)
+			drawIconBox(c, o.TrailingIcon, chipIconSize, iconColor).MarginStart(chipIconGap)
 		}
 	})
 	if changed && o.OnChanged != nil {
@@ -335,7 +363,7 @@ func InputChip(c *ui.Context, label string, opts ...InputChipOptions) ui.Element
 	th := CurrentTheme(c)
 	cs := th.Colors
 	rtl := c.Direction() == ui.RightToLeft
-	outer := ui.Row(c).Height(chipHeight).Shrink(0).DimDisabled(false)
+	outer := ui.Row(c).Height(chipHeight).AlignItems(ui.Center).PaddingEnd(4).Shrink(0).DimDisabled(false)
 	disabled := o.Disabled || outer.IsDisabled()
 
 	pal := chipPaletteOf(th, o.Elevated, false, disabled)
@@ -344,26 +372,33 @@ func InputChip(c *ui.Context, label string, opts ...InputChipOptions) ui.Element
 	}
 	if pal.border.A > 0 {
 		outer.Border(1, pal.border)
+	} else if o.Elevated && !disabled && th.Dark {
+		if hl := resolveHairlineColor(th, ui.Color{}); hl.A > 0 {
+			outer.Border(1, hl)
+		}
 	}
 	outer.Radius(chipRadius).TextColor(pal.content)
 	if o.Elevated && !disabled {
 		ApplyElevationShadows(th, outer, tokens.Level1)
+		attachHoverElevation(outer, th, tokens.Level1, tokens.Level2, chipRadius, disabled)
 	}
 
 	bodyRadii := [4]float32{chipRadius, 0, 0, chipRadius}
-	closeRadii := [4]float32{0, chipRadius, chipRadius, 0}
 	if rtl {
 		bodyRadii = [4]float32{0, chipRadius, chipRadius, 0}
-		closeRadii = [4]float32{chipRadius, 0, 0, chipRadius}
 	}
 
 	bodyInk := pal.content
-	iconInk := pal.icon
+	iconInk := cs.OnSurfaceVariant
 	closeInk := cs.OnSurfaceVariant
 	if disabled {
 		bodyInk = cs.OnSurface.Alpha(float32(tokens.DisabledContentOpacity))
 		iconInk = bodyInk
 		closeInk = bodyInk
+	}
+	borderInset := float32(0)
+	if pal.border.A > 0 || (o.Elevated && !disabled && th.Dark) {
+		borderInset = 1
 	}
 	removeLabel := o.RemoveLabel
 	if removeLabel == "" {
@@ -387,14 +422,15 @@ func InputChip(c *ui.Context, label string, opts ...InputChipOptions) ui.Element
 			Shrink(0).
 			Disabled(disabled).
 			PaddingStart(padStart).
-			PaddingEnd(4).
+			PaddingEnd(6).
 			Label(labelOr(o.Label, label))
 		body.TextColor(bodyInk)
 		attachRippleWithContext(c, th, body, StateLayerOptions{
-			Color:    bodyInk,
-			Radii:    bodyRadii,
-			HasRadii: true,
-			Disabled: disabled,
+			Color:       bodyInk,
+			Radii:       bodyRadii,
+			HasRadii:    true,
+			BorderInset: borderInset,
+			Disabled:    disabled,
 		})
 		body.Children(func() {
 			if o.LeadingIcon != nil {
@@ -422,14 +458,14 @@ func InputChip(c *ui.Context, label string, opts ...InputChipOptions) ui.Element
 			DimDisabled(false).
 			FocusRing(false).
 			Size(chipCloseSize, chipCloseSize).
+			Radius(chipCloseSize / 2).
 			Shrink(0).
 			Disabled(disabled).
 			Label(removeLabel).
 			TextColor(closeInk)
 		attachRippleWithContext(c, th, closeEl, StateLayerOptions{
 			Color:    closeInk,
-			Radii:    closeRadii,
-			HasRadii: true,
+			Radius:   chipCloseSize / 2,
 			Disabled: disabled,
 		})
 		closeEl.Children(func() {
@@ -530,13 +566,11 @@ func chipPaletteOf(th *Theme, elevated, filter, disabled bool) chipColors {
 		}
 		if elevated {
 			out.container = fill
+		} else {
+			out.border = fill
 		}
-		out.border = fill
 		if filter {
 			out.selectedContainer = fill
-			if !elevated {
-				out.border = fill
-			}
 		}
 		return out
 	}
@@ -567,7 +601,7 @@ func chipPaletteOf(th *Theme, elevated, filter, disabled bool) chipColors {
 // drawFilterChip paints a filter chip's container: the unselected outlined or
 // elevated fill and border cross-fading into the selected SecondaryContainer
 // with no border, by t from 0 to 1.
-func drawFilterChip(p *ui.Painter, r ui.Rect, t float32, pal chipColors) {
+func drawFilterChip(p *ui.Painter, r ui.Rect, t float32, pal chipColors, darkHairline ui.Color) {
 	if r.W <= 0 || r.H <= 0 {
 		return
 	}
@@ -579,5 +613,7 @@ func drawFilterChip(p *ui.Painter, r ui.Rect, t float32, pal chipColors) {
 	}
 	if a := 1 - t; a > 0.01 && pal.border.A > 0 {
 		p.Stroke(r, pal.border.Alpha(a), chipRadius, 1)
+	} else if a := 1 - t; a > 0.01 && darkHairline.A > 0 {
+		p.Stroke(r, darkHairline.Alpha(a), chipRadius, 1)
 	}
 }
