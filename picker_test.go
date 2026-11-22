@@ -3,6 +3,7 @@ package md3e
 import (
 	"image"
 	"math"
+	"strconv"
 	"testing"
 	"time"
 
@@ -1405,15 +1406,20 @@ func TestTimePickerZeroValueInputKeepsPeriod(t *testing.T) {
 		})
 	})
 
-	pm0 := tt.Now().Hour() >= 12
+	now0 := tt.Now()
+	pm0 := now0.Hour() >= 12
+	pick0 := 3
+	if now0.Hour()%12 == pick0 {
+		pick0 = 5
+	}
 	hour := buttonInfo(t, tt, ui.RoleTextField, "Hour")
 	tt.ClickAt(center(hour.Bounds))
 	tt.Key(ui.Cmd, ui.KeyA)
-	tt.Type("3")
+	tt.Type(strconv.Itoa(pick0))
 	tt.Frame()
-	want0 := 3
+	want0 := pick0
 	if pm0 {
-		want0 = 15
+		want0 = pick0 + 12
 	}
 	if zeroAM.Hour() != want0 {
 		t.Fatalf("zero-value 12h input set %02d:00, want %02d:00 (pm=%v)", zeroAM.Hour(), want0, pm0)
@@ -1424,15 +1430,20 @@ func TestTimePickerZeroValueInputKeepsPeriod(t *testing.T) {
 	tt.Advance(12 * time.Hour)
 	tt.Click("Use PM")
 	tt.Frame()
-	pm1 := tt.Now().Hour() >= 12
+	now1 := tt.Now()
+	pm1 := now1.Hour() >= 12
+	pick1 := 4
+	if now1.Hour()%12 == pick1 {
+		pick1 = 6
+	}
 	hour2 := buttonInfo(t, tt, ui.RoleTextField, "Hour")
 	tt.ClickAt(center(hour2.Bounds))
 	tt.Key(ui.Cmd, ui.KeyA)
-	tt.Type("4")
+	tt.Type(strconv.Itoa(pick1))
 	tt.Frame()
-	want1 := 4
+	want1 := pick1
 	if pm1 {
-		want1 = 16
+		want1 = pick1 + 12
 	}
 	if zeroPM.Hour() != want1 {
 		t.Fatalf("shifted zero-value 12h input set %02d:00, want %02d:00 (pm=%v)", zeroPM.Hour(), want1, pm1)
