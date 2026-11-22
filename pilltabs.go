@@ -219,7 +219,8 @@ func SegmentedTabs(c *ui.Context, tabs []TabItem, opts ...PillTabsOptions) ui.El
 
 func buildPillTabs(c *ui.Context, items []TabItem, o PillTabsOptions, segmented bool) ui.Element {
 	th := CurrentTheme(c)
-	cs := th.Colors
+	disabledInk := th.Colors.OnSurface.Alpha(float32(tokens.DisabledContentOpacity))
+	disabledContainer := th.Colors.OnSurface.Alpha(float32(tokens.DisabledContainerOpacity))
 	label := o.Label
 	if label == "" {
 		label = "Tabs"
@@ -308,7 +309,7 @@ func buildPillTabs(c *ui.Context, items []TabItem, o PillTabsOptions, segmented 
 					ink = pal.activeInk
 				}
 				if itemDisabled {
-					ink = cs.OnSurface.Alpha(float32(tokens.DisabledContentOpacity))
+					ink = disabledInk
 				}
 				tab.Disabled(o.Disabled || item.Disabled).
 					AccessSelected(on).
@@ -335,8 +336,8 @@ func buildPillTabs(c *ui.Context, items []TabItem, o PillTabsOptions, segmented 
 							bdgBg, bdgInk = pal.activeBdgBg, pal.activeBdgInk
 						}
 						if itemDisabled {
-							bdgBg = cs.OnSurface.Alpha(float32(tokens.DisabledContainerOpacity))
-							bdgInk = cs.OnSurface.Alpha(float32(tokens.DisabledContentOpacity))
+							bdgBg = disabledContainer
+							bdgInk = disabledInk
 						}
 						Badge(c, item.Badge, BadgeOptions{
 							ShowZero:       true,
@@ -346,7 +347,7 @@ func buildPillTabs(c *ui.Context, items []TabItem, o PillTabsOptions, segmented 
 					} else if item.BadgeDot {
 						dotCol := pal.dotCol
 						if itemDisabled {
-							dotCol = cs.OnSurface.Alpha(float32(tokens.DisabledContentOpacity))
+							dotCol = disabledInk
 						}
 						SmallBadge(c, BadgeOptions{ContainerColor: dotCol})
 					}
@@ -445,7 +446,7 @@ func buildPillTabs(c *ui.Context, items []TabItem, o PillTabsOptions, segmented 
 	capsuleCol := pal.capsule
 	capsuleEdge := pal.capsuleEdge
 	if disabledAll || selTab.IsDisabled() {
-		capsuleCol = cs.OnSurface.Alpha(float32(tokens.DisabledContainerOpacity))
+		capsuleCol = disabledContainer
 		capsuleEdge = ui.Transparent
 	}
 
@@ -465,11 +466,12 @@ func buildPillTabs(c *ui.Context, items []TabItem, o PillTabsOptions, segmented 
 	trackPad := m.trackPad
 
 	// Paint the sliding capsule in Draw (underneath the tab labels, icons, and ripples).
-	tabs.List.Draw(func(p *ui.Painter, r ui.Rect) {
+	tabList := tabs.List
+	tabList.Draw(func(p *ui.Painter, r ui.Rect) {
 		if !indReady || r.W <= 0 || r.H <= 0 {
 			return
 		}
-		if tabs.List.Valid() {
+		if tabList.Valid() {
 			if pt := indicator.paintedTab; pt.W > 0 {
 				if absF32(pt.W-indicator.builtTabW) > 0.5 ||
 					absF32((pt.X-r.X)-indicator.builtRelX) > 0.5 ||

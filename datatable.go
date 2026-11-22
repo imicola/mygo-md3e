@@ -218,6 +218,11 @@ type dataTableTrack struct {
 	hasLayout          bool
 	lastSyncedLayout   ui.TableLayout
 	lastReportedLayout ui.TableLayout
+	columns            []DataTableColumn
+	uiColumns          []ui.TableColumn
+	sortBeforeBuild    []ui.SortOrder
+	clickedRow         int
+	doubleClickedRow   int
 }
 
 // DataTableCellText builds a single-line (or bounded-line) table cell text
@@ -332,7 +337,9 @@ func DataTable(c *ui.Context, columns []DataTableColumn, count int, cell func(ro
 	track := ui.Local(root, dataTableTrackKey{}, func() dataTableTrack { return dataTableTrack{} })
 	syncDataTableLayoutIn(state, o, track)
 
-	uiCols, colAligns := convertDataTableColumns(columns)
+	uiCols := track.updateColumns(columns)
+	onRowClick := !disabled && o.OnRowClick != nil
+	onRowSubmit := !disabled && o.OnRowSubmit != nil
 	monoFont := th.MonoFont
 	if monoFont == "" {
 		monoFont = "monospace"
@@ -340,14 +347,25 @@ func DataTable(c *ui.Context, columns []DataTableColumn, count int, cell func(ro
 
 	var prevSort ui.SortOrder
 	var prevSortBy []ui.SortOrder
-	if state.Sort != nil {
-		prevSort = *state.Sort
+	if !disabled && o.OnSortChanged != nil {
+		if state.Sort != nil {
+			prevSort = *state.Sort
+		}
+		if state.SortBy != nil {
+			prevSortBy = *state.SortBy
+		}
 	}
-	if state.SortBy != nil {
-		prevSortBy = slices.Clone(*state.SortBy)
+	// Cell builders may update the caller's sort slice in place.
+	if !slices.Equal(track.sortBeforeBuild, prevSortBy) {
+		if len(prevSortBy) == 0 || cap(track.sortBeforeBuild)/2 > len(prevSortBy) {
+			track.sortBeforeBuild = slices.Clone(prevSortBy)
+		} else {
+			clear(track.sortBeforeBuild)
+			track.sortBeforeBuild = append(track.sortBeforeBuild[:0], prevSortBy...)
+		}
 	}
 
-	clickedRow, doubleClickedRow := -1, -1
+	track.clickedRow, track.doubleClickedRow = -1, -1
 
 	root.Children(func() {
 		ui.Themed(c, tableTheme).
@@ -362,14 +380,14 @@ func DataTable(c *ui.Context, columns []DataTableColumn, count int, cell func(ro
 						cell(row, 0)
 						return
 					}
-					var colMeta DataTableColumn
+					numeric, mono := false, false
 					colAlign := ui.Start
-					if col >= 0 && col < len(columns) {
-						colMeta = columns[col]
-						colAlign = colAligns[col]
+					if col >= 0 && col < len(uiCols) {
+						colMeta := &track.columns[col]
+						numeric, mono = colMeta.Numeric, colMeta.Mono
+						colAlign = uiCols[col].Align
 					}
-					needWrap := colMeta.Numeric || colMeta.Mono || (!disabled && (o.OnRowClick != nil || o.OnRowSubmit != nil))
-					if !needWrap {
+					if !numeric && !mono && !onRowClick && !onRowSubmit {
 						cell(row, col)
 						return
 					}
@@ -378,19 +396,19 @@ func DataTable(c *ui.Context, columns []DataTableColumn, count int, cell func(ro
 						AlignItems(ui.Center).
 						Justify(colAlign).
 						Shrink(1).MinWidth(0)
-					if colMeta.Numeric {
+					if numeric {
 						TabularNums(cellBox)
 					}
-					if colMeta.Mono {
+					if mono {
 						cellBox.Font(monoFont)
 					}
-					if !disabled && (o.OnRowClick != nil || o.OnRowSubmit != nil) {
-						if cellBox.RowClicked() && o.OnRowClick != nil {
-							clickedRow = row
-						}
-						if o.OnRowSubmit != nil && cellBox.RowDoubleClicked() {
-							doubleClickedRow = row
-						}
+					// RowClicked marks the upstream row clickable for builds with
+					// either callback, including submit-only tables.
+					if (onRowClick || onRowSubmit) && cellBox.RowClicked() && onRowClick {
+						track.clickedRow = row
+					}
+					if onRowSubmit && cellBox.RowDoubleClicked() {
+						track.doubleClickedRow = row
 					}
 					cellBox.Children(func() {
 						cell(row, col)
@@ -406,8 +424,7 @@ func DataTable(c *ui.Context, columns []DataTableColumn, count int, cell func(ro
 
 				tableChanged := tableEl.Changed()
 				dispatchDataTablePostBuild(
-					th, state, tableEl, tableChanged, count, o, track,
-					prevSort, prevSortBy, clickedRow, doubleClickedRow, disabled,
+					state, tableEl, tableChanged, count, o, track, prevSort, disabled,
 				)
 			})
 	})
@@ -436,8 +453,7 @@ func buildDataTableUITheme(root ui.Element, origUI *ui.Theme, th *Theme, contain
 	}
 	hairline := resolveHairlineColor(th, ui.Color{})
 
-	t := ui.Local(root, dataTableThemeKey{}, func() ui.Theme { return ui.Theme{} })
-	*t = *origUI
+	t := *origUI
 	t.Background = ui.Transparent
 	t.Surface = containerBg
 	t.SurfaceHover = cs.OnSurface.Alpha(float32(tokens.StateHoverOpacity)).Over(containerBg)
@@ -463,7 +479,11 @@ func buildDataTableUITheme(root ui.Element, origUI *ui.Theme, th *Theme, contain
 		t.InactiveAccent = selectedBg.Mix(containerBg, 0.35)
 		t.AccentText = selectedInk
 	}
-	return t
+	cached := ui.Local(root, dataTableThemeKey{}, func() ui.Theme { return ui.Theme{} })
+	if *cached != t {
+		*cached = t
+	}
+	return cached
 }
 
 func resolveDataTableState(root ui.Element, th *Theme, o DataTableOptions) *ui.ListState {
@@ -542,17 +562,24 @@ func resolveDataTableState(root ui.Element, th *Theme, o DataTableOptions) *ui.L
 	return s
 }
 
-func convertDataTableColumns(columns []DataTableColumn) ([]ui.TableColumn, []ui.Align) {
-	uiCols := make([]ui.TableColumn, len(columns))
-	aligns := make([]ui.Align, len(columns))
+func (t *dataTableTrack) updateColumns(columns []DataTableColumn) []ui.TableColumn {
+	if slices.Equal(t.columns, columns) {
+		return t.uiColumns
+	}
+	if cap(t.columns)/2 > len(columns) {
+		t.columns, t.uiColumns = nil, nil
+	}
+	clear(t.columns)
+	clear(t.uiColumns)
+	t.columns = append(t.columns[:0], columns...)
+	t.uiColumns = slices.Grow(t.uiColumns[:0], len(columns))[:len(columns)]
 	for i := range columns {
 		c := &columns[i]
 		align := c.Align
 		if c.Numeric && align == ui.Start {
 			align = ui.End
 		}
-		aligns[i] = align
-		uiCols[i] = ui.TableColumn{
+		t.uiColumns[i] = ui.TableColumn{
 			Title:     c.Title,
 			ID:        c.ID,
 			Width:     sanitizeNonNegF32(c.Width),
@@ -564,7 +591,7 @@ func convertDataTableColumns(columns []DataTableColumn) ([]ui.TableColumn, []ui.
 			RowHeader: c.RowHeader,
 		}
 	}
-	return uiCols, aligns
+	return t.uiColumns
 }
 
 func syncDataTableLayoutIn(state *ui.ListState, o DataTableOptions, track *dataTableTrack) {
@@ -585,7 +612,6 @@ func syncDataTableLayoutIn(state *ui.ListState, o DataTableOptions, track *dataT
 }
 
 func dispatchDataTablePostBuild(
-	th *Theme,
 	state *ui.ListState,
 	tableEl ui.Element,
 	tableChanged bool,
@@ -593,11 +619,9 @@ func dispatchDataTablePostBuild(
 	o DataTableOptions,
 	track *dataTableTrack,
 	prevSort ui.SortOrder,
-	prevSortBy []ui.SortOrder,
-	clickedRow, doubleClickedRow int,
 	disabled bool,
 ) {
-	_ = th
+	clickedRow, doubleClickedRow := track.clickedRow, track.doubleClickedRow
 	var curSort ui.SortOrder
 	var curSortBy []ui.SortOrder
 	if state.Sort != nil {
@@ -606,7 +630,7 @@ func dispatchDataTablePostBuild(
 	if state.SortBy != nil {
 		curSortBy = *state.SortBy
 	}
-	if !disabled && o.OnSortChanged != nil && (curSort != prevSort || !slices.Equal(curSortBy, prevSortBy)) {
+	if !disabled && o.OnSortChanged != nil && (curSort != prevSort || !slices.Equal(curSortBy, track.sortBeforeBuild)) {
 		o.OnSortChanged(curSort, slices.Clone(curSortBy))
 	}
 

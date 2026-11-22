@@ -115,7 +115,9 @@ func buildTabs(c *ui.Context, items []TabItem, opts []TabsOptions, primary bool)
 		o = opts[0]
 	}
 	th := CurrentTheme(c)
-	cs := th.Colors
+	activeInk, inactiveInk := th.Colors.Primary, th.Colors.OnSurfaceVariant
+	disabledTabInk := th.Colors.OnSurface.Alpha(float32(tokens.DisabledContentOpacity))
+	dividerInk := th.Colors.OutlineVariant
 	label := o.Label
 	if label == "" {
 		label = "Tabs"
@@ -180,12 +182,12 @@ func buildTabs(c *ui.Context, items []TabItem, opts []TabsOptions, primary bool)
 
 				on := *selected == i
 				disabled := o.Disabled || item.Disabled || tab.IsDisabled()
-				ink := cs.OnSurfaceVariant
+				ink := inactiveInk
 				if on {
-					ink = cs.Primary
+					ink = activeInk
 				}
 				if disabled {
-					ink = cs.OnSurface.Alpha(float32(tokens.DisabledContentOpacity))
+					ink = disabledTabInk
 				}
 				tab.Disabled(o.Disabled || item.Disabled).
 					AccessSelected(on).
@@ -296,11 +298,12 @@ func buildTabs(c *ui.Context, items []TabItem, opts []TabsOptions, primary bool)
 		c.Invalidate()
 	}
 
-	disabledInk := cs.Primary
-	if o.Disabled || tabs.List.IsDisabled() || selTab.IsDisabled() {
-		disabledInk = cs.OnSurface.Alpha(float32(tokens.DisabledContentOpacity))
+	tabList := tabs.List
+	indicatorInk := activeInk
+	if o.Disabled || tabList.IsDisabled() || selTab.IsDisabled() {
+		indicatorInk = disabledTabInk
 	}
-	if !primary && cs.OutlineVariant.A > 0 {
+	if !primary && dividerInk.A > 0 {
 		root.DrawOver(func(p *ui.Painter, r ui.Rect) {
 			if !root.Valid() || r.W <= 0 || r.H <= 0 {
 				return
@@ -310,7 +313,7 @@ func buildTabs(c *ui.Context, items []TabItem, opts []TabsOptions, primary bool)
 				Y: r.Y + r.H - tabsSecondaryDividerThickness,
 				W: r.W,
 				H: tabsSecondaryDividerThickness,
-			}, cs.OutlineVariant, 0)
+			}, dividerInk, 0)
 		})
 	}
 	srv := c.Services()
@@ -322,8 +325,8 @@ func buildTabs(c *ui.Context, items []TabItem, opts []TabsOptions, primary bool)
 			indicator.paintedTab = tr
 		})
 	}
-	tabs.List.DrawOver(func(p *ui.Painter, r ui.Rect) {
-		if !tabs.List.Valid() || !indicator.set || r.W <= 0 || r.H <= 0 {
+	tabList.DrawOver(func(p *ui.Painter, r ui.Rect) {
+		if !tabList.Valid() || !indicator.set || r.W <= 0 || r.H <= 0 {
 			return
 		}
 		if pt := indicator.paintedTab; pt.W > 0 {
@@ -347,7 +350,7 @@ func buildTabs(c *ui.Context, items []TabItem, opts []TabsOptions, primary bool)
 			Y: y,
 			W: min(indicator.w, max(r.W-indicator.x, 0)),
 			H: height,
-		}, [4]float32{half, half, half, half}, disabledInk)
+		}, [4]float32{half, half, half, half}, indicatorInk)
 	})
 	return root
 }

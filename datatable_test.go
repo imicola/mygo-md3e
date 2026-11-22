@@ -610,3 +610,22 @@ func headerBounds(t *testing.T, tt *ui.Tester, title string) ui.Rect {
 	}
 	return info.Bounds
 }
+
+func TestDataTableColumnCacheUpdatesInPlaceChanges(t *testing.T) {
+	columns := []DataTableColumn{{Title: "Count", Width: 100}, {Title: "Name"}}
+	var track dataTableTrack
+	cached := track.updateColumns(columns)
+	if same := track.updateColumns(columns); &same[0] != &cached[0] {
+		t.Fatal("unchanged columns should reuse the native column slice")
+	}
+
+	columns[0].Numeric = true
+	columns[0].Width = 144
+	updated := track.updateColumns(columns)
+	if updated[0].Align != ui.End || updated[0].Width != 144 || !track.columns[0].Numeric {
+		t.Fatalf("in-place change did not refresh column metadata: %+v", updated[0])
+	}
+	if got := track.updateColumns(nil); len(got) != 0 {
+		t.Fatalf("removing all columns left stale columns: %+v", got)
+	}
+}

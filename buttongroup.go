@@ -145,8 +145,15 @@ func buildButtonGroup(c *ui.Context, items []ButtonGroupItem, o ButtonGroupOptio
 	row.Children(func() {
 		// Read every segment's press before styling any: the neighbors of the
 		// pressed button give way as it widens.
-		els := make([]ui.Element, n)
-		pressed := make([]bool, n)
+		var stackEls [12]ui.Element
+		var stackPressed [12]bool
+		var els []ui.Element
+		var pressed []bool
+		if n <= len(stackEls) {
+			els, pressed = stackEls[:n], stackPressed[:n]
+		} else {
+			els, pressed = make([]ui.Element, n), make([]bool, n)
+		}
 		for i := range items {
 			els[i] = ui.ButtonBase(c).
 				DimDisabled(false).

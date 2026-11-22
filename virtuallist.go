@@ -134,12 +134,15 @@ func VirtualList(c *ui.Context, count int, row func(r ui.ListRow), opts ...Virtu
 	disabled := o.Disabled || root.IsDisabled()
 
 	listTheme := ui.Local(root, virtualListThemeKey{}, func() ui.Theme { return ui.Theme{} })
-	*listTheme = *origUI
-	listTheme.Background = ui.Transparent
-	listTheme.Accent = ui.Transparent
-	listTheme.InactiveAccent = ui.Transparent
-	listTheme.SurfaceHover = ui.Transparent
-	listTheme.Radius = 0
+	next := *origUI
+	next.Background = ui.Transparent
+	next.Accent = ui.Transparent
+	next.InactiveAccent = ui.Transparent
+	next.SurfaceHover = ui.Transparent
+	next.Radius = 0
+	if next != *listTheme {
+		*listTheme = next
+	}
 
 	state := resolveVirtualListState(root, o)
 	metrics := computeVirtualListMetrics(th, o)
@@ -459,6 +462,7 @@ func attachVirtualListRowFeedback(
 		return
 	}
 
+	thReduceMotion := th.ReduceMotion
 	rowShell.DrawOver(func(p *ui.Painter, rect ui.Rect) {
 		if rect.W <= 0 || rect.H <= 0 {
 			return
@@ -477,7 +481,7 @@ func attachVirtualListRowFeedback(
 			return
 		}
 
-		reduceMotion := th.ReduceMotion || p.Preferences().ReduceMotion
+		reduceMotion := thReduceMotion || p.Preferences().ReduceMotion
 		now := p.Now()
 		hovered := r.Hovered()
 		pressed := r.Pressed()
