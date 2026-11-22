@@ -149,11 +149,20 @@ func MarkdownThemeFor(th *md3e.Theme, opts ...MarkdownThemeOptions) *markdown.Th
 	textCol := pickColor(cs.OnSurface, fallbackDocInk(th.Dark))
 	mutedCol := pickColor(cs.OnSurfaceVariant, textCol.Alpha(0.72))
 	linkCol := pickColor(cs.Primary, md3e.DefaultSeedColor)
-	ruleCol := pickColor(cs.OutlineVariant, cs.Outline, mutedCol.Alpha(0.3))
-	codeBg := pickColor(cs.SurfaceContainerHigh, cs.SurfaceContainerHighest, textCol.Alpha(0.08))
+	hairlineCol := resolveHairlineColor(th)
+	ruleCol := pickColor(hairlineCol, cs.OutlineVariant, cs.Outline, mutedCol.Alpha(0.3))
+	inlineCodeBg := textCol.Alpha(0.075)
+	if th.Dark {
+		inlineCodeBg = textCol.Alpha(0.11)
+	}
+	codeBlockBg := pickColor(cs.SurfaceContainerHigh, cs.SurfaceContainerHighest, inlineCodeBg)
 	tableHeader := pickColor(cs.SurfaceContainerHigh, cs.SurfaceContainer, textCol.Alpha(0.05))
 	tableStripe := pickColor(cs.SurfaceContainerLow, cs.Surface)
 	markCol := pickColor(cs.TertiaryContainer, cs.SecondaryContainer, ui.RGBA(250, 204, 21, 0.32))
+	quoteBar := linkCol.Alpha(0.55)
+	if th.Contrast >= tokens.ContrastHigh {
+		quoteBar = linkCol
+	}
 
 	hRoles := [6]tokens.TypeRole{
 		tokens.HeadlineLarge,
@@ -163,8 +172,8 @@ func MarkdownThemeFor(th *md3e.Theme, opts ...MarkdownThemeOptions) *markdown.Th
 		tokens.TitleMedium,
 		tokens.TitleSmall,
 	}
-	hTops := [6]float32{1.40, 1.30, 1.20, 1.10, 1.00, 0.95}
-	hBots := [6]float32{0.55, 0.50, 0.45, 0.40, 0.35, 0.30}
+	hTops := [6]float32{1.55, 1.42, 1.28, 1.16, 1.05, 0.98}
+	hBots := [6]float32{0.58, 0.52, 0.46, 0.40, 0.36, 0.32}
 
 	var headings [6]markdown.HeadingStyle
 	for idx, role := range hRoles {
@@ -209,19 +218,19 @@ func MarkdownThemeFor(th *md3e.Theme, opts ...MarkdownThemeOptions) *markdown.Th
 		StrongWeight:        strongWeight,
 		LinkWeight:          500,
 		Code:                textCol,
-		CodeBackground:      codeBg,
+		CodeBackground:      inlineCodeBg,
 		CodeSize:            0.875,
 		BlockSpacing:        0.75,
 		ItemSpacing:         0.25,
 		Headings:            headings,
 		ListIndent:          1.6,
-		QuoteBar:            pickColor(cs.Outline, ruleCol),
+		QuoteBar:            quoteBar,
 		QuoteText:           mutedCol,
 		QuoteBarWidth:       3,
 		Alerts:              [5]ui.Color{linkCol, pickColor(th.Success, cs.Tertiary, linkCol), pickColor(cs.Tertiary, linkCol), pickColor(th.Warning, cs.Secondary, linkCol), pickColor(cs.Error, linkCol)},
 		Rule:                ruleCol,
-		CodeBlockBackground: codeBg,
-		CodeBlockBorder:     resolveHairlineColor(th),
+		CodeBlockBackground: codeBlockBg,
+		CodeBlockBorder:     hairlineCol,
 		CodeBlockRadius:     resolveCodeRadius(th, tokens.ShapeMedium, 0),
 		CodeBlockPadding:    0.9,
 		CodeColors:          codeview.ThemeFromMD3E(th),

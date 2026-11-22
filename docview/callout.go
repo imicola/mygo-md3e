@@ -122,7 +122,8 @@ func Callout(c *ui.Context, kind CalloutKind, body func(), opts ...CalloutOption
 	padStart := float32(16) * padScale
 	padEnd := float32(14) * padScale
 	padY := float32(12) * padScale
-	stripeW := float32(4)
+	stripeW := float32(3.5)
+	stripeInsetX := float32(1.5)
 
 	role := ui.RoleRegion
 	if o.LiveAlert {
@@ -137,7 +138,7 @@ func Callout(c *ui.Context, kind CalloutKind, body func(), opts ...CalloutOption
 	box := ui.Column(c).
 		AlignSelf(ui.Stretch).
 		Padding(padY, 0, padY, 0).
-		PaddingStart(padStart + stripeW).
+		PaddingStart(padStart + stripeW + stripeInsetX).
 		PaddingEnd(padEnd).
 		Gap(6).
 		Radius(radius).
@@ -153,11 +154,12 @@ func Callout(c *ui.Context, kind CalloutKind, body func(), opts ...CalloutOption
 		if r.W <= 0 || r.H <= 0 || pal.accent.A == 0 {
 			return
 		}
-		x := r.X
+		x := r.X + stripeInsetX
 		if rtl {
-			x = r.X + r.W - stripeW
+			x = r.X + r.W - stripeInsetX - stripeW
 		}
-		p.Fill(ui.Rect{X: x, Y: r.Y, W: stripeW, H: r.H}, pal.accent, 0)
+		insetY := minF32(8, max(0, (r.H-12)*0.5))
+		p.Fill(ui.Rect{X: x, Y: r.Y + insetY, W: stripeW, H: max(4, r.H-2*insetY)}, pal.accent, stripeW*0.5)
 	})
 
 	box.Children(func() {
@@ -224,11 +226,15 @@ func calloutPaletteFor(th *md3e.Theme, kind CalloutKind) calloutPalette {
 		name = "Note"
 	}
 
+	if th.Dark && th.Contrast < tokens.ContrastHigh && container.A > 0 && cs.SurfaceContainerLow.A > 0 {
+		container = container.MixOklab(cs.SurfaceContainerLow, 0.36)
+	}
+
 	headerInk := accent
-	if container.A > 0 && tokens.ContrastRatio(headerInk, container) < 3.0 {
+	if container.A > 0 && tokens.ContrastRatio(headerInk, container) < 4.5 {
 		headerInk = onContainer
 	}
-	border := accent.Alpha(0.30)
+	border := accent.Alpha(0.28)
 	if th.Contrast >= tokens.ContrastHigh {
 		border = accent.Alpha(0.75)
 	}

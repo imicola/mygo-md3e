@@ -167,11 +167,29 @@ func CodeBlock(c *ui.Context, code string, opts ...CodeBlockOptions) ui.Element 
 				body.AlignSelf(ui.Stretch)
 			}
 
+			if o.ShowLineNumbers {
+				gutterW := m.bodyPad + lineNumWidth + m.lineNumGap*0.5
+				gutterWash := cs.OnSurface.Alpha(0.03)
+				if th.Dark {
+					gutterWash = cs.OnSurface.Alpha(0.04)
+				}
+				gutterRule := resolveHairlineColor(th)
+				body.Draw(func(p *ui.Painter, r ui.Rect) {
+					if r.W <= gutterW || r.H <= 0 {
+						return
+					}
+					p.Fill(ui.Rect{X: r.X, Y: r.Y, W: gutterW, H: r.H}, gutterWash, 0)
+					if gutterRule.A > 0 {
+						p.Fill(ui.Rect{X: r.X + gutterW - 0.5, Y: r.Y, W: 1, H: r.H}, gutterRule, 0)
+					}
+				})
+			}
+
 			body.Children(func() {
 				if o.ShowLineNumbers {
 					gutterInk := pickColor(ct.LineNumber, cs.OnSurfaceVariant.Alpha(0.65), ct.Text.Alpha(0.65))
 					for i, spans := range lines {
-						row := ui.Row(c).AlignItems(ui.Start)
+						row := ui.Row(c).AlignItems(ui.Baseline)
 						if !o.Wrap {
 							row.Shrink(0)
 						} else {
@@ -228,8 +246,10 @@ func buildCodeBlockCard(c *ui.Context, th *md3e.Theme, o codeCardOptions, bodyFn
 
 	bg := pickColor(cs.SurfaceContainerHigh, md3e.SurfaceColorForElevation(th, tokens.Level3))
 	headerBg := pickColor(cs.SurfaceContainerHighest, bg)
-	if headerBg == bg && cs.OnSurface.A > 0 {
-		headerBg = bg.Mix(cs.OnSurface, 0.03)
+	if !th.Dark && cs.OnSurface.A > 0 {
+		headerBg = bg.MixOklab(cs.OnSurface, 0.045)
+	} else if headerBg == bg && cs.OnSurface.A > 0 {
+		headerBg = bg.MixOklab(cs.OnSurface, 0.035)
 	}
 	ink := pickColor(cs.OnSurface, th.ContentColorFor(bg))
 	muted := pickColor(cs.OnSurfaceVariant, ink.Alpha(0.72))
@@ -345,7 +365,11 @@ func buildCodeCopyButton(c *ui.Context, th *md3e.Theme, m docCodeMetrics, o code
 	}
 	ink := pickColor(cs.OnSurfaceVariant, cs.OnSurface)
 	if copied {
-		ink = pickColor(th.Success, cs.Primary, ink)
+		succBg := pickColor(th.SuccessContainer, th.Success.Alpha(0.16), cs.PrimaryContainer)
+		ink = pickColor(th.OnSuccessContainer, th.Success, cs.Primary, ink)
+		if succBg.A > 0 && !o.copyDisabled {
+			btn.Background(succBg)
+		}
 	}
 	if o.copyDisabled {
 		ink = cs.OnSurface.Alpha(float32(tokens.DisabledContentOpacity))
@@ -481,7 +505,8 @@ func tokenizeCodeLines(code, lang string, ct *editor.Theme) [][]ui.Span {
 				sp := ui.Span{Text: line[start:end], Color: ct.TokenColor(t.Kind)}
 				if style := ct.Tokens[t.Kind]; style.Bold {
 					sp.Weight = 600
-				} else if style.Italic {
+				}
+				if style := ct.Tokens[t.Kind]; style.Italic {
 					sp.Italic = true
 				}
 				spans = append(spans, sp)

@@ -51,20 +51,21 @@ func ThemeFromMD3E(th *md3e.Theme) *editor.Theme {
 		activeLineAlpha = 0.12
 	}
 
-	selection := primary.Alpha(0.24)
-	if cs.PrimaryContainer.A > 0 {
-		selection = cs.PrimaryContainer.Alpha(0.78)
-		if highContrast {
-			selection = cs.PrimaryContainer
-		}
+	selAlpha := float32(0.22)
+	if th.Dark {
+		selAlpha = 0.30
 	}
-	inactiveSel := selection.Alpha(0.55)
-	if cs.SecondaryContainer.A > 0 {
-		inactiveSel = cs.SecondaryContainer.Alpha(0.55)
+	if highContrast {
+		selAlpha = 0.38
+	}
+	selection := primary.Alpha(selAlpha)
+	inactiveSel := selection.Alpha(0.52)
+	if cs.Secondary.A > 0 {
+		inactiveSel = cs.Secondary.Alpha(selAlpha * 0.65)
 	}
 	matchCol := tertiary.Alpha(0.26)
 	if cs.TertiaryContainer.A > 0 {
-		matchCol = cs.TertiaryContainer.Alpha(0.68)
+		matchCol = cs.TertiaryContainer.Alpha(0.60)
 	}
 
 	ct := &editor.Theme{
@@ -113,9 +114,8 @@ func ThemeFromMD3E(th *md3e.Theme) *editor.Theme {
 
 	pHue := primaryHCT.Hue
 	tHue := tokens.HCTFromColor(tertiary).Hue
-	if hueDelta(pHue, tHue) < 24 {
-		tHue = tokens.SanitizeDegrees(pHue + 60)
-	}
+	sHue := tokens.HCTFromColor(succCol).Hue
+	eHue := tokens.HCTFromColor(errCol).Hue
 	baseTone := 40.0
 	baseChroma := 52.0
 	if th.Dark {
@@ -142,21 +142,37 @@ func ThemeFromMD3E(th *md3e.Theme) *editor.Theme {
 		return fit(c, minBodyRatio)
 	}
 
+	// De-collide syntax hues against primary, string (success), and error hues
+	// so every seed color yields clearly distinct syntax roles (>= 28° apart).
+	usedHues := make([]float64, 0, 8)
+	usedHues = append(usedHues, pHue, sHue, eHue)
+	allocHue := func(pref float64) float64 {
+		h := pickDistinctHue(pref, usedHues, 28)
+		usedHues = append(usedHues, h)
+		return h
+	}
+	typeHue := allocHue(32)   // warm amber/terracotta
+	fnHue := allocHue(tHue)   // theme tertiary accent
+	propHue := allocHue(215)  // crisp azure
+	numHue := allocHue(262)   // indigo-blue
+	metaHue := allocHue(312)  // orchid/violet
+
 	keywordCol := fit(primary, minBodyRatio)
-	typeCol := fromHue(28, 1.05, 0)         // warm amber/terracotta
-	fnCol := fromHue(tHue, 1.0, 2)          // theme tertiary accent
-	propCol := fromHue(225, 0.95, 2)        // crisp azure
-	strCol := fit(succCol, minBodyRatio)    // harmonized emerald
-	numCol := fromHue(255, 0.90, 0)         // indigo-blue
-	metaCol := fromHue(295, 0.92, 0)        // violet
+	typeCol := fromHue(typeHue, 1.05, 0)
+	fnCol := fromHue(fnHue, 1.0, 2)
+	propCol := fromHue(propHue, 0.95, 2)
+	strCol := fit(succCol, minBodyRatio)
+	numCol := fromHue(numHue, 0.92, 0)
+	metaCol := fromHue(metaHue, 0.92, 0)
 	commentCol := fit(muted, minCommentRatio)
+	punctCol := fit(muted, minCommentRatio)
 	opCol := fit(secondary, minBodyRatio)
 	invalidCol := fit(errCol, minBodyRatio)
 
 	ct.Tokens[editor.TokenText] = editor.TokenStyle{Color: text}
-	ct.Tokens[editor.TokenKeyword] = editor.TokenStyle{Color: keywordCol}
+	ct.Tokens[editor.TokenKeyword] = editor.TokenStyle{Color: keywordCol, Bold: true}
 	ct.Tokens[editor.TokenOperator] = editor.TokenStyle{Color: opCol}
-	ct.Tokens[editor.TokenPunctuation] = editor.TokenStyle{Color: muted}
+	ct.Tokens[editor.TokenPunctuation] = editor.TokenStyle{Color: punctCol}
 	ct.Tokens[editor.TokenType] = editor.TokenStyle{Color: typeCol}
 	ct.Tokens[editor.TokenFunction] = editor.TokenStyle{Color: fnCol}
 	ct.Tokens[editor.TokenMeta] = editor.TokenStyle{Color: metaCol}
@@ -390,6 +406,38 @@ func hueDelta(a, b float64) float64 {
 		d = 360 - d
 	}
 	return d
+}
+
+func pickDistinctHue(pref float64, used []float64, minSep float64) float64 {
+	pref = tokens.SanitizeDegrees(pref)
+	minDist := func(cand float64) float64 {
+		best := 180.0
+		for _, u := range used {
+			if d := hueDelta(cand, u); d < best {
+				best = d
+			}
+		}
+		return best
+	}
+	if minDist(pref) >= minSep {
+		return pref
+	}
+	bestHue := pref
+	bestDist := minDist(pref)
+	for step := 15.0; step <= 180.0; step += 15.0 {
+		for _, dir := range [2]float64{1, -1} {
+			cand := tokens.SanitizeDegrees(pref + dir*step)
+			d := minDist(cand)
+			if d >= minSep {
+				return cand
+			}
+			if d > bestDist {
+				bestDist = d
+				bestHue = cand
+			}
+		}
+	}
+	return bestHue
 }
 
 func clampF64(v, lo, hi float64) float64 {

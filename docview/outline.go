@@ -1,6 +1,9 @@
 package docview
 
 import (
+	"math"
+	"time"
+
 	"github.com/egoist/mygo/ui"
 
 	md3e "github.com/imicola/mygo-md3e"
@@ -40,6 +43,16 @@ type OutlineOptions struct {
 type (
 	outlineItemKey   struct{ slug string; i int }
 	outlineActiveKey struct{}
+	outlineRailKey   struct{}
+
+	outlineRailState struct {
+		ys     []float32
+		hs     []float32
+		hasBar bool
+		curY   float32
+		curH   float32
+		lastAt time.Time
+	}
 )
 
 // Outline builds an MD3E document table-of-contents navigation list designed
@@ -64,7 +77,7 @@ func Outline(c *ui.Context, state *State, opts ...OutlineOptions) ui.Element {
 	cs := th.Colors
 	rtl := c.Direction() == ui.RightToLeft
 	reduce := th.ReduceMotion || c.Preferences().ReduceMotion
-	spatial := th.Animation(motion.FastSpatial)
+	effects := th.Animation(motion.FastEffects)
 
 	if state != nil && o.Scroll != nil {
 		state.attachScroll(o.Scroll)
@@ -182,6 +195,11 @@ func Outline(c *ui.Context, state *State, opts ...OutlineOptions) ui.Element {
 		}
 
 		listCol := ui.Column(c).FillWidth().Gap(2).FocusGroup(ui.Vertical)
+		rail := ui.Local(listCol, outlineRailKey{}, func() outlineRailState { return outlineRailState{} })
+		if len(rail.ys) != len(visible) {
+			rail.ys = make([]float32, len(visible))
+			rail.hs = make([]float32, len(visible))
+		}
 		guideCol := pickColor(cs.OutlineVariant, cs.Outline).Alpha(0.55)
 		barCol := pickColor(cs.Primary, md3e.DefaultSeedColor)
 		pillBg := pickColor(cs.SecondaryContainer, barCol.Alpha(0.14))
@@ -206,6 +224,7 @@ func Outline(c *ui.Context, state *State, opts ...OutlineOptions) ui.Element {
 
 		listCol.Children(func() {
 			for i, it := range visible {
+				idx := i
 				isActive := i == activeVisibleIdx
 				indent := float32(it.Level-minLevel) * indentStep
 				radius := minF32(rowH/2, th.Shapes.Radius(tokens.ShapeSmall))
@@ -222,7 +241,7 @@ func Outline(c *ui.Context, state *State, opts ...OutlineOptions) ui.Element {
 					FillWidth().
 					MinHeight(rowH).
 					Padding(padY, 0, padY, 0).
-					PaddingStart(12 + indent).
+					PaddingStart(16 + indent).
 					PaddingEnd(10).
 					Radius(radius).
 					Disabled(o.Disabled).
@@ -238,42 +257,41 @@ func Outline(c *ui.Context, state *State, opts ...OutlineOptions) ui.Element {
 					mixTarget = 1
 				}
 				mixT := mixTarget
-				if !reduce {
-					mixT = btn.AnimateTo(outlineActiveKey{}, mixTarget, spatial)
+				if reduce {
+					mixT = btn.Jump(outlineActiveKey{}, mixTarget)
+				} else {
+					mixT = btn.AnimateTo(outlineActiveKey{}, mixTarget, effects)
+				}
+				if mixT < 0 {
+					mixT = 0
+				} else if mixT > 1 {
+					mixT = 1
 				}
 
 				if mixT > 0.01 && !o.Disabled {
-					btn.Background(ui.Transparent.Mix(pillBg, mixT))
+					btn.Background(pillBg.Alpha(mixT))
 				}
 
-				ink := restInk
-				if isActive {
-					ink = pillInk
+				ink := restInk.MixOklab(pillInk, mixT)
+				if o.Disabled {
+					ink = restInk
 				}
 				btn.TextColor(ink)
+
+				// Record exact paint geometry into rail before listCol.DrawOver runs
+				// (keeps btn.DrawOver completely intact for AttachRipple).
+				btn.Draw(func(_ *ui.Painter, r ui.Rect) {
+					if idx < len(rail.ys) {
+						rail.ys[idx] = r.Y
+						rail.hs[idx] = r.H
+					}
+				})
 
 				md3e.AttachRipple(c, btn, md3e.StateLayerOptions{
 					Color:    ink,
 					Radius:   radius,
 					Disabled: o.Disabled,
 				})
-
-				if isActive || mixT > 0.02 {
-					activeAlpha := mixT
-					btn.DrawOver(func(p *ui.Painter, r ui.Rect) {
-						if !btn.Valid() || r.W <= 0 || r.H <= 0 || activeAlpha <= 0.02 {
-							return
-						}
-						barW := float32(3)
-						barH := max(10, r.H-12)
-						x := r.X + 1
-						if rtl {
-							x = r.X + r.W - barW - 1
-						}
-						y := r.Y + (r.H-barH)/2
-						p.Fill(ui.Rect{X: x, Y: y, W: barW, H: barH}, barCol.Alpha(activeAlpha), barW/2)
-					})
-				}
 
 				btn.Children(func() {
 					md3e.TextWith(c, it.Title, md3e.TextOptions{
@@ -298,6 +316,57 @@ func Outline(c *ui.Context, state *State, opts ...OutlineOptions) ui.Element {
 					c.Invalidate()
 				}
 			}
+		})
+
+		// Single gliding Primary indicator bar along the Start rail (ghost-draw safe).
+		activeIdx := activeVisibleIdx
+		listCol.DrawOver(func(p *ui.Painter, r ui.Rect) {
+			if r.W <= 0 || r.H <= 0 || barCol.A == 0 || activeIdx < 0 || activeIdx >= len(rail.ys) {
+				return
+			}
+			live := listCol.Valid()
+			red := reduce || p.Preferences().ReduceMotion
+			if live {
+				targetY := rail.ys[activeIdx]
+				targetH := rail.hs[activeIdx]
+				if targetH > 0 {
+					now := p.Now()
+					if !rail.hasBar || red {
+						rail.curY = targetY
+						rail.curH = targetH
+						rail.hasBar = true
+						rail.lastAt = now
+					} else {
+						dt := float64(0)
+						if !rail.lastAt.IsZero() && now.After(rail.lastAt) {
+							dt = now.Sub(rail.lastAt).Seconds()
+						}
+						rail.lastAt = now
+						if dt > 0 {
+							k := float32(1 - math.Exp(-dt/0.055))
+							rail.curY += (targetY - rail.curY) * k
+							rail.curH += (targetH - rail.curH) * k
+						}
+						if math.Abs(float64(targetY-rail.curY)) <= 0.25 && math.Abs(float64(targetH-rail.curH)) <= 0.25 {
+							rail.curY = targetY
+							rail.curH = targetH
+						} else {
+							p.AnimationFrame()
+						}
+					}
+				}
+			}
+			if !rail.hasBar || rail.curH <= 0 {
+				return
+			}
+			barW := float32(3)
+			barH := max(10, rail.curH-12)
+			x := r.X + 1
+			if rtl {
+				x = r.X + r.W - barW - 1
+			}
+			y := rail.curY + (rail.curH-barH)*0.5
+			p.Fill(ui.Rect{X: x, Y: y, W: barW, H: barH}, barCol, barW*0.5)
 		})
 	})
 
