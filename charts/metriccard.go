@@ -172,7 +172,7 @@ func MetricCard(c *ui.Context, opts MetricCardOptions) ui.Element {
 		drawRadius := radius
 		rtl := c.Direction() == ui.RightToLeft
 		el.Draw(func(p *ui.Painter, r ui.Rect) {
-			if !isPositiveFiniteF32(r.W) || !isPositiveFiniteF32(r.H) {
+			if !rectIntersects(r, p.Visible()) {
 				return
 			}
 			cx := float32(0.14)

@@ -85,6 +85,7 @@ type lineChartState struct {
 	selected      int
 	focusedSeries int
 	scratches     []sparklineScratch
+	xFractions    []float32
 }
 
 // LineChart builds an MD3E Expressive multi-series line/area chart over
@@ -136,20 +137,6 @@ func LineChart(c *ui.Context, series []LineSeries, opts ...LineChartOptions) ui.
 	yScale := resolveLineYScale(series, o.YMin, o.YMax, o.HasYDomain, o.BaselineZero, yTickCount, fmtVal)
 	yTicks := yScale.Ticks(yTickCount)
 
-	// Build normalized X fractions (strictly ascending for chart.Select).
-	xs := make([]float32, maxN)
-	if maxN == 1 {
-		xs[0] = 0.5
-	} else if maxN > 1 {
-		inv := float32(1) / float32(maxN-1)
-		for i := range maxN {
-			xs[i] = float32(i) * inv
-		}
-	}
-
-	// Build X-axis ticks (with optional thinning for dense categories).
-	xTicks := buildLineXTicks(xs, o.Labels, o.MaxXLabels)
-
 	label := o.Label
 	if label == "" {
 		label = "Line chart"
@@ -162,11 +149,28 @@ func LineChart(c *ui.Context, series []LineSeries, opts ...LineChartOptions) ui.
 	if st.focusedSeries >= len(series) {
 		st.focusedSeries = -1
 	}
-	if len(st.scratches) < len(series) {
+	if len(st.scratches) != len(series) {
 		grown := make([]sparklineScratch, len(series))
 		copy(grown, st.scratches)
 		st.scratches = grown
 	}
+
+	// Positions depend only on the point count. Replace the slice on a
+	// resize so old draw callbacks still see the positions they captured.
+	if len(st.xFractions) != maxN {
+		st.xFractions = make([]float32, maxN)
+		switch {
+		case maxN == 1:
+			st.xFractions[0] = 0.5
+		case maxN > 1:
+			inv := float32(1) / float32(maxN-1)
+			for i := range st.xFractions {
+				st.xFractions[i] = float32(i) * inv
+			}
+		}
+	}
+	xs := st.xFractions
+	xTicks := buildLineXTicks(xs, o.Labels, o.MaxXLabels)
 
 	selPtr := o.Selected
 	if selPtr == nil {
@@ -249,11 +253,10 @@ func LineChart(c *ui.Context, series []LineSeries, opts ...LineChartOptions) ui.
 				}
 			}
 
-			// Snapshot immutable rendering inputs for ghost-draw safety.
+			// Copy the caller's series headers for ghost draws. Colors and ticks
+			// are already owned by this build.
 			seriesSnap := make([]LineSeries, len(series))
 			copy(seriesSnap, series)
-			colorsSnap := append([]ui.Color(nil), colors...)
-			yTicksSnap := append([]chart.Tick(nil), yTicks...)
 			focusedSnap := st.focusedSeries
 			scratches := st.scratches
 			yLo, yHi := yScale.Lo, yScale.Hi
@@ -264,13 +267,13 @@ func LineChart(c *ui.Context, series []LineSeries, opts ...LineChartOptions) ui.
 				if !isPositiveFiniteF32(r.W) || !isPositiveFiniteF32(r.H) {
 					return
 				}
-				if vis := p.Visible(); vis.W > 0 && vis.H > 0 && !rectIntersects(r, vis) {
+				if !rectIntersects(r, p.Visible()) {
 					return
 				}
 
 				// Horizontal gridlines & crisp baseline.
 				if showGrid {
-					for _, tick := range yTicksSnap {
+					for _, tick := range yTicks {
 						ty := chart.Y(r, tick.At)
 						p.Line(r.X, ty, r.X+r.W, ty, 1, gridCol)
 					}
@@ -285,7 +288,7 @@ func LineChart(c *ui.Context, series []LineSeries, opts ...LineChartOptions) ui.
 						if len(s.Values) == 0 {
 							continue
 						}
-						col := colorsSnap[si]
+						col := colors[si]
 						dimmed := focusedSnap >= 0 && focusedSnap != si
 						strokeW := sanitizePositiveF32(s.StrokeWidth, 2.4)
 						if focusedSnap == si {
@@ -525,10 +528,8 @@ func buildLineSeriesPaths(
 	bottomY := r.Y + r.H
 
 	if pixelW > 0 && n > pixelW*2 {
-		s.rawX = ensureF32Cap(s.rawX, n)
 		s.rawY = ensureF32Cap(s.rawY, n)
 		for i := range n {
-			s.rawX[i] = xs[i]
 			v := values[i]
 			if !isFiniteF64(v) {
 				s.rawY[i] = float32(math.NaN())
@@ -537,7 +538,7 @@ func buildLineSeriesPaths(
 				s.rawY[i] = clampF32(baseFrac+(yf-baseFrac)*riseScale, 0, 1)
 			}
 		}
-		s.dsX, s.dsY = chart.MinMax(s.dsX, s.dsY, s.rawX, s.rawY, pixelW)
+		s.dsX, s.dsY = chart.MinMax(s.dsX, s.dsY, xs[:n], s.rawY, pixelW)
 		ok, _, _ := buildSparklineRunsFromFractions(s, r, bottomY, s.dsX, s.dsY, curve)
 		return ok
 	}

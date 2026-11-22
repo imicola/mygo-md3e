@@ -172,7 +172,7 @@ func AreaSparkline(c *ui.Context, opts ...AreaSparklineOptions) ui.Element {
 		if !isPositiveFiniteF32(r.W) || !isPositiveFiniteF32(r.H) || !hasDomain {
 			return
 		}
-		if vis := p.Visible(); vis.W > 0 && vis.H > 0 && !rectIntersects(r, vis) {
+		if !rectIntersects(r, p.Visible()) {
 			return
 		}
 

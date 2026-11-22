@@ -67,6 +67,14 @@ type StackedProgressOptions struct {
 
 type stackedSegAnimKey int
 type stackedGeometryKey struct{}
+type stackedFrameKey struct{}
+
+type stackedFrame struct {
+	nextColors []ui.Color
+	nextFracs  []float32
+	colors     []ui.Color
+	fracs      []float32
+}
 
 type stackedGeomSeg struct {
 	segIndex int // -1 for unfilled remainder track
@@ -114,10 +122,14 @@ func StackedProgress(c *ui.Context, segments []StackedSegment, opts ...StackedPr
 		}
 	}
 
-	// Sanitize segment values and resolve colors.
+	// Sanitize segment values before computing their total.
 	n := len(segments)
-	vals := make([]float64, n)
-	colors := make([]ui.Color, n)
+	var stackVals [12]float64
+	vals := stackVals[:]
+	if n > len(vals) {
+		vals = make([]float64, n)
+	}
+	vals = vals[:n]
 	sum := 0.0
 	for i, seg := range segments {
 		v := seg.Value
@@ -126,11 +138,6 @@ func StackedProgress(c *ui.Context, segments []StackedSegment, opts ...StackedPr
 		}
 		vals[i] = v
 		sum += v
-		col := seg.Color
-		if col.A == 0 {
-			col = SeriesColor(th, i)
-		}
-		colors[i] = col
 	}
 
 	denom := sum
@@ -171,17 +178,36 @@ func StackedProgress(c *ui.Context, segments []StackedSegment, opts ...StackedPr
 		root.Description(o.Description)
 	}
 
-	// Animate normalized fractions with MD3E DefaultSpatial.
+	frame := ui.Local(root, stackedFrameKey{}, func() stackedFrame { return stackedFrame{} })
+	if len(frame.nextFracs) != n {
+		frame.nextColors = make([]ui.Color, n)
+		frame.nextFracs = make([]float32, n)
+	}
+	// Resolve colors and animate normalized fractions with MD3E DefaultSpatial.
 	anim := motion.Resolve(th.Motion, motion.DefaultSpatial, reduce)
-	fracs := make([]float32, n)
-	for i := range n {
+	for i, seg := range segments {
+		col := seg.Color
+		if col.A == 0 {
+			col = SeriesColor(th, i)
+		}
+		frame.nextColors[i] = col
 		target := float32(0)
 		if denom > 0 && vals[i] > 0 {
 			target = float32(vals[i] / denom)
 		}
 		f := animateF32(root, stackedSegAnimKey(i), target, anim, reduce || !animate)
-		fracs[i] = clampF32(f, 0, 1)
+		frame.nextFracs[i] = clampF32(f, 0, 1)
 	}
+
+	// Keep each paint snapshot immutable for the draw callbacks of exiting
+	// elements. Steady frames reuse the snapshot without copying.
+	if !slices.Equal(frame.colors, frame.nextColors) {
+		frame.colors = slices.Clone(frame.nextColors)
+	}
+	if !slices.Equal(frame.fracs, frame.nextFracs) {
+		frame.fracs = slices.Clone(frame.nextFracs)
+	}
+	colors, fracs := frame.colors, frame.fracs
 
 	remTarget := float32(0)
 	if hasRemainder {
@@ -217,7 +243,7 @@ func StackedProgress(c *ui.Context, segments []StackedSegment, opts ...StackedPr
 			if !isPositiveFiniteF32(r.W) || !isPositiveFiniteF32(r.H) {
 				return
 			}
-			if vis := p.Visible(); vis.W > 0 && vis.H > 0 && !rectIntersects(r, vis) {
+			if !rectIntersects(r, p.Visible()) {
 				return
 			}
 

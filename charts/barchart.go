@@ -248,16 +248,16 @@ func BarChart(c *ui.Context, series []BarSeries, opts ...BarChartOptions) ui.Ele
 				}
 			}
 
-			yTicksSnap := append([]chart.Tick(nil), yTicks...)
+			baselineInk := cs.OutlineVariant
 			area.Draw(func(p *ui.Painter, r ui.Rect) {
 				if !isPositiveFiniteF32(r.W) || !isPositiveFiniteF32(r.H) {
 					return
 				}
-				if vis := p.Visible(); vis.W > 0 && vis.H > 0 && !rectIntersects(r, vis) {
+				if !rectIntersects(r, p.Visible()) {
 					return
 				}
 				if showGrid {
-					for _, tick := range yTicksSnap {
+					for _, tick := range yTicks {
 						ty := chart.Y(r, tick.At)
 						p.Line(r.X, ty, r.X+r.W, ty, 1, gridCol)
 					}
@@ -265,7 +265,7 @@ func BarChart(c *ui.Context, series []BarSeries, opts ...BarChartOptions) ui.Ele
 				// Crisp baseline at 0 when inside domain.
 				if yScale.Lo <= 0 && yScale.Hi >= 0 {
 					zy := chart.Y(r, zeroAt)
-					p.Line(r.X, zy, r.X+r.W, zy, 1.2, cs.OutlineVariant)
+					p.Line(r.X, zy, r.X+r.W, zy, 1.2, baselineInk)
 				}
 			})
 

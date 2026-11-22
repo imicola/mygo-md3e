@@ -297,11 +297,8 @@ func DonutChart(c *ui.Context, slices []DonutSlice, opts ...DonutChartOptions) u
 			pops[i] = max(0, animateF32(ring, donutSlicePopKey(i), target, popAnim, reduce || !animate)) * popExpand
 		}
 
-		// Capture immutable slices for ghost-draw safe painting.
-		drawPie := append([]chart.Slice(nil), pieSlices...)
-		drawCols := append([]ui.Color(nil), colors...)
-		drawVals := append([]float64(nil), vals...)
-		drawPops := append([]float32(nil), pops...)
+		// The slices are owned by this build and remain read-only while
+		// a departing element draws its captured frame.
 		drawActive := *selPtr
 		drawTotal := total
 		drawSweep := float64(sweep)
@@ -310,18 +307,18 @@ func DonutChart(c *ui.Context, slices []DonutSlice, opts ...DonutChartOptions) u
 			if !isPositiveFiniteF32(r.W) || !isPositiveFiniteF32(r.H) {
 				return
 			}
-			if vis := p.Visible(); vis.W > 0 && vis.H > 0 && !rectIntersects(r, vis) {
+			if !rectIntersects(r, p.Visible()) {
 				return
 			}
 			cx, cy := r.X+r.W*0.5, r.Y+r.H*0.5
-			if drawTotal <= 0 || len(drawPie) == 0 {
+			if drawTotal <= 0 || len(pieSlices) == 0 {
 				full := chart.Slice{Start: 0, End: 2 * math.Pi}
 				p.FillPath(chart.Sector(cx, cy, inner, baseOuter, full), emptyTrackCol)
 				return
 			}
 
-			for i, sl := range drawPie {
-				if drawVals[i] <= 0 || sl.End <= sl.Start {
+			for i, sl := range pieSlices {
+				if vals[i] <= 0 || sl.End <= sl.Start {
 					continue
 				}
 				swept := chart.Slice{
@@ -332,15 +329,15 @@ func DonutChart(c *ui.Context, slices []DonutSlice, opts ...DonutChartOptions) u
 				if swept.End <= swept.Start {
 					continue
 				}
-				col := drawCols[i]
-				outer := baseOuter + drawPops[i]
+				col := colors[i]
+				outer := baseOuter + pops[i]
 
 				if drawActive >= 0 && drawActive != i {
 					col = col.Alpha(0.58)
 				}
 
 				// Active slice soft colored outer aura glow.
-				if drawActive == i && drawPops[i] > 0.5 {
+				if drawActive == i && pops[i] > 0.5 {
 					glowAlpha := float32(0.22)
 					if dark {
 						glowAlpha = 0.30
