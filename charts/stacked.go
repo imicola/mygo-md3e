@@ -74,6 +74,8 @@ type stackedFrame struct {
 	nextFracs  []float32
 	colors     []ui.Color
 	fracs      []float32
+	sheenPath  ui.Path
+	sheenStops [2]ui.GradientStop
 }
 
 type stackedGeomSeg struct {
@@ -260,13 +262,17 @@ func StackedProgress(c *ui.Context, segments []StackedSegment, opts ...StackedPr
 				}
 				segRect := ui.Rect{X: r.X + g.x0, Y: r.Y, W: w, H: r.H}
 				col := g.color
-				if drawActive >= 0 && g.segIndex >= 0 && g.segIndex != drawActive {
-					col = col.Alpha(0.42)
+				if drawActive >= 0 {
+					if g.segIndex >= 0 && g.segIndex != drawActive {
+						col = col.Alpha(0.42)
+					} else if g.segIndex < 0 {
+						col = col.Alpha(0.65)
+					}
 				}
 				p.FillRadii(segRect, g.radii, col)
 
-				// Subtle upper specular sheen gives segmented bars crisp MD3E volume.
-				if g.segIndex >= 0 && r.H >= 6 {
+				// Path-clipped vertical specular sheen stays strictly inside pill corners.
+				if g.segIndex >= 0 && r.H >= 6 && w > 2 {
 					sheenAlpha := float32(0.14)
 					if drawDark {
 						sheenAlpha = 0.11
@@ -274,38 +280,47 @@ func StackedProgress(c *ui.Context, segments []StackedSegment, opts ...StackedPr
 					if drawActive == g.segIndex {
 						sheenAlpha += 0.08
 					}
-					sheenRect := ui.Rect{X: segRect.X, Y: segRect.Y, W: segRect.W, H: segRect.H * 0.44}
-					sheenRadii := [4]float32{g.radii[0], g.radii[1], 0, 0}
-					p.FillRadii(sheenRect, sheenRadii, ui.RGB(255, 255, 255).Alpha(sheenAlpha))
+					frame.sheenStops[0] = ui.GradientStop{Color: ui.RGB(255, 255, 255).Alpha(sheenAlpha), At: 0}
+					frame.sheenStops[1] = ui.GradientStop{Color: ui.Transparent, At: 0.58}
+					buildRoundedRectPath(&frame.sheenPath, segRect, g.radii)
+					p.FillPathGradient(&frame.sheenPath, ui.LinearGradient{
+						Angle: 180,
+						Oklab: true,
+						Stops: frame.sheenStops[:],
+					})
 				}
 			}
 		})
 
-		// Instant floating tooltip above hovered segment.
+		// Instant floating tooltip rendered in ui.Overlay so clipped parent cards never chop it off.
 		if showTooltip && activeSeg >= 0 && activeSeg < n && denom > 0 {
-			seg := segments[activeSeg]
-			pct := (vals[activeSeg] / denom) * 100
-			valText := formatStackedSegmentValue(seg, vals[activeSeg], pct, true, o.ValueFormatter)
-			name := seg.Label
-			if name == "" {
-				name = fmt.Sprintf("Segment %d", activeSeg+1)
-			}
-			trackWrap.Children(func() {
+			if b := trackWrap.Bounds(); b.W > 0 {
+				seg := segments[activeSeg]
+				pct := (vals[activeSeg] / denom) * 100
+				valText := formatStackedSegmentValue(seg, vals[activeSeg], pct, true, o.ValueFormatter)
+				name := seg.Label
+				if name == "" {
+					name = fmt.Sprintf("Segment %d", activeSeg+1)
+				}
 				hAlign := ui.Center
 				if activeAnchorX < 0.22 {
 					hAlign = ui.Start
 				} else if activeAnchorX > 0.78 {
 					hAlign = ui.End
 				}
-				ui.Row(c.Key("tip-anchor")).Absolute().
-					LeftPercent(activeAnchorX*100).Top(-6).Size(0, 0).
-					AlignItems(ui.End).PassThrough().
-					Children(func() {
-						ui.Column(c).Width(0).AlignItems(hAlign).Children(func() {
-							renderCompactSegmentTip(c, th, name, valText, colors[activeSeg])
+				anchorX := b.X + b.W*activeAnchorX
+				anchorY := max(float32(4), b.Y-6)
+				ui.Overlay(c, func() {
+					ui.Row(c.Key("tip-anchor")).Absolute().
+						Left(anchorX).Top(anchorY).Size(0, 0).
+						AlignItems(ui.End).PassThrough().
+						Children(func() {
+							ui.Column(c).Width(0).AlignItems(hAlign).PassThrough().Children(func() {
+								renderCompactSegmentTip(c, th, name, valText, colors[activeSeg])
+							})
 						})
-					})
-			})
+				})
+			}
 		}
 
 		if o.ShowLegend && n > 0 {

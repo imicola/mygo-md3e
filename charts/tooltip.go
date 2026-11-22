@@ -51,7 +51,10 @@ func renderChartTooltipCard(c *ui.Context, th *md3e.Theme, title string, rows []
 		Radius(th.Shapes.Radius(tokens.ShapeMedium)).
 		Background(bg).Border(1, border).
 		TextColor(cs.OnSurface).PassThrough()
-	md3e.ApplyElevationShadows(th, panel, tokens.Level2)
+	md3e.ApplyElevationShadows(th, panel, tokens.Level3)
+	if th.Dark {
+		panel.InsetShadow(0, 1, 0, 0, cs.OnSurface.Alpha(0.08))
+	}
 
 	panel.Children(func() {
 		if title != "" {
@@ -61,6 +64,9 @@ func renderChartTooltipCard(c *ui.Context, th *md3e.Theme, title string, rows []
 				MaxLines:   1,
 				Color:      cs.OnSurface,
 			}).NoWrap()
+			if len(rows) > 0 {
+				ui.Box(c).FillWidth().Height(1).Background(cs.OutlineVariant.Alpha(0.35))
+			}
 		}
 		for i, row := range rows {
 			ui.Row(c.Key(i)).FillWidth().AlignItems(ui.Center).Justify(ui.SpaceBetween).Gap(12).Children(func() {

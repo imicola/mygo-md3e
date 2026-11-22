@@ -179,12 +179,14 @@ func MetricCard(c *ui.Context, opts MetricCardOptions) ui.Element {
 			if rtl {
 				cx = 0.86
 			}
+			stops := [3]ui.GradientStop{
+				{Color: glowCol.Alpha(glowAlpha), At: 0},
+				{Color: glowCol.Alpha(glowAlpha * 0.35), At: 0.45},
+				{Color: glowCol.Alpha(0), At: 1},
+			}
 			p.Clip(r, drawRadius, func() {
 				p.FillRadialGradient(r, ui.RadialGradient{
-					Stops: []ui.GradientStop{
-						{Color: glowCol.Alpha(glowAlpha), At: 0},
-						{Color: glowCol.Alpha(0), At: 1},
-					},
+					Stops:  stops[:],
 					Center: ui.Point{X: cx, Y: 0.12},
 					Oklab:  true,
 				}, 0)
@@ -292,8 +294,8 @@ func MetricCard(c *ui.Context, opts MetricCardOptions) ui.Element {
 				if !disabled && opts.ValueColor.A > 0 {
 					valCol = opts.ValueColor
 				}
-				ui.Row(c.Key("value-row")).FillWidth().MinWidth(0).AlignItems(ui.End).Justify(ui.SpaceBetween).Gap(8).Wrap().Children(func() {
-					ui.Row(c.Key("primary-val")).AlignItems(ui.End).Gap(4).Children(func() {
+				ui.Row(c.Key("value-row")).FillWidth().MinWidth(0).AlignItems(ui.Baseline).Justify(ui.SpaceBetween).Gap(8).Wrap().Children(func() {
+					ui.Row(c.Key("primary-val")).AlignItems(ui.Baseline).Gap(4).Children(func() {
 						if opts.Value != "" {
 							md3e.TextWith(c, opts.Value, md3e.TextOptions{
 								Role:        valueRole,
@@ -306,7 +308,7 @@ func MetricCard(c *ui.Context, opts MetricCardOptions) ui.Element {
 							md3e.TextWith(c, opts.Unit, md3e.TextOptions{
 								Role:  tokens.LabelMedium,
 								Color: mutedInk,
-							}).NoWrap().Margin(0, 0, 3, 0)
+							}).NoWrap()
 						}
 					})
 					if opts.Secondary != "" {
@@ -314,7 +316,7 @@ func MetricCard(c *ui.Context, opts MetricCardOptions) ui.Element {
 							Role:        tokens.LabelSmall,
 							TabularNums: true,
 							Color:       mutedInk,
-						}).NoWrap().Margin(0, 0, 3, 0)
+						}).NoWrap()
 					}
 				})
 			}
@@ -352,11 +354,15 @@ func MetricCard(c *ui.Context, opts MetricCardOptions) ui.Element {
 			}
 		})
 
-		// Edge-to-edge bottom-flush sparkline clipped neatly to the card's bottom corners.
+		// Edge-to-edge bottom-flush sparkline clipped neatly to the card's inner bottom corners.
 		if hasFlushSparkline {
 			spOpts := *opts.Sparkline
 			if spOpts.BottomRadius <= 0 && spOpts.Radii == [4]float32{} {
-				spOpts.BottomRadius = radius
+				innerRad := radius
+				if border.A > 0 {
+					innerRad = max(radius-1, 0)
+				}
+				spOpts.BottomRadius = innerRad
 			}
 			if spOpts.Height <= 0 {
 				spOpts.Height = 46

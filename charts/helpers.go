@@ -5,6 +5,7 @@ import (
 	"math"
 
 	"github.com/egoist/mygo/ui"
+	"github.com/egoist/mygo/ui/chart"
 
 	md3e "github.com/imicola/mygo-md3e"
 	"github.com/imicola/mygo-md3e/motion"
@@ -164,6 +165,26 @@ func buildRoundedRectPath(dst *ui.Path, r ui.Rect, radii [4]float32) *ui.Path {
 	}
 	dst.Close()
 	return dst
+}
+
+// drawDashedGrid paints crisp zero-allocation dashed horizontal reference lines
+// for ticks using a single reused ui.Path.
+func drawDashedGrid(p *ui.Painter, dst *ui.Path, r ui.Rect, ticks []chart.Tick, col ui.Color) {
+	if col.A == 0 || len(ticks) == 0 || !isPositiveFiniteF32(r.W) || !isPositiveFiniteF32(r.H) {
+		return
+	}
+	const dashLen = float32(4)
+	const dashStep = float32(8)
+	dst.Reset()
+	xEnd := r.X + r.W
+	for _, tick := range ticks {
+		ty := chart.Y(r, tick.At)
+		for x := r.X; x < xEnd; x += dashStep {
+			dst.MoveTo(x, ty)
+			dst.LineTo(min(x+dashLen, xEnd), ty)
+		}
+	}
+	p.StrokePath(dst, 1, col)
 }
 
 // defaultFormatNumber formats numeric values concisely for tooltips and labels.

@@ -71,11 +71,12 @@ type donutLocalKey struct{}
 type donutSlicePopKey int
 
 type donutState struct {
-	selected int
-	hovering bool
-	lastX    float32
-	lastY    float32
-	lastAnn  int
+	selected   int
+	hovering   bool
+	lastX      float32
+	lastY      float32
+	lastAnn    int
+	sectorPath ui.Path
 }
 
 // DonutChart builds an MD3E Expressive donut/pie chart over
@@ -197,9 +198,9 @@ func DonutChart(c *ui.Context, slices []DonutSlice, opts ...DonutChartOptions) u
 	if emptyTrackCol.A == 0 {
 		emptyTrackCol = cs.OutlineVariant
 	}
-	innerRimCol := cs.OutlineVariant.Alpha(0.35)
-	if th.Contrast >= tokens.ContrastHigh && cs.Outline.A > 0 {
-		innerRimCol = cs.Outline.Alpha(0.75)
+	bgTrackCol := emptyTrackCol.Alpha(0.45)
+	if th.Dark {
+		bgTrackCol = emptyTrackCol.Alpha(0.38)
 	}
 	dark := th.Dark
 
@@ -302,6 +303,12 @@ func DonutChart(c *ui.Context, slices []DonutSlice, opts ...DonutChartOptions) u
 		drawActive := *selPtr
 		drawTotal := total
 		drawSweep := float64(sweep)
+		pieMode := o.PieMode
+		sectorPath := &st.sectorPath
+		sliceCorner := float32(0)
+		if !pieMode && positiveCount > 1 && baseOuter-inner > 8 {
+			sliceCorner = min(float32(4), (baseOuter-inner)*0.24)
+		}
 
 		ring.Draw(func(p *ui.Painter, r ui.Rect) {
 			if !isPositiveFiniteF32(r.W) || !isPositiveFiniteF32(r.H) {
@@ -311,10 +318,15 @@ func DonutChart(c *ui.Context, slices []DonutSlice, opts ...DonutChartOptions) u
 				return
 			}
 			cx, cy := r.X+r.W*0.5, r.Y+r.H*0.5
+			full := chart.Slice{Start: 0, End: 2 * math.Pi}
 			if drawTotal <= 0 || len(pieSlices) == 0 {
-				full := chart.Slice{Start: 0, End: 2 * math.Pi}
-				p.FillPath(chart.Sector(cx, cy, inner, baseOuter, full), emptyTrackCol)
+				p.FillPath(buildRoundedSectorPath(sectorPath, cx, cy, inner, baseOuter, full, 0), emptyTrackCol)
 				return
+			}
+
+			// Subtle full-ring background bed behind donut slices (replaces gap-bridging inner stroke).
+			if !pieMode && inner > 4 {
+				p.FillPath(buildRoundedSectorPath(sectorPath, cx, cy, inner, baseOuter, full, 0), bgTrackCol)
 			}
 
 			for i, sl := range pieSlices {
@@ -331,27 +343,23 @@ func DonutChart(c *ui.Context, slices []DonutSlice, opts ...DonutChartOptions) u
 				}
 				col := colors[i]
 				outer := baseOuter + pops[i]
+				popFrac := clampF32(pops[i]/popExpand, 0, 1)
 
 				if drawActive >= 0 && drawActive != i {
-					col = col.Alpha(0.58)
+					col = col.Alpha(0.56)
 				}
 
-				// Active slice soft colored outer aura glow.
-				if drawActive == i && pops[i] > 0.5 {
-					glowAlpha := float32(0.22)
+				// Smooth continuous 2-layer colored aura driven by spring popFrac.
+				if popFrac > 0.01 {
+					outerA, innerA := float32(0.10), float32(0.16)
 					if dark {
-						glowAlpha = 0.30
+						outerA, innerA = 0.14, 0.22
 					}
-					p.FillPath(chart.Sector(cx, cy, max(0, inner-1), outer+3.5, swept), col.Alpha(glowAlpha))
+					p.FillPath(buildRoundedSectorPath(sectorPath, cx, cy, max(0, inner-1), outer+4.5*popFrac, swept, sliceCorner+1), col.Alpha(outerA*popFrac))
+					p.FillPath(buildRoundedSectorPath(sectorPath, cx, cy, max(0, inner-0.5), outer+2.2*popFrac, swept, sliceCorner+0.5), col.Alpha(innerA*popFrac))
 				}
 
-				p.FillPath(chart.Sector(cx, cy, inner, outer, swept), col)
-			}
-
-			// Subtle inner ring accent rim for dimensional crispness on donut hole.
-			if inner > 8 {
-				rim := ui.Rect{X: cx - inner, Y: cy - inner, W: inner * 2, H: inner * 2}
-				p.Stroke(rim, innerRimCol, inner, 1)
+				p.FillPath(buildRoundedSectorPath(sectorPath, cx, cy, inner, outer, swept, sliceCorner), col)
 			}
 		})
 
@@ -360,9 +368,11 @@ func DonutChart(c *ui.Context, slices []DonutSlice, opts ...DonutChartOptions) u
 			if !o.PieMode && inner >= 26 {
 				cTitle := o.CenterTitle
 				cSub := o.CenterSubtitle
+				var activeSwatch ui.Color
 				if idx := *selPtr; idx >= 0 && idx < n && total > 0 {
 					vs, ps := formatSliceVal(idx)
 					cTitle = vs
+					activeSwatch = colors[idx]
 					name := slices[idx].Label
 					if name != "" {
 						cSub = fmt.Sprintf("%s · %s", name, ps)
@@ -392,10 +402,15 @@ func DonutChart(c *ui.Context, slices []DonutSlice, opts ...DonutChartOptions) u
 								Color:       cs.OnSurface,
 							})
 							if cSub != "" {
-								md3e.TextWith(c, cSub, md3e.TextOptions{
-									Role:     tokens.LabelSmall,
-									MaxLines: 1,
-									Color:    cs.OnSurfaceVariant,
+								ui.Row(c).AlignItems(ui.Center).Gap(5).MaxWidth(centerW).Children(func() {
+									if activeSwatch.A > 0 {
+										ui.Box(c).Size(7, 7).Radius(3.5).Background(activeSwatch).Shrink(0)
+									}
+									md3e.TextWith(c, cSub, md3e.TextOptions{
+										Role:     tokens.LabelSmall,
+										MaxLines: 1,
+										Color:    cs.OnSurfaceVariant,
+									})
 								})
 							}
 						})
@@ -462,4 +477,126 @@ func DonutChart(c *ui.Context, slices []DonutSlice, opts ...DonutChartOptions) u
 	})
 
 	return root
+}
+
+// buildRoundedSectorPath writes a pie or donut sector into dst with optional
+// rounded arc corners, reusing dst's backing storage with zero allocations.
+func buildRoundedSectorPath(dst *ui.Path, cx, cy, inner, outer float32, s chart.Slice, cornerR float32) *ui.Path {
+	dst.Reset()
+	if outer <= 0 || s.End <= s.Start {
+		return dst
+	}
+	inner = max(0, min(inner, outer))
+	gap := s.Pad * math.Sqrt(float64(inner*inner+outer*outer))
+	angles := func(r float32) (a0, a1 float64) {
+		a0, a1 = s.Start, s.End
+		if gap > 0 && r > 0 {
+			d := math.Asin(min(1, gap*0.5/float64(r)))
+			if a1-a0 > 2*d {
+				return a0 + d, a1 - d
+			}
+			m := (a0 + a1) * 0.5
+			return m, m
+		}
+		return a0, a1
+	}
+
+	a0, a1 := angles(outer)
+	if a1 <= a0 {
+		return dst
+	}
+	// Full ring / full circle or unrounded pie slice.
+	isFull := (s.End - s.Start) >= 2*math.Pi-1e-4 && gap <= 1e-5
+	if isFull || inner <= 0 || cornerR <= 0.25 {
+		x, y := chart.Polar(cx, cy, outer, a0)
+		dst.MoveTo(x, y)
+		appendSectorArc(dst, cx, cy, outer, a0, a1)
+		if inner > 0 {
+			b0, b1 := angles(inner)
+			if isFull {
+				dst.Close()
+				ix, iy := chart.Polar(cx, cy, inner, b1)
+				dst.MoveTo(ix, iy)
+				appendSectorArc(dst, cx, cy, inner, b1, b0)
+			} else {
+				ix, iy := chart.Polar(cx, cy, inner, b1)
+				dst.LineTo(ix, iy)
+				appendSectorArc(dst, cx, cy, inner, b1, b0)
+			}
+		} else if !isFull {
+			dst.LineTo(cx, cy)
+		}
+		dst.Close()
+		return dst
+	}
+
+	b0, b1 := angles(inner)
+	if b1 <= b0 {
+		b0, b1 = a0, a1
+	}
+
+	thick := outer - inner
+	o0x, o0y := chart.Polar(cx, cy, outer, a0)
+	o1x, o1y := chart.Polar(cx, cy, outer, a1)
+	i0x, i0y := chart.Polar(cx, cy, inner, b0)
+	i1x, i1y := chart.Polar(cx, cy, inner, b1)
+
+	edgeStartLen := float32(math.Hypot(float64(o0x-i0x), float64(o0y-i0y)))
+	edgeEndLen := float32(math.Hypot(float64(o1x-i1x), float64(o1y-i1y)))
+	minEdge := min(thick, min(edgeStartLen, edgeEndLen))
+	rOut := min(cornerR, minEdge*0.42, outer*float32(a1-a0)*0.36)
+	rIn := min(cornerR, minEdge*0.42, inner*float32(b1-b0)*0.36)
+	daOut := min(float64(rOut)/float64(outer), (a1-a0)*0.45)
+	daIn := min(float64(rIn)/float64(inner), (b1-b0)*0.45)
+
+	const k = float32(0.55228475)
+	lerpEdge := func(ax, ay, bx, by, dist, total float32) (float32, float32) {
+		if total <= 1e-4 {
+			return ax, ay
+		}
+		t := clampF32(dist/total, 0, 0.45)
+		return ax + (bx-ax)*t, ay + (by-ay)*t
+	}
+	corner := func(ax, ay, vx, vy, bx, by float32) {
+		dst.CubeTo(ax+k*(vx-ax), ay+k*(vy-ay), bx+k*(vx-bx), by+k*(vy-by), bx, by)
+	}
+
+	// Start edge -> outer-start corner -> outer arc -> outer-end corner -> end edge.
+	sOutX, sOutY := lerpEdge(o0x, o0y, i0x, i0y, rOut, edgeStartLen)
+	oa0x, oa0y := chart.Polar(cx, cy, outer, a0+daOut)
+	oa1x, oa1y := chart.Polar(cx, cy, outer, a1-daOut)
+	eOutX, eOutY := lerpEdge(o1x, o1y, i1x, i1y, rOut, edgeEndLen)
+
+	eInX, eInY := lerpEdge(i1x, i1y, o1x, o1y, rIn, edgeEndLen)
+	ib1x, ib1y := chart.Polar(cx, cy, inner, b1-daIn)
+	ib0x, ib0y := chart.Polar(cx, cy, inner, b0+daIn)
+	sInX, sInY := lerpEdge(i0x, i0y, o0x, o0y, rIn, edgeStartLen)
+
+	dst.MoveTo(sOutX, sOutY)
+	corner(sOutX, sOutY, o0x, o0y, oa0x, oa0y)
+	appendSectorArc(dst, cx, cy, outer, a0+daOut, a1-daOut)
+	corner(oa1x, oa1y, o1x, o1y, eOutX, eOutY)
+	dst.LineTo(eInX, eInY)
+	corner(eInX, eInY, i1x, i1y, ib1x, ib1y)
+	appendSectorArc(dst, cx, cy, inner, b1-daIn, b0+daIn)
+	corner(ib0x, ib0y, i0x, i0y, sInX, sInY)
+	dst.Close()
+	return dst
+}
+
+func appendSectorArc(dst *ui.Path, cx, cy, r float32, a0, a1 float64) {
+	n := int(math.Ceil(math.Abs(a1-a0) / (math.Pi * 0.5)))
+	if n == 0 {
+		return
+	}
+	step := (a1 - a0) / float64(n)
+	k := float32(4.0 / 3.0 * math.Tan(step*0.25))
+	for i := range n {
+		b0, b1 := a0+float64(i)*step, a0+float64(i+1)*step
+		x0, y0 := chart.Polar(cx, cy, r, b0)
+		x1, y1 := chart.Polar(cx, cy, r, b1)
+		t0x, t0y := float32(math.Cos(b0)), float32(math.Sin(b0))
+		t1x, t1y := float32(math.Cos(b1)), float32(math.Sin(b1))
+		dst.CubeTo(x0+k*r*t0x, y0+k*r*t0y, x1-k*r*t1x, y1-k*r*t1y, x1, y1)
+	}
 }

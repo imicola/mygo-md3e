@@ -176,13 +176,14 @@ func AreaSparkline(c *ui.Context, opts ...AreaSparklineOptions) ui.Element {
 			return
 		}
 
-		// Reserve slight vertical inset so stroke caps & endpoint dot never clip.
+		// Reserve slight vertical and trailing inset so stroke caps & endpoint aura never clip.
 		topPad := strokeW*0.9 + 1.5
+		endDotPad := max(strokeW*2.4+2.5, float32(8))
 		if showEndDot {
-			topPad = max(topPad, 5.5)
+			topPad = max(topPad, endDotPad)
 		}
 		if topPad*2 >= r.H {
-			topPad = r.H * 0.12
+			topPad = r.H * 0.14
 		}
 		plotRect := ui.Rect{
 			X: r.X,
@@ -190,8 +191,8 @@ func AreaSparkline(c *ui.Context, opts ...AreaSparklineOptions) ui.Element {
 			W: r.W,
 			H: max(1, r.H-topPad),
 		}
-		if showEndDot && plotRect.W > 12 {
-			plotRect.W -= 4
+		if showEndDot && plotRect.W > endDotPad*2 {
+			plotRect.W -= endDotPad
 		}
 
 		pixelW := int(math.Ceil(float64(plotRect.W * max(1, p.Scale()))))

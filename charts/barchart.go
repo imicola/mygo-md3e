@@ -81,6 +81,7 @@ type barChartLocalKey struct{}
 type barChartState struct {
 	selected      int
 	focusedSeries int
+	gridPath      ui.Path
 }
 
 // BarChart builds an MD3E Expressive grouped or stacked bar chart over
@@ -249,6 +250,7 @@ func BarChart(c *ui.Context, series []BarSeries, opts ...BarChartOptions) ui.Ele
 			}
 
 			baselineInk := cs.OutlineVariant
+			gridPath := &st.gridPath
 			area.Draw(func(p *ui.Painter, r ui.Rect) {
 				if !isPositiveFiniteF32(r.W) || !isPositiveFiniteF32(r.H) {
 					return
@@ -257,10 +259,7 @@ func BarChart(c *ui.Context, series []BarSeries, opts ...BarChartOptions) ui.Ele
 					return
 				}
 				if showGrid {
-					for _, tick := range yTicks {
-						ty := chart.Y(r, tick.At)
-						p.Line(r.X, ty, r.X+r.W, ty, 1, gridCol)
-					}
+					drawDashedGrid(p, gridPath, r, yTicks, gridCol)
 				}
 				// Crisp baseline at 0 when inside domain.
 				if yScale.Lo <= 0 && yScale.Hi >= 0 {
@@ -400,14 +399,12 @@ func renderGroupedBars(
 			x0 := band.Lo + float32(si)*subStep + gapW*0.5
 			spanX := chart.Span{Lo: x0, Hi: x0 + subW}
 
-			col := colors[si]
 			dimmed := (activeCat >= 0 && activeCat != ci) || (focusedSeries >= 0 && focusedSeries != si)
-			if dimmed {
-				col = col.Alpha(0.46)
-			}
-
-			grad := barVerticalGradient(col, th.Dark, activeCat == ci && !dimmed)
+			grad := barVerticalGradient(colors[si], th.Dark, activeCat == ci && !dimmed)
 			bar := chart.Rect(c, spanX, spanY).LinearGradient(grad)
+			if dimmed {
+				bar.Opacity(0.46)
+			}
 			if val >= 0 {
 				bar.Radius(barRadius, barRadius, 0, 0)
 			} else {
@@ -417,17 +414,21 @@ func renderGroupedBars(
 				onClick(ci)
 			}
 
-			if showValues && growScale > 0.85 && !dimmed && val != 0 {
+			if showValues && growScale > 0.85 && val != 0 {
 				vAlign := ui.End
 				if val < 0 {
 					vAlign = ui.Start
+				}
+				lblOpacity := float32(1)
+				if dimmed {
+					lblOpacity = 0.42
 				}
 				chart.Anchor(c, spanX.Mid(), clampF32(yScale.At(val), 0, 1), ui.Center, vAlign, func() {
 					md3e.TextWith(c, fmtVal(val), md3e.TextOptions{
 						Role:        tokens.LabelSmall,
 						TabularNums: true,
 						Color:       th.Colors.OnSurfaceVariant,
-					}).NoWrap().Margin(2, 0)
+					}).NoWrap().Margin(2, 0).Opacity(lblOpacity)
 				}).PassThrough()
 			}
 		}
@@ -453,15 +454,21 @@ func renderStackedBars(
 	numCats := len(xBand.Labels)
 	for ci := range numCats {
 		band := xBand.Band(ci)
-		// Find outermost positive and negative non-zero series indices for crisp cap rounding.
-		topPos, botNeg := -1, -1
+		// Find outermost and baseline-touching positive/negative series indices.
+		firstPos, topPos, firstNeg, botNeg := -1, -1, -1, -1
 		totalPos := 0.0
 		for si := range numSeries {
 			v := matrix[si][ci]
 			if v > 0 {
+				if firstPos < 0 {
+					firstPos = si
+				}
 				topPos = si
 				totalPos += v
 			} else if v < 0 {
+				if firstNeg < 0 {
+					firstNeg = si
+				}
 				botNeg = si
 			}
 		}
@@ -476,20 +483,47 @@ func renderStackedBars(
 			hi := seg.Hi * float64(growScale)
 			spanY := yScale.Span(lo, hi)
 
-			col := colors[si]
-			dimmed := (activeCat >= 0 && activeCat != ci) || (focusedSeries >= 0 && focusedSeries != si)
-			if dimmed {
-				col = col.Alpha(0.46)
+			// Subtle interior vertical seam gap so stacked segments read as crisp layers.
+			if hSpan := spanY.Hi - spanY.Lo; hSpan > 0.012 {
+				seam := min(float32(0.004), hSpan*0.14)
+				if v > 0 {
+					if si != firstPos {
+						spanY.Lo += seam
+					}
+					if si != topPos {
+						spanY.Hi -= seam
+					}
+				} else {
+					if si != firstNeg {
+						spanY.Hi -= seam
+					}
+					if si != botNeg {
+						spanY.Lo += seam
+					}
+				}
 			}
-			grad := barVerticalGradient(col, th.Dark, activeCat == ci && !dimmed)
+
+			dimmed := (activeCat >= 0 && activeCat != ci) || (focusedSeries >= 0 && focusedSeries != si)
+			grad := barVerticalGradient(colors[si], th.Dark, activeCat == ci && !dimmed)
 			bar := chart.Rect(c, band, spanY).LinearGradient(grad)
+			if dimmed {
+				bar.Opacity(0.46)
+			}
 			switch {
+			case si == topPos && si == firstPos:
+				bar.Radius(barRadius, barRadius, 0, 0)
 			case si == topPos:
-				bar.Radius(barRadius, barRadius, 1.5, 1.5)
+				bar.Radius(barRadius, barRadius, 2, 2)
+			case si == botNeg && si == firstNeg:
+				bar.Radius(0, 0, barRadius, barRadius)
 			case si == botNeg:
-				bar.Radius(1.5, 1.5, barRadius, barRadius)
+				bar.Radius(2, 2, barRadius, barRadius)
+			case si == firstPos:
+				bar.Radius(2, 2, 0, 0)
+			case si == firstNeg:
+				bar.Radius(0, 0, 2, 2)
 			default:
-				bar.Radius(1.5)
+				bar.Radius(2)
 			}
 			if bar.Clicked() && onClick != nil {
 				onClick(ci)
@@ -497,27 +531,33 @@ func renderStackedBars(
 		}
 
 		if showValues && growScale > 0.85 && totalPos > 0 {
+			lblOpacity := float32(1)
+			if activeCat >= 0 && activeCat != ci {
+				lblOpacity = 0.42
+			}
 			chart.Anchor(c, band.Mid(), clampF32(yScale.At(totalPos), 0, 1), ui.Center, ui.End, func() {
 				md3e.TextWith(c, fmtVal(totalPos), md3e.TextOptions{
 					Role:        tokens.LabelSmall,
 					TabularNums: true,
 					Color:       th.Colors.OnSurfaceVariant,
-				}).NoWrap().Margin(0, 0, 3, 0)
+				}).NoWrap().Margin(0, 0, 3, 0).Opacity(lblOpacity)
 			}).PassThrough()
 		}
 	}
 }
 
 func barVerticalGradient(base ui.Color, dark, active bool) ui.LinearGradient {
-	lift := float32(0.14)
+	lift := float32(0.12)
+	shade := float32(0.08)
 	if dark {
-		lift = 0.16
+		lift = 0.10
+		shade = 0.10
 	}
 	if active {
-		lift += 0.10
+		lift += 0.08
 	}
-	topCol := base.Mix(ui.RGB(255, 255, 255), lift)
-	botCol := base.Mix(ui.RGB(0, 0, 0), 0.08)
+	topCol := base.MixOklab(ui.RGB(255, 255, 255), lift)
+	botCol := base.MixOklab(ui.RGB(0, 0, 0), shade)
 	return ui.LinearGradient{
 		From:  topCol,
 		To:    botCol,

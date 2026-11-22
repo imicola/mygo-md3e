@@ -86,6 +86,7 @@ type lineChartState struct {
 	focusedSeries int
 	scratches     []sparklineScratch
 	xFractions    []float32
+	gridPath      ui.Path
 }
 
 // LineChart builds an MD3E Expressive multi-series line/area chart over
@@ -263,6 +264,8 @@ func LineChart(c *ui.Context, series []LineSeries, opts ...LineChartOptions) ui.
 			baseFrac := clampF32(yScale.At(max(yLo, min(yHi, 0))), 0, 1)
 			curve := o.Curve
 
+			gridPath := &st.gridPath
+			baselineInk := cs.OutlineVariant
 			area.Draw(func(p *ui.Painter, r ui.Rect) {
 				if !isPositiveFiniteF32(r.W) || !isPositiveFiniteF32(r.H) {
 					return
@@ -271,12 +274,13 @@ func LineChart(c *ui.Context, series []LineSeries, opts ...LineChartOptions) ui.
 					return
 				}
 
-				// Horizontal gridlines & crisp baseline.
+				// Dashed horizontal reference gridlines & crisp 0-baseline when in domain.
 				if showGrid {
-					for _, tick := range yTicks {
-						ty := chart.Y(r, tick.At)
-						p.Line(r.X, ty, r.X+r.W, ty, 1, gridCol)
-					}
+					drawDashedGrid(p, gridPath, r, yTicks, gridCol)
+				}
+				if yLo <= 0 && yHi >= 0 {
+					zy := chart.Y(r, baseFrac)
+					p.Line(r.X, zy, r.X+r.W, zy, 1.2, baselineInk)
 				}
 				if maxN == 0 || len(seriesSnap) == 0 || !(yHi > yLo) {
 					return
@@ -368,7 +372,7 @@ func LineChart(c *ui.Context, series []LineSeries, opts ...LineChartOptions) ui.
 			// Active selection crosshair, ringed point markers, and MD3E RichTooltip card.
 			if idx := *selPtr; idx >= 0 && idx < maxN {
 				selX := xs[idx]
-				chart.RuleX(c, selX, 1).Background(crosshairCol).PassThrough()
+				chart.RuleX(c, selX, 1).BorderWidth(0, 0, 0, 1).BorderColor(crosshairCol).BorderStyle(ui.BorderDashed).PassThrough()
 
 				var tipRows []TooltipRow
 				topY := float32(0.5)
@@ -381,6 +385,7 @@ func LineChart(c *ui.Context, series []LineSeries, opts ...LineChartOptions) ui.
 						continue
 					}
 					yf := clampF32(yScale.At(s.Values[idx]), 0, 1)
+					yf = clampF32(baseFrac+(yf-baseFrac)*riseScale, 0, 1)
 					if !foundPoint || yf > topY {
 						topY = yf
 						foundPoint = true
