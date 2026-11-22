@@ -283,4 +283,22 @@ MD3E 将动效分为 **Spatial（空间：位移、缩放、尺寸、圆角、�
   - 完整键盘导航（Tab/Arrow/Home/End/Escape + `c.Announce`）、`DonutChart` RTL 方向键镜像、`ReduceMotion` 首帧零多余帧与退场幽灵绘制安全。
 - **DCE 硬边界验证**：通过离线 `charts/dce_test.go` 验证仅引用根包 `md3e.Button` 时零链接 `charts/` 与 `ui/chart`，且仅引用 `charts.AreaSparkline` + `charts.RingBuffer` 时零链接 `charts.BarChart`、`charts.DonutChart`、`symbols/` 与 `media/`。
 
+---
+
+## 11. 文档、Markdown 与代码视图子包规格（M13：`docview/` & `codeview/`）
+
+### 11.1 `codeview` 编辑器与 Diff 主题桥（`codeview/theme.go`）
+- **`ThemeFromMD3E`**：将 `*md3e.Theme` 映射到 `*editor.Theme`，包括 `Surface` / `SurfaceContainerLowest` 背景、当前行 `SurfaceContainerHighest` 高亮、选区半透明 `Primary`、匹配括号与搜索高亮、行号槽与 `OutlineVariant` 细分割线、`Primary` 光标、Diff 增删改三态表面底色（兼容 Light/Dark/HighContrast 对比度收敛），以及 9 类语法 Token 调色。
+- **`FontFromMD3E` / `ScrollbarFromMD3E` / `ApplyToEditor` / `ApplyToDiff` / `ConfigureEditor`**：提供等宽排版字阶映射、`md3e` 胶囊滚动条风格以及编辑器/Diff 状态一步配置与实时上下文字体/滚动条同步。
+
+### 11.2 `docview.Markdown` 与流式输出（`docview/markdown.go`）
+- **`MarkdownTheme` / `MarkdownThemeFor`**：基于 `th.Type`、`th.Colors` 与 `th.Density` 生成 `*markdown.Theme`，统一映射 `H1..H6`（H1–H3 使用 `Brand` 字体族）、正文行高、行内代码微胶囊、引用左/Start 装饰竖线、`SurfaceContainer` 表格斑马条纹、圆角、链接与文本选区颜色；默认复用 `codeview.ThemeFromMD3E(th)` 着色源码片段。
+- **`Markdown` / `MarkdownStream` / `Revealed`**：`Markdown` 自动将围栏代码块委托给 `docview.CodeBlock`（流式未闭合块自动禁用复制按钮并等待输出完结），将 GitHub Alert 引用映射为 `docview.Callout`，同时保持 `ui/markdown` 的 `ShareSelection` 与 `Copy as Markdown` 完整可用；`MarkdownStream` 结合 `Theme.ReduceMotion || c.Preferences().ReduceMotion` 控制渐显动画并确保结束后无残留动画帧；提供 `Anchor` / `AnchorVersion` 与 `*docview.State` 联动。
+
+### 11.3 文档增强块与滚动联动目录（`codeblock.go` / `callout.go` / `state.go` / `outline.go`）
+- **`docview.CodeBlock`**：`SurfaceContainerHigh` + `ShapeMedium`（可调）+ 1 DIP `Hairline` 描边卡片，含语言徽章与可选标题栏、可选 `TabularNums` 不可选中行号槽、强制 `ui.LeftToRight` 代码排版方向、`ui/editor` 语法高亮着色与横向滚动条，以及右上角一键复制按钮（支持点击后 2 秒勾选反馈、同步写入剪贴板与可选 `md3e.SnackbarState` 提示、退场幽灵安全与禁用状态）。
+- **`docview.Callout`**：`CalloutNote`、`CalloutTip`、`CalloutImportant`、`CalloutWarning`、`CalloutCaution` 五类语义块（配合 `CalloutKindFromAlert`），分别映射至 `PrimaryContainer`/`SuccessContainer`/`TertiaryContainer`/`WarningContainer`/`ErrorContainer`（均由底层色彩回落保障可用性），提供 Start 侧 3 DIP 强调竖条（支持 `ui.RightToLeft` 右缘镜像）、`RoleRegion`/`RoleAlert` 无障碍语义、Markdown 原生子内容或纯文本降级渲染。
+- **`docview.State` / `ExtractOutline` / `Outline`**：`ExtractOutline` 解析文档标题生成去重小写 `Slug`、`Level` 与块索引；`Markdown` 构建期通过 `LayoutBounds()` 测量标题相对垂直偏移且不干扰 `ui.Scroll` 视口裁剪；`Outline` 在 `RoleNavigation` 内提供层级缩进、活跃态 `SecondaryContainer` 胶囊背景 + `FastSpatial` 弹簧过渡 + Primary Start 侧 3 DIP 指示条（RTL 自动镜像）、点击平滑滚动（无 `ui.ScrollState` 时平滑回退至 `ui/markdown` 锚点）、`FocusGroup(ui.Vertical)` 方向键导航、单独传入 `Items`/`Active`/`OnSelect` 与与 `md3e.SupportingPane` 协同布局。
+- **DCE 硬边界验证**：通过离线 `codeview/dce_test.go` 与 `docview/dce_test.go` 验证仅引用 `md3e.Button` 时零链接 `codeview/`、`docview/` 与 `ui/markdown`/`ui/editor`；仅调用 `codeview.ThemeFromMD3E` 时零链接 `editor.View`/`editor.DiffView`；仅引用 `docview.Outline` + `docview.State` 时零链接 `editor.View`/`editor.DiffView`、`charts/` 与 `media/`。
+
 

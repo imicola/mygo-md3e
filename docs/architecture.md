@@ -122,6 +122,23 @@ Go 模块路径：`github.com/imicola/mygo-md3e`（直接依赖上游 `github.co
 │   ├── dashboard_test.go   # StackedProgress & MetricCard 测试
 │   ├── charts_test.go      # LineChart / BarChart / DonutChart 交互、RTL 与弹簧收敛测试
 │   └── dce_test.go         # Zero-Bloat / 死代码消除链接边界测试
+├── codeview/               # M13.3: ui/editor 主题、字体与滚动条薄桥接（按需引入）
+│   ├── doc.go              # codeview 子包概览
+│   ├── theme.go            # ThemeFromMD3E / FontFromMD3E / ScrollbarFromMD3E / ApplyToEditor / ApplyToDiff / ConfigureEditor
+│   ├── theme_test.go       # Light/Dark/HighContrast 对比度与渲染测试
+│   └── dce_test.go         # Zero-Bloat / 死代码消除链接边界测试（仅 ThemeFromMD3E 不拉入 editor.View/DiffView）
+├── docview/                # M13: 文档、Markdown、流式渲染与大纲目录子包（按需引入）
+│   ├── doc.go              # docview 子包概览
+│   ├── helpers.go          # 主题颜色选取与非有限浮点防护工具
+│   ├── codeblock.go        # CodeBlock 代码卡片（复制 2s 反馈 / Snackbar / 语法高亮）
+│   ├── callout.go          # Callout 五类 MD3E 语义提示块与 CalloutKindFromAlert
+│   ├── markdown.go         # MarkdownTheme / MarkdownThemeFor / Markdown / MarkdownStream / Revealed
+│   ├── state.go            # State / OutlineItem / ExtractOutline（标题测量与 Scroll/Anchor 跳转）
+│   ├── outline.go          # Outline 文档大纲导航目录（配合 SupportingPane）
+│   ├── blocks_test.go      # CodeBlock / Callout 交互、退场幽灵、RTL 与 Snackbar 测试
+│   ├── markdown_test.go    # Markdown 排版密度、块集成、Stream、Copy as Markdown 与 ReduceMotion 测试
+│   ├── outline_test.go     # Outline 滚动联动、Anchor 回退、键盘与 RTL 测试
+│   └── dce_test.go         # Zero-Bloat / 死代码消除链接边界测试
 ├── golden_test.go          # 纯几何 Golden 视觉基线测试（testdata/）
 └── examples/
     ├── m2-demo/            # M2: 独立可运行的令牌/动效/形状预览模块
@@ -137,10 +154,12 @@ Go 模块路径：`github.com/imicola/mygo-md3e`（直接依赖上游 `github.co
    - `motion` 仅依赖 `tokens` 与 `github.com/egoist/mygo/ui`（`Animation`、`SpringOptions`、`Preferences`）。
    - `shape` 仅依赖 `github.com/egoist/mygo/ui`（`Path`、`Painter`、`Rect`、`Point`）。
    - `symbols` 仅依赖 Go 标准库与 `github.com/egoist/mygo/ui`（`Path`、`Painter`、`Rect`、`Color`），不导入 `md3e`，其 `(*Symbol).Draw` 方法值签名与 `md3e.IconDraw` 完全一致。
-   - `md3e`（根包）整合 `tokens`、`motion`、`shape`、`internal/mdicon` 与 `github.com/egoist/mygo/ui`；**严禁导入** `media`、`charts`、`ui/netimage`、`ui/video` 或 `ui/chart`。
+   - `md3e`（根包）整合 `tokens`、`motion`、`shape`、`internal/mdicon` 与 `github.com/egoist/mygo/ui`；**严禁导入** `media`、`charts`、`codeview`、`docview`、`ui/netimage`、`ui/video`、`ui/chart`、`ui/markdown` 或 `ui/editor`。
    - `media`（扩展媒体子包）单向构建于 `md3e`、`tokens`、`motion`、`shape`、`symbols`、`github.com/egoist/mygo/ui`、`ui/netimage` 与 `ui/video` 之上，各功能块无包级 `init()`，确保仅使用 `NetImage` 时不链接 `ui/video`，仅使用根包 `md3e.Button`/`md3e.Image` 时零引入 `media/`。
    - `charts`（扩展图表子包）单向构建于 `md3e`、`tokens`、`motion`、`github.com/egoist/mygo/ui` 与 `github.com/egoist/mygo/ui/chart` 之上，不导入 `symbols/` 或 `media/`，零 `init()` 注册表，确保仅使用根包 `md3e.Button` 时零引入 `charts/` 与 `ui/chart`，且仅使用 `AreaSparkline`/`RingBuffer` 时不链接 `BarChart`/`DonutChart`。
-   - **禁止循环依赖**：`tokens`、`motion`、`shape`、`symbols` 不得导入根包 `md3e`、`media` 或 `charts`；`md3e` 不得导入任何业务扩展子包（如 `media`、`charts`）。
+   - `codeview`（代码编辑器主题桥接）单向构建于 `md3e`、`tokens`、`github.com/egoist/mygo/ui` 与 `github.com/egoist/mygo/ui/editor` 之上，零包级 `init()`；仅调用 `codeview.ThemeFromMD3E` 时不链接 `editor.View`/`editor.DiffView` 重渲染路径。
+   - `docview`（文档与 Markdown 子包）单向构建于 `md3e`、`tokens`、`motion`、`shape`、`codeview`、`github.com/egoist/mygo/ui` 与 `ui/markdown` 之上，不导入 `symbols/`、`media/` 或 `charts/`，零包级 `init()`；`Outline`/`State` 路径不拉入 `editor.View`/`editor.DiffView`，且仅使用根包 `md3e.Button` 时零引入 `docview/`、`codeview/` 与 `ui/markdown`。
+   - **禁止循环依赖**：`tokens`、`motion`、`shape`、`symbols` 不得导入根包 `md3e`、`media`、`charts`、`codeview` 或 `docview`；`md3e` 不得导入任何业务扩展子包（如 `media`、`charts`、`codeview`、`docview`）。
 2. **零 `init()` 注册表**：任何包不得在 `init()` 中构造大对象或注册全量组件表，确保用户应用只链接实际调用的组件（遵循 MyGo“按需付费”原则）。
 
 ---

@@ -135,18 +135,18 @@ tokens  ──►  motion  ──►  shape  ──►  md3e (根包：核心美
   - `media.VideoPlayer`：封装上游 `ui.Video` / `ui/video`（含 `OpenVideo`、`OpenVideoURL`、`OpenVideoData`），提供基于虚拟时钟（`c.Now()`/`c.After`）自动隐藏与移入唤起的半透明控制条、共享 Expressive `mediaScrubber` 波浪/胶囊进度拖拽条（带缓冲段与 `TabularNums` 时间气泡）、Play/Pause Morph 按钮、音量滑块、倍速菜单、全屏钩子及快捷键/RTL 支持。
   - `media.AudioPlayerCard` / `media.MiniPlayer`：紧凑密度自适应底栏迷你播放器与展开式专辑封面卡片（支持 `ui.Local` 缓存的封面取色 + `AnimatedThemeScope` 过渡、`ArtworkShape` 裁切、播放态 `LinearWavyProgress` 波浪条及暂停/`ReduceMotion` 零多余帧收敛）。
 
-#### M13 — 文档、Markdown 与知识展示子包（`docview/`）
+#### M13 — 文档、Markdown 与知识展示子包（`docview/` & `codeview/`）
 > **目标**：补齐文档站、README 预览、笔记应用、AI 流式回复渲染场景。
 
-- [ ] **M13.1 `docview.Markdown`（封装 `ui/markdown`）**
-  - 自动读取 `md3e.CurrentTheme(c)`，将标题/正文/引用/链接/分隔线/表格精准映射至 MD3E `TypographyScale` 与 `ColorScheme`。
-  - 流式输出友好（适配 AI Chat 逐字/逐块更新无闪烁）。
-- [ ] **M13.2 文档增强块**
-  - `docview.CodeBlock`：带语言标签与一键复制按钮（带 Snackbar/勾选反馈）的 `SurfaceContainerHigh` 代码卡片。
-  - `docview.Callout`：MD3E 语义化提示块（Note / Tip / Important / Warning / Caution，复用 `Primary`/`Tertiary`/`Warning`/`Error` 容器色）。
-  - `docview.Outline`：基于标题结构联动滚动的右侧目录大纲（配合 `SupportingPane`）。
-- [ ] **M13.3 *(可选薄桥接)* `codeview.ThemeFromMD3E`**
-  - 提供极薄函数将 `*md3e.Theme` 转换为 `ui/editor` 配色与字号配置，让代码编辑器/Diff 视图开箱融入 MD3E。
+- [x] **M13.1 `docview.Markdown`（封装 `ui/markdown`：`docview/markdown.go`、`markdown_test.go`）**
+  - `docview.MarkdownTheme` / `docview.MarkdownThemeFor` 自动读取 `md3e.CurrentTheme(c)`，将标题/正文/行内代码/引用/链接/分隔线/表格/选区与 `codeview` 语法高亮精准映射至 MD3E `TypographyScale`、`ColorScheme` 与 `Theme.Density`。
+  - 提供 `docview.Markdown`、`docview.MarkdownStream` 与 `docview.Revealed` 流式逐词渐显渲染，响应 Theme 与 OS `ReduceMotion`（首帧零多余动画帧），并默认接入 MD3E `CodeBlock` 与 GFM Alert -> `Callout`（保留 `ShareSelection` 与 `Copy as Markdown`）。
+- [x] **M13.2 文档增强块（`docview/codeblock.go`、`callout.go`、`state.go`、`outline.go`、`helpers.go`、`blocks_test.go`、`outline_test.go`、`dce_test.go`）**
+  - `docview.CodeBlock`：`SurfaceContainerHigh` + Hairline 描边代码卡片，支持语言/标题徽章、LTR 防护代码体、可选 `TabularNums` 行号、`ui/editor` 语法高亮与带 2 秒勾选反馈及 `md3e.SnackbarState` 联动的一键复制按钮。
+  - `docview.Callout`：MD3E 语义化提示块（`CalloutNote` / `CalloutTip` / `CalloutImportant` / `CalloutWarning` / `CalloutCaution` 与 `CalloutKindFromAlert`，复用 `PrimaryContainer` / `SuccessContainer` / `TertiaryContainer` / `WarningContainer` / `ErrorContainer` 容器色与 Start 侧强调竖条，支持 `ui.RightToLeft` 镜像与可选 `LiveAlert`）。
+  - `docview.State` / `ExtractOutline` / `Outline`：支持标题唯一 Slug 提取、`LayoutBounds()` 偏移测量、`ui.ScrollState` 双向滚动联动（含无 `ScrollState` 时的 `ui/markdown` 锚点回退）、`FocusGroup(ui.Vertical)` 键盘导航、单独 `Items`+`Active`+`OnSelect` 模式与 `SupportingPane` 集成。
+- [x] **M13.3 *(薄桥接)* `codeview` 编辑器主题与字体桥（`codeview/theme.go`、`doc.go`、`theme_test.go`、`dce_test.go`）**
+  - 提供 `codeview.ThemeFromMD3E`、`FontFromMD3E`、`ScrollbarFromMD3E`、`ApplyToEditor`、`ApplyToDiff` 与 `ConfigureEditor`，将 `*md3e.Theme` 的表面/语法色板、HCT 对比度、等宽字体阶与密度映射至 `ui/editor`，并通过独立 DCE 测试锁定与根包及 `docview` 的按需链接边界。
 
 #### M14 — 实时与统计图表子包（`charts/`）
 > **目标**：基于上游 `ui/chart` 提供高颜值、零分配的 MD3E 数据可视化组件。

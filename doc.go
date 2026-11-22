@@ -15,9 +15,12 @@
 //     whose (*Symbol).Draw method values plug directly into [IconDraw].
 //   - package md3e itself holds the core components, from buttons and selection
 //     controls to navigation, overlays, virtualized tables, and local/SVG images.
-//   - [github.com/imicola/mygo-md3e/media] and [github.com/imicola/mygo-md3e/charts] are
-//     opt-in extension subpackages for network images/lightbox/video/audio players and
-//     real-time/statistical charts over ui/chart, isolated from root md3e for zero-bloat DCE.
+//   - [github.com/imicola/mygo-md3e/media], [github.com/imicola/mygo-md3e/charts],
+//     [github.com/imicola/mygo-md3e/docview], and [github.com/imicola/mygo-md3e/codeview]
+//     are opt-in extension subpackages for network images/lightbox/video/audio players,
+//     real-time/statistical charts over ui/chart, Markdown/streaming documents/outline
+//     over ui/markdown, and editor theme/font bridging over ui/editor, isolated from
+//     root md3e for zero-bloat DCE.
 //
 // Components follow MyGo's value API: an element and its context live for one
 // build pass only, state is held by the caller through pointers, and a
