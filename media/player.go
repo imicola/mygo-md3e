@@ -117,7 +117,6 @@ func VideoPlayer(c *ui.Context, player *ui.VideoPlayer, opts ...VideoPlayerOptio
 	}
 
 	th := md3e.CurrentTheme(c)
-	cs := th.Colors
 	reduce := th.ReduceMotion || c.Preferences().ReduceMotion
 	rtl := c.Direction() == ui.RightToLeft
 
@@ -352,6 +351,9 @@ func VideoPlayer(c *ui.Context, player *ui.VideoPlayer, opts ...VideoPlayerOptio
 		fit = ui.Contain
 	}
 
+	hudTh := cinemaHUDTheme(host, th)
+	hudCs := hudTh.Colors
+
 	host.Children(func() {
 		// 1. Video frame layer.
 		if player != nil {
@@ -390,11 +392,35 @@ func VideoPlayer(c *ui.Context, player *ui.VideoPlayer, opts ...VideoPlayerOptio
 
 		// 3. Buffering spinner overlay when decoder isn't ready or is starving.
 		if player != nil && (!ready || buffering) && playErr == nil {
-			ui.Column(c).Absolute().Fill().Center().PassThrough().Children(func() {
-				md3e.LoadingIndicator(c, md3e.LoadingOptions{
-					Style: md3e.LoadingContained,
-					Size:  48,
-					Label: "Buffering video",
+			ui.Column(c.Key("buffering")).Absolute().Fill().Center().PassThrough().Children(func() {
+				md3e.ThemeScope(c, hudTh, func() {
+					md3e.LoadingIndicator(c, md3e.LoadingOptions{
+						Style: md3e.LoadingContained,
+						Size:  48,
+						Label: "Buffering video",
+					})
+				})
+			})
+		}
+
+		// 3b. Center translucent Play/Replay badge when paused or ended.
+		if player != nil && ready && !buffering && playErr == nil && !playing && ctrlAlpha > 0.01 {
+			badgeIcon := symbols.PlayArrow.Draw
+			if ended {
+				badgeIcon = symbols.Replay.Draw
+			}
+			ui.Column(c.Key("play-badge")).Absolute().Fill().Center().PassThrough().Opacity(ctrlAlpha).Children(func() {
+				badge := ui.Box(c).Size(56, 56).Radius(28).Center().
+					Background(ui.RGBA(18, 18, 24, 0.72)).
+					Border(1, ui.RGBA(255, 255, 255, 0.18)).
+					InsetShadow(0, 1, 0, 0, ui.RGBA(255, 255, 255, 0.12)).
+					PassThrough()
+				md3e.ApplyElevationShadows(hudTh, badge, tokens.Level3)
+				badge.Children(func() {
+					iconBox := ui.Box(c).Size(28, 28).PassThrough()
+					iconBox.Draw(func(p *ui.Painter, r ui.Rect) {
+						badgeIcon(p, r, ui.RGB(255, 255, 255))
+					})
 				})
 			})
 		}
@@ -405,41 +431,48 @@ func VideoPlayer(c *ui.Context, player *ui.VideoPlayer, opts ...VideoPlayerOptio
 			if playErr != nil {
 				errMsg = playErr.Error()
 			}
-			ui.Column(c).Absolute().Fill().Center().Background(ui.RGBA(0, 0, 0, 0.72)).Padding(16).Gap(10).Children(func() {
-				errIcon := ui.Box(c).Size(36, 36)
-				ink := cs.Error
-				if ink.A == 0 {
-					ink = ui.RGB(242, 184, 181)
-				}
-				errIcon.Draw(func(p *ui.Painter, r ui.Rect) {
-					symbols.ErrorOutline.Draw(p, r, ink)
+			ui.Column(c.Key("error")).Absolute().Fill().Center().Background(ui.RGBA(0, 0, 0, 0.76)).Padding(16).Gap(10).Children(func() {
+				md3e.ThemeScope(c, hudTh, func() {
+					ui.Column(c).AlignItems(ui.Center).Gap(10).Children(func() {
+						errIcon := ui.Box(c).Size(36, 36)
+						ink := hudCs.Error
+						if ink.A == 0 {
+							ink = ui.RGB(242, 184, 181)
+						}
+						errIcon.Draw(func(p *ui.Painter, r ui.Rect) {
+							symbols.ErrorOutline.Draw(p, r, ink)
+						})
+						md3e.TextWith(c, errMsg, md3e.TextOptions{
+							Role:       tokens.TitleSmall,
+							Color:      ui.RGB(255, 255, 255),
+							MaxLines:   2,
+							Emphasized: true,
+						})
+						if o.OnRetry != nil {
+							if md3e.Button(c, "Retry", md3e.ButtonOptions{
+								Variant:     md3e.ButtonTonal,
+								Size:        tokens.SizeS,
+								LeadingIcon: symbols.Refresh.Draw,
+							}).Clicked() {
+								o.OnRetry()
+							}
+						}
+					})
 				})
-				md3e.TextWith(c, errMsg, md3e.TextOptions{
-					Role:       tokens.TitleSmall,
-					Color:      ui.RGB(255, 255, 255),
-					MaxLines:   2,
-					Emphasized: true,
-				})
-				if o.OnRetry != nil {
-					if md3e.Button(c, "Retry", md3e.ButtonOptions{
-						Variant:     md3e.ButtonTonal,
-						Size:        tokens.SizeS,
-						LeadingIcon: symbols.Refresh.Draw,
-					}).Clicked() {
-						o.OnRetry()
-					}
-				}
 			})
 		}
 
-		// 5. Title top gradient scrim (fades alongside bottom controls).
+		// 5. Title top 4-stop gradient scrim (fades alongside bottom controls).
 		if player != nil && playErr == nil && o.Title != "" && ctrlAlpha > 0.01 {
-			ui.Row(c).Absolute().Top(0).Left(0).Right(0).
-				PaddingX(16).PaddingY(12).
+			ui.Row(c.Key("top-scrim")).Absolute().Top(0).Left(0).Right(0).
+				Padding(14, 16, 22, 16).
 				LinearGradient(ui.LinearGradient{
 					Angle: 180,
+					Oklab: true,
 					Stops: []ui.GradientStop{
-						{At: 0, Color: ui.RGBA(0, 0, 0, 0.65)},
+						{At: 0, Color: ui.RGBA(0, 0, 0, 0.72)},
+						{At: 0.35, Color: ui.RGBA(0, 0, 0, 0.42)},
+						{At: 0.72, Color: ui.RGBA(0, 0, 0, 0.14)},
 						{At: 1, Color: ui.Transparent},
 					},
 				}).
@@ -455,19 +488,25 @@ func VideoPlayer(c *ui.Context, player *ui.VideoPlayer, opts ...VideoPlayerOptio
 				})
 		}
 
-		// 6. Floating translucent MD3E bottom controls overlay.
+		// 6. Floating translucent MD3E dark-glass bottom controls overlay.
 		if player != nil && playErr == nil && ctrlAlpha > 0.01 {
 			lightText := ui.RGB(255, 255, 255)
-			lightMuted := ui.RGBA(255, 255, 255, 0.72)
+			hudScrubActive := hudCs.Primary
+			if hudScrubActive.A == 0 {
+				hudScrubActive = ui.RGB(208, 188, 255)
+			}
 
-			ctrlWrap := ui.Column(c).
+			ctrlWrap := ui.Column(c.Key("ctrl-wrap")).
 				Absolute().Left(0).Right(0).Bottom(0).
-				Padding(20, 12, 10, 12).
+				Padding(26, 12, 10, 12).
 				Gap(6).
 				LinearGradient(ui.LinearGradient{
 					Angle: 0,
+					Oklab: true,
 					Stops: []ui.GradientStop{
-						{At: 0, Color: ui.RGBA(0, 0, 0, 0.82)},
+						{At: 0, Color: ui.RGBA(0, 0, 0, 0.86)},
+						{At: 0.38, Color: ui.RGBA(0, 0, 0, 0.54)},
+						{At: 0.72, Color: ui.RGBA(0, 0, 0, 0.18)},
 						{At: 1, Color: ui.Transparent},
 					},
 				}).
@@ -477,175 +516,180 @@ func VideoPlayer(c *ui.Context, player *ui.VideoPlayer, opts ...VideoPlayerOptio
 				AccessHidden(!controlsActive)
 
 			ctrlWrap.Children(func() {
-				// Expressive wavy / capsule scrubber row.
-				mediaScrubber(c.Key(videoScrubKey{}), scrubberOptions{
-					position:   pos,
-					duration:   dur,
-					buffered:   o.Buffered,
-					playing:    playing,
-					wavy:       wavy,
-					disabled:   player == nil || playErr != nil,
-					active:     cs.Primary,
-					buffer:     ui.RGBA(255, 255, 255, 0.42),
-					track:      ui.RGBA(255, 255, 255, 0.24),
-					thumb:      lightText,
-					bubbleBg:   cs.SurfaceContainerHighest,
-					bubbleFg:   cs.OnSurface,
-					height:     28,
-					thumbH:     20,
-					showBubble: true,
-					label:      "Video timeline",
-					onSeek: func(next time.Duration) {
-						if player != nil {
-							player.Seek(next)
-							pos = next
-							touchControls()
-						}
-					},
-					onInteract: touchControls,
-				})
-
-				// Control bar pill container.
-				barCard := ui.Box(c).FillWidth().
-					Radius(th.Shapes.Radius(tokens.ShapeLarge)).
-					Background(cs.SurfaceContainerHigh.Alpha(0.86)).
-					Border(1, cs.OutlineVariant.Alpha(0.28)).
-					PaddingX(10).PaddingY(6)
-				// Consume clicks on the bar itself so clicking between buttons doesn't toggle stage pause.
-				barCard.Clicked()
-				barCard.Children(func() {
-					ui.Row(c).FillWidth().Justify(ui.SpaceBetween).AlignItems(ui.Center).Gap(8).Children(func() {
-						// Start cluster: Morph Play/Pause + timestamp.
-						ui.Row(c).AlignItems(ui.Center).Gap(10).Children(func() {
-							isPlaying := playing
-							playLabel := "Play"
-							playIcon := symbols.PlayArrow.Draw
-							if playing {
-								playLabel = "Pause"
-							} else if ended {
-								playLabel = "Replay"
-								playIcon = symbols.Replay.Draw
-							}
-							md3e.MorphIconButton(c.Key(videoPlayBtnKey{}), &isPlaying, playLabel, playIcon, md3e.MorphIconButtonOptions{
-								Variant:       md3e.ShapeButtonFilled,
-								Size:          tokens.SizeS,
-								Shape:         defaultVideoPlayShape(),
-								SelectedShape: defaultVideoPauseShape(),
-								SelectedIcon:  symbols.Pause.Draw,
-								Disabled:      player == nil || playErr != nil,
-								OnChanged: func(nextPlay bool) {
-									if player == nil {
-										return
-									}
-									if nextPlay {
-										if player.Ended() {
-											player.Seek(0)
-										}
-										player.Play()
-									} else {
-										player.Pause()
-									}
+				md3e.ThemeScope(c, hudTh, func() {
+					ui.Column(c).FillWidth().Gap(6).Children(func() {
+						// Expressive wavy / capsule scrubber row.
+						mediaScrubber(c.Key(videoScrubKey{}), scrubberOptions{
+							position:   pos,
+							duration:   dur,
+							buffered:   o.Buffered,
+							playing:    playing,
+							wavy:       wavy,
+							disabled:   player == nil || playErr != nil,
+							active:     hudScrubActive,
+							buffer:     ui.RGBA(255, 255, 255, 0.44),
+							track:      ui.RGBA(255, 255, 255, 0.22),
+							thumb:      lightText,
+							bubbleBg:   ui.RGBA(26, 26, 34, 0.94),
+							bubbleFg:   lightText,
+							height:     28,
+							thumbH:     20,
+							showBubble: true,
+							label:      "Video timeline",
+							onSeek: func(next time.Duration) {
+								if player != nil {
+									player.Seek(next)
+									pos = next
 									touchControls()
-									srv.Invalidate()
-								},
-							})
-
-							timeStr := fmt.Sprintf("%s / %s", formatMediaTime(pos), formatMediaTime(dur))
-							md3e.TextWith(c, timeStr, md3e.TextOptions{
-								Role:        tokens.LabelLarge,
-								TabularNums: true,
-								Color:       cs.OnSurface,
-							})
+								}
+							},
+							onInteract: touchControls,
 						})
 
-						// End cluster: Mute + volume slider + playback speed menu + fullscreen.
-						ui.Row(c).AlignItems(ui.Center).Gap(6).Children(func() {
-							volIcon := symbols.VolumeUp.Draw
-							muteLabel := "Mute"
-							if muted || vol <= 0.001 {
-								volIcon = symbols.VolumeOff.Draw
-								muteLabel = "Unmute"
-							} else if vol < 0.5 {
-								volIcon = symbols.VolumeDown.Draw
-							}
-							if md3e.IconButton(c, muteLabel, volIcon, md3e.IconButtonOptions{
-								Variant:  md3e.IconButtonStandard,
-								Size:     tokens.SizeXS,
-								Disabled: player == nil,
-							}).Clicked() {
-								toggleMute()
-							}
+						// Smoked dark-glass control bar pill container.
+						barCard := ui.Box(c).FillWidth().
+							Radius(hudTh.Shapes.Radius(tokens.ShapeLarge)).
+							Background(ui.RGBA(18, 18, 24, 0.78)).
+							Border(1, ui.RGBA(255, 255, 255, 0.14)).
+							InsetShadow(0, 1, 0, 0, ui.RGBA(255, 255, 255, 0.08)).
+							PaddingX(10).PaddingY(6)
+						md3e.ApplyElevationShadows(hudTh, barCard, tokens.Level3)
+						// Consume clicks on the bar itself so clicking between buttons doesn't toggle stage pause.
+						barCard.Clicked()
+						barCard.Children(func() {
+							ui.Row(c).FillWidth().Justify(ui.SpaceBetween).AlignItems(ui.Center).Gap(8).Children(func() {
+								// Start cluster: Morph Play/Pause + timestamp.
+								ui.Row(c).AlignItems(ui.Center).Gap(10).Children(func() {
+									isPlaying := playing
+									playLabel := "Play"
+									playIcon := symbols.PlayArrow.Draw
+									if playing {
+										playLabel = "Pause"
+									} else if ended {
+										playLabel = "Replay"
+										playIcon = symbols.Replay.Draw
+									}
+									md3e.MorphIconButton(c.Key(videoPlayBtnKey{}), &isPlaying, playLabel, playIcon, md3e.MorphIconButtonOptions{
+										Variant:       md3e.ShapeButtonFilled,
+										Size:          tokens.SizeS,
+										Shape:         defaultVideoPlayShape(),
+										SelectedShape: defaultVideoPauseShape(),
+										SelectedIcon:  symbols.Pause.Draw,
+										Disabled:      player == nil || playErr != nil,
+										OnChanged: func(nextPlay bool) {
+											if player == nil {
+												return
+											}
+											if nextPlay {
+												if player.Ended() {
+													player.Seek(0)
+												}
+												player.Play()
+											} else {
+												player.Pause()
+											}
+											touchControls()
+											srv.Invalidate()
+										},
+									})
 
-							volVal := vol
-							if muted {
-								volVal = 0
-							}
-							volSlider := ui.SliderBase(c.Key(videoVolKey{}), &volVal, 0, 1).
-								Disabled(player == nil).
-								Label("Volume").
-								FocusRing(false).
-								Width(64).
-								Height(24).
-								PaddingX(6)
-							if volSlider.Changed() && player != nil {
-								player.SetVolume(volVal)
-								if volVal > 0 && muted {
-									player.SetMuted(false)
-								} else if volVal <= 0.001 {
-									player.SetMuted(true)
-								}
-								touchControls()
-							}
-							drawVolumeTrack(volSlider, cs.Primary, cs.SecondaryContainer, cs.OnSurface, volVal, player == nil, rtl)
+									timeStr := fmt.Sprintf("%s / %s", formatMediaTime(pos), formatMediaTime(dur))
+									md3e.TextWith(c, timeStr, md3e.TextOptions{
+										Role:        tokens.LabelLarge,
+										TabularNums: true,
+										Color:       lightText,
+									})
+								})
 
-							rates := o.Rates
-							if len(rates) == 0 {
-								rates = defaultPlaybackRates
-							}
-							rateItems := make([]md3e.MenuItem, 0, len(rates))
-							for _, r := range rates {
-								rVal := r
-								if rVal <= 0 || math.IsNaN(rVal) || math.IsInf(rVal, 0) {
-									continue
-								}
-								rateItems = append(rateItems, md3e.MenuItem{
-									Label:   fmt.Sprintf("%gx", rVal),
-									Radio:   true,
-									Checked: math.Abs(rate-rVal) < 0.01,
-									OnClick: func() {
-										if player != nil {
-											player.SetRate(rVal)
+								// End cluster: Mute + volume slider + playback speed menu + fullscreen.
+								ui.Row(c).AlignItems(ui.Center).Gap(6).Children(func() {
+									volIcon := symbols.VolumeUp.Draw
+									muteLabel := "Mute"
+									if muted || vol <= 0.001 {
+										volIcon = symbols.VolumeOff.Draw
+										muteLabel = "Unmute"
+									} else if vol < 0.5 {
+										volIcon = symbols.VolumeDown.Draw
+									}
+									if md3e.IconButton(c, muteLabel, volIcon, md3e.IconButtonOptions{
+										Variant:  md3e.IconButtonStandard,
+										Size:     tokens.SizeXS,
+										Disabled: player == nil,
+									}).Clicked() {
+										toggleMute()
+									}
+
+									volVal := vol
+									if muted {
+										volVal = 0
+									}
+									volSlider := ui.SliderBase(c.Key(videoVolKey{}), &volVal, 0, 1).
+										Disabled(player == nil).
+										Label("Volume").
+										FocusRing(false).
+										Width(68).
+										Height(24).
+										PaddingX(6)
+									if volSlider.Changed() && player != nil {
+										player.SetVolume(volVal)
+										if volVal > 0 && muted {
+											player.SetMuted(false)
+										} else if volVal <= 0.001 {
+											player.SetMuted(true)
 										}
 										touchControls()
-									},
-								})
-							}
-							if len(rateItems) > 0 {
-								md3e.MenuButton(c.Key(videoRateKey{}), fmt.Sprintf("%gx", rate), symbols.Speed.Draw, rateItems, md3e.MenuOptions{
-									Open:     &st.rateMenuOpen,
-									Label:    fmt.Sprintf("Playback speed %gx", rate),
-									Disabled: player == nil,
-								})
-							}
+									}
+									drawVolumeTrack(volSlider, hudScrubActive, ui.RGBA(255, 255, 255, 0.24), lightText, volVal, player == nil, rtl, reduce)
 
-							if hasFS {
-								fsIcon := symbols.Fullscreen.Draw
-								fsLabel := "Fullscreen"
-								if fsState {
-									fsIcon = symbols.FullscreenExit.Draw
-									fsLabel = "Exit fullscreen"
-								}
-								if md3e.IconButton(c, fsLabel, fsIcon, md3e.IconButtonOptions{
-									Variant: md3e.IconButtonStandard,
-									Size:    tokens.SizeXS,
-								}).Clicked() {
-									toggleFullscreen()
-								}
-							}
+									rates := o.Rates
+									if len(rates) == 0 {
+										rates = defaultPlaybackRates
+									}
+									rateItems := make([]md3e.MenuItem, 0, len(rates))
+									for _, r := range rates {
+										rVal := r
+										if rVal <= 0 || math.IsNaN(rVal) || math.IsInf(rVal, 0) {
+											continue
+										}
+										rateItems = append(rateItems, md3e.MenuItem{
+											Label:   fmt.Sprintf("%gx", rVal),
+											Radio:   true,
+											Checked: math.Abs(rate-rVal) < 0.01,
+											OnClick: func() {
+												if player != nil {
+													player.SetRate(rVal)
+												}
+												touchControls()
+											},
+										})
+									}
+									if len(rateItems) > 0 {
+										md3e.MenuButton(c.Key(videoRateKey{}), fmt.Sprintf("%gx", rate), symbols.Speed.Draw, rateItems, md3e.MenuOptions{
+											Open:     &st.rateMenuOpen,
+											Label:    fmt.Sprintf("Playback speed %gx", rate),
+											Disabled: player == nil,
+										})
+									}
+
+									if hasFS {
+										fsIcon := symbols.Fullscreen.Draw
+										fsLabel := "Fullscreen"
+										if fsState {
+											fsIcon = symbols.FullscreenExit.Draw
+											fsLabel = "Exit fullscreen"
+										}
+										if md3e.IconButton(c, fsLabel, fsIcon, md3e.IconButtonOptions{
+											Variant: md3e.IconButtonStandard,
+											Size:    tokens.SizeXS,
+										}).Clicked() {
+											toggleFullscreen()
+										}
+									}
+								})
+							})
 						})
 					})
-				})
-				_ = lightMuted
+				}).FillWidth()
 			})
 		}
 	})
@@ -653,34 +697,109 @@ func VideoPlayer(c *ui.Context, player *ui.VideoPlayer, opts ...VideoPlayerOptio
 	return host
 }
 
-func drawVolumeTrack(sl ui.Element, active, inactive, disabledInk ui.Color, val float64, disabled, rtl bool) {
+type volTrackStateKey struct{}
+
+type volTrackState struct {
+	lastAt    time.Time
+	haloAlpha float32
+}
+
+func drawVolumeTrack(sl ui.Element, active, inactive, thumbInk ui.Color, val float64, disabled, rtl, reduce bool) {
 	if disabled {
-		active = disabledInk.Alpha(0.38)
-		inactive = disabledInk.Alpha(0.14)
+		active = thumbInk.Alpha(0.38)
+		inactive = thumbInk.Alpha(0.14)
+		thumbInk = active
 	}
 	f := float32(clampF64(val, 0, 1))
+	vst := ui.Local(sl, volTrackStateKey{}, func() volTrackState { return volTrackState{} })
 	sl.Draw(func(p *ui.Painter, r ui.Rect) {
-		if r.W <= 12 || r.H <= 0 {
+		if r.W <= 12 || r.H <= 0 || !rectIntersects(r, p.Visible()) {
 			return
 		}
 		pad := float32(6)
 		x0 := r.X + pad
-		trackW := r.W - 2*pad
+		x1 := r.X + r.W - pad
+		trackW := x1 - x0
 		cy := r.Y + r.H*0.5
-		p.Fill(ui.Rect{X: x0, Y: cy - 2, W: trackW, H: 4}, inactive, 2)
-		actW := trackW * f
-		actX := x0
+
+		live := sl.Valid()
+		pressed := live && !disabled && sl.Pressed()
+		hovered := live && !disabled && sl.Hovered()
+		focused := live && !disabled && sl.Focused()
+		red := reduce || p.Preferences().ReduceMotion
+
+		targetHalo := float32(0)
+		if pressed {
+			targetHalo = 0.20
+		} else if hovered {
+			targetHalo = 0.12
+		}
+		if live {
+			now := p.Now()
+			if red {
+				vst.haloAlpha = targetHalo
+				vst.lastAt = now
+			} else {
+				dt := float64(0)
+				if !vst.lastAt.IsZero() && now.After(vst.lastAt) {
+					dt = now.Sub(vst.lastAt).Seconds()
+				}
+				vst.lastAt = now
+				if dt > 0 {
+					vst.haloAlpha += (targetHalo - vst.haloAlpha) * float32(1-math.Exp(-dt/0.05))
+				}
+				if math.Abs(float64(targetHalo-vst.haloAlpha)) <= 0.005 {
+					vst.haloAlpha = targetHalo
+				} else {
+					p.AnimationFrame()
+				}
+			}
+		}
+
+		thumbW := float32(3)
+		thumbH := float32(14)
+		if pressed {
+			thumbW = 2
+			thumbH = 16
+		}
+		gap := thumbW*0.5 + 3
+
+		vf := f
 		if rtl {
-			actX = x0 + trackW - actW
+			vf = 1 - f
 		}
-		if actW > 0 {
-			p.Fill(ui.Rect{X: actX, Y: cy - 2, W: actW, H: 4}, active, 2)
-		}
-		tx := x0 + actW
+		tx := x0 + trackW*vf
+
+		// Inactive segment ahead of thumb.
+		var inLo, inHi float32
 		if rtl {
-			tx = actX
+			inLo, inHi = x0, min(x1, tx-gap)
+		} else {
+			inLo, inHi = max(x0, tx+gap), x1
 		}
-		p.Fill(ui.Rect{X: tx - 5, Y: cy - 5, W: 10, H: 10}, active, 5)
+		if inHi > inLo {
+			p.Fill(ui.Rect{X: inLo, Y: cy - 2, W: inHi - inLo, H: 4}, inactive, 2)
+		}
+		// Active segment behind thumb.
+		var actLo, actHi float32
+		if rtl {
+			actLo, actHi = min(x1, tx+gap), x1
+		} else {
+			actLo, actHi = x0, max(x0, tx-gap)
+		}
+		if actHi > actLo {
+			p.Fill(ui.Rect{X: actLo, Y: cy - 2, W: actHi - actLo, H: 4}, active, 2)
+		}
+		// Soft hover/press halo + keyboard focus ring.
+		if vst.haloAlpha > 0.005 {
+			p.Fill(ui.Rect{X: tx - 9, Y: cy - 9, W: 18, H: 18}, active.Alpha(vst.haloAlpha), 9)
+		}
+		if focused {
+			ring := ui.Rect{X: tx - thumbW*0.5 - 3, Y: cy - thumbH*0.5 - 3, W: thumbW + 6, H: thumbH + 6}
+			p.Stroke(ring, active.Alpha(0.75), ring.W*0.5, 1.5)
+		}
+		// MD3E vertical capsule thumb.
+		p.Fill(ui.Rect{X: tx - thumbW*0.5, Y: cy - thumbH*0.5, W: thumbW, H: thumbH}, thumbInk, thumbW*0.5)
 	})
 }
 

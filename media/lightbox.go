@@ -234,6 +234,9 @@ func ImageLightbox(c *ui.Context, open *bool, items []LightboxItem, opts ...Ligh
 	}
 	showAlpha := clampF32(show, 0, 1)
 
+	hudTh := cinemaHUDTheme(anchor, th)
+	hudCs := hudTh.Colors
+
 	ui.Overlay(c, func() {
 		back := ui.Box(c).Absolute().Left(0).Top(0).Right(0).Bottom(0).
 			Background(scrim.Alpha(0.90 * showAlpha))
@@ -279,291 +282,290 @@ func ImageLightbox(c *ui.Context, open *bool, items []LightboxItem, opts ...Ligh
 		}
 
 		back.Children(func() {
-			dialog := ui.Box(c).Fill().
-				Role(ui.RoleDialog).
-				Label(firstNonEmpty(o.Label, "Image viewer")).
-				Opacity(showAlpha).
-				Scale(0.95+0.05*showAlpha, 0.95+0.05*showAlpha)
-			dialog.Children(func() {
-				// Main zoomable/pannable stage inset slightly so scrim border remains reachable.
-				stage := ui.Box(c).Absolute().Left(48).Top(64).Right(48).Bottom(72).
-					Center().Clip()
-				stage.Draw(func(_ *ui.Painter, r ui.Rect) {
-					st.viewportW, st.viewportH = r.W, r.H
-				})
+			md3e.ThemeScope(c, hudTh, func() {
+				dialog := ui.Box(c).Fill().
+					Role(ui.RoleDialog).
+					Label(firstNonEmpty(o.Label, "Image viewer")).
+					Opacity(showAlpha).
+					Scale(0.95+0.05*showAlpha, 0.95+0.05*showAlpha)
+				dialog.Children(func() {
+					// Main zoomable/pannable stage inset slightly so scrim border remains reachable.
+					stage := ui.Box(c).Absolute().Left(48).Top(64).Right(48).Bottom(72).
+						Center().Clip()
+					stage.Draw(func(_ *ui.Painter, r ui.Rect) {
+						st.viewportW, st.viewportH = r.W, r.H
+					})
 
-				zoomInstant := reduce || st.dragging
-				visZoom := animateF32(stage, lightboxZoomAnimKey{}, st.zoom, th.Animation(motion.FastSpatial), zoomInstant)
+					zoomInstant := reduce || st.dragging
+					visZoom := animateF32(stage, lightboxZoomAnimKey{}, st.zoom, hudTh.Animation(motion.FastSpatial), zoomInstant)
 
-				stage.HandleInput(func(ev ui.InputEvent) bool {
-					if exiting {
-						return false
-					}
-					switch ev.Kind {
-					case ui.InputPointerDown:
-						if ev.Button != 0 {
+					stage.HandleInput(func(ev ui.InputEvent) bool {
+						if exiting {
 							return false
 						}
-						isDouble := ev.Clicks >= 2 || (!st.lastTapAt.IsZero() &&
-							ev.Time.Sub(st.lastTapAt) <= 400*time.Millisecond &&
-							math.Hypot(float64(ev.X-st.lastTapX), float64(ev.Y-st.lastTapY)) <= 8)
-						st.lastTapAt = ev.Time
-						st.lastTapX = ev.X
-						st.lastTapY = ev.Y
-						if isDouble {
-							if st.zoom > st.minZoom+0.05 {
-								st.zoom = st.minZoom
-								st.panX, st.panY = 0, 0
-							} else {
-								target := min(st.maxZoom, max(st.minZoom, float32(2.0)))
-								st.zoom = target
+						switch ev.Kind {
+						case ui.InputPointerDown:
+							if ev.Button != 0 {
+								return false
+							}
+							isDouble := ev.Clicks >= 2 || (!st.lastTapAt.IsZero() &&
+								ev.Time.Sub(st.lastTapAt) <= 400*time.Millisecond &&
+								math.Hypot(float64(ev.X-st.lastTapX), float64(ev.Y-st.lastTapY)) <= 8)
+							st.lastTapAt = ev.Time
+							st.lastTapX = ev.X
+							st.lastTapY = ev.Y
+							if isDouble {
+								if st.zoom > st.minZoom+0.05 {
+									st.zoom = st.minZoom
+									st.panX, st.panY = 0, 0
+								} else {
+									target := min(st.maxZoom, max(st.minZoom, float32(2.0)))
+									st.zoom = target
+									lightboxClampPan(st)
+								}
+								st.dragging = false
+								return true
+							}
+							if st.zoom > st.minZoom+0.001 {
+								st.dragging = true
+								st.dragX = ev.X
+								st.dragY = ev.Y
+								st.panStartX = st.panX
+								st.panStartY = st.panY
+							}
+							return true
+						case ui.InputPointerMove:
+							if !st.dragging {
+								return false
+							}
+							st.panX = st.panStartX + (ev.X - st.dragX)
+							st.panY = st.panStartY + (ev.Y - st.dragY)
+							lightboxClampPan(st)
+							return true
+						case ui.InputPointerUp:
+							if !st.dragging {
+								return false
+							}
+							if ev.Canceled {
+								st.panX = st.panStartX
+								st.panY = st.panStartY
 								lightboxClampPan(st)
 							}
 							st.dragging = false
 							return true
-						}
-						if st.zoom > st.minZoom+0.001 {
-							st.dragging = true
-							st.dragX = ev.X
-							st.dragY = ev.Y
-							st.panStartX = st.panX
-							st.panStartY = st.panY
-						}
-						return true
-					case ui.InputPointerMove:
-						if !st.dragging {
-							return false
-						}
-						st.panX = st.panStartX + (ev.X - st.dragX)
-						st.panY = st.panStartY + (ev.Y - st.dragY)
-						lightboxClampPan(st)
-						return true
-					case ui.InputPointerUp:
-						if !st.dragging {
-							return false
-						}
-						if ev.Canceled {
-							st.panX = st.panStartX
-							st.panY = st.panStartY
-							lightboxClampPan(st)
-						}
-						st.dragging = false
-						return true
-					case ui.InputZoom:
-						if isPositiveFiniteF32(ev.Scale) {
-							st.zoom = clampF32(st.zoom*ev.Scale, st.minZoom, st.maxZoom)
-							lightboxClampPan(st)
-						}
-						return true
-					case ui.InputScroll:
-						if !ev.Precise || (ev.Mods&(ui.Cmd|ui.Ctrl)) != 0 {
-							delta := ev.DY
-							if delta == 0 {
-								delta = ev.DX
-							}
-							if delta != 0 && isFiniteF32(delta) {
-								steps := -float64(delta)
-								if math.Abs(steps) >= 15 {
-									steps /= 40.0
-								} else if steps > 0 {
-									steps = 1
-								} else {
-									steps = -1
-								}
-								factor := float32(clampF64(math.Pow(1.25, steps), 0.65, 1.55))
-								st.zoom = clampF32(st.zoom*factor, st.minZoom, st.maxZoom)
+						case ui.InputZoom:
+							if isPositiveFiniteF32(ev.Scale) {
+								st.zoom = clampF32(st.zoom*ev.Scale, st.minZoom, st.maxZoom)
 								lightboxClampPan(st)
 							}
 							return true
-						}
-						if st.zoom > st.minZoom+0.001 {
-							if isFiniteF32(ev.DX) {
-								st.panX -= ev.DX
+						case ui.InputScroll:
+							if !ev.Precise || (ev.Mods&(ui.Cmd|ui.Ctrl)) != 0 {
+								delta := ev.DY
+								if delta == 0 {
+									delta = ev.DX
+								}
+								if delta != 0 && isFiniteF32(delta) {
+									steps := -float64(delta)
+									if math.Abs(steps) >= 15 {
+										steps /= 40.0
+									} else if steps > 0 {
+										steps = 1
+									} else {
+										steps = -1
+									}
+									factor := float32(clampF64(math.Pow(1.25, steps), 0.65, 1.55))
+									st.zoom = clampF32(st.zoom*factor, st.minZoom, st.maxZoom)
+									lightboxClampPan(st)
+								}
+								return true
 							}
-							if isFiniteF32(ev.DY) {
-								st.panY -= ev.DY
+							if st.zoom > st.minZoom+0.001 {
+								if isFiniteF32(ev.DX) {
+									st.panX -= ev.DX
+								}
+								if isFiniteF32(ev.DY) {
+									st.panY -= ev.DY
+								}
+								lightboxClampPan(st)
+								return true
 							}
-							lightboxClampPan(st)
-							return true
 						}
+						return false
+					})
+
+					item := items[idx]
+					var matchKey any
+					if o.MatchKey != nil && idx == st.openIdx {
+						matchKey = o.MatchKey
 					}
-					return false
-				})
+					slideLabel := firstNonEmpty(item.Label, item.Title, fmt.Sprintf("Image %d of %d", idx+1, len(items)))
 
-				item := items[idx]
-				var matchKey any
-				if o.MatchKey != nil && idx == st.openIdx {
-					matchKey = o.MatchKey
-				}
-				slideLabel := firstNonEmpty(item.Label, item.Title, fmt.Sprintf("Image %d of %d", idx+1, len(items)))
+					stage.Children(func() {
+						content := ui.Box(c).Fill().Center().
+							Scale(visZoom, visZoom).
+							Translate(st.panX, st.panY)
+						content.Children(func() {
+							if item.Image != nil {
+								md3e.Image(c.Key(lightboxSlideKey(idx)), item.Image, md3e.ImageOptions{
+									Fit:      ui.Contain,
+									NoFade:   true,
+									MatchKey: matchKey,
+									Label:    slideLabel,
+								}).Fill()
+							} else {
+								maxSide := o.MaxSide
+								if item.MaxSide > 0 {
+									maxSide = item.MaxSide
+								}
+								NetImage(c.Key(lightboxSlideKey(idx)), item.URL, NetImageOptions{
+									MaxSide:  maxSide,
+									Fit:      ui.Contain,
+									MatchKey: matchKey,
+									Label:    slideLabel,
+								}).Fill()
+							}
+						})
+					})
 
-				stage.Children(func() {
-					content := ui.Box(c).Fill().Center().
-						Scale(visZoom, visZoom).
-						Translate(st.panX, st.panY)
-					content.Children(func() {
-						if item.Image != nil {
-							md3e.Image(c.Key(lightboxSlideKey(idx)), item.Image, md3e.ImageOptions{
-								Fit:      ui.Contain,
-								NoFade:   true,
-								MatchKey: matchKey,
-								Label:    slideLabel,
-							}).Fill()
+					// Previous / Next floating buttons at Start / End edges (automatically mirrored in RTL).
+					if len(items) > 1 {
+						prevIcon := symbols.ChevronLeft.Draw
+						nextIcon := symbols.ChevronRight.Draw
+						if rtl {
+							prevIcon = symbols.ChevronRight.Draw
+							nextIcon = symbols.ChevronLeft.Draw
+						}
+						ui.Column(c).Absolute().Start(16).Top(0).Bottom(0).Justify(ui.Center).Children(func() {
+							if md3e.IconButton(c, "Previous image", prevIcon, md3e.IconButtonOptions{
+								Variant:  md3e.IconButtonTonal,
+								Size:     tokens.SizeM,
+								Disabled: idx <= 0,
+							}).Clicked() {
+								setIndex(idx - 1)
+							}
+						})
+						ui.Column(c).Absolute().End(16).Top(0).Bottom(0).Justify(ui.Center).Children(func() {
+							if md3e.IconButton(c, "Next image", nextIcon, md3e.IconButtonOptions{
+								Variant:  md3e.IconButtonTonal,
+								Size:     tokens.SizeM,
+								Disabled: idx >= len(items)-1,
+							}).Clicked() {
+								setIndex(idx + 1)
+							}
+						})
+					}
+
+					// Smoked dark-glass toolbar pills over cinema scrim.
+					pillBg := ui.RGBA(22, 22, 28, 0.84)
+					pillBorder := ui.RGBA(255, 255, 255, 0.14)
+					pillInset := ui.RGBA(255, 255, 255, 0.08)
+
+					ui.Row(c).Absolute().Top(12).Left(16).Right(16).
+						Justify(ui.SpaceBetween).AlignItems(ui.Center).Gap(12).Children(func() {
+						if len(items) > 1 || item.Title != "" {
+							infoPill := md3e.Surface(c, md3e.SurfaceOptions{
+								Elevation:    tokens.Level3,
+								Color:        pillBg,
+								ContentColor: hudCs.OnSurface,
+								ShapeScale:   tokens.ShapeFull,
+								BorderWidth:  1,
+								BorderColor:  pillBorder,
+							}).Shrink(1).MinWidth(0).PaddingX(14).PaddingY(8).InsetShadow(0, 1, 0, 0, pillInset)
+							infoPill.Clicked()
+							infoPill.Children(func() {
+								ui.Row(c).AlignItems(ui.Center).Gap(10).MinWidth(0).Children(func() {
+									if len(items) > 1 {
+										md3e.TextWith(c, fmt.Sprintf("%d / %d", idx+1, len(items)), md3e.TextOptions{
+											Role:        tokens.LabelLarge,
+											Emphasized:  true,
+											TabularNums: true,
+											Color:       hudCs.OnSurface,
+										}).NoWrap()
+									}
+									if item.Title != "" {
+										md3e.TextWith(c, item.Title, md3e.TextOptions{
+											Role:     tokens.TitleSmall,
+											MaxLines: 1,
+											Color:    hudCs.OnSurface,
+										}).Shrink(1).MinWidth(0)
+									}
+								})
+							})
 						} else {
-							maxSide := o.MaxSide
-							if item.MaxSide > 0 {
-								maxSide = item.MaxSide
-							}
-							NetImage(c.Key(lightboxSlideKey(idx)), item.URL, NetImageOptions{
-								MaxSide:  maxSide,
-								Fit:      ui.Contain,
-								MatchKey: matchKey,
-								Label:    slideLabel,
-							}).Fill()
+							ui.Box(c).Size(1, 1)
 						}
-					})
-				})
 
-				// Previous / Next floating buttons at Start / End edges (automatically mirrored in RTL).
-				if len(items) > 1 {
-					prevIcon := symbols.ChevronLeft.Draw
-					nextIcon := symbols.ChevronRight.Draw
-					if rtl {
-						prevIcon = symbols.ChevronRight.Draw
-						nextIcon = symbols.ChevronLeft.Draw
-					}
-					ui.Column(c).Absolute().Start(16).Top(0).Bottom(0).Justify(ui.Center).Children(func() {
-						if md3e.IconButton(c, "Previous image", prevIcon, md3e.IconButtonOptions{
-							Variant:  md3e.IconButtonTonal,
-							Size:     tokens.SizeM,
-							Disabled: idx <= 0,
-						}).Clicked() {
-							setIndex(idx - 1)
-						}
-					})
-					ui.Column(c).Absolute().End(16).Top(0).Bottom(0).Justify(ui.Center).Children(func() {
-						if md3e.IconButton(c, "Next image", nextIcon, md3e.IconButtonOptions{
-							Variant:  md3e.IconButtonTonal,
-							Size:     tokens.SizeM,
-							Disabled: idx >= len(items)-1,
-						}).Clicked() {
-							setIndex(idx + 1)
-						}
-					})
-				}
-
-				// Top toolbar bar (slide counter / title + zoom & close actions).
-				pillBg := cs.SurfaceContainerHigh.Alpha(0.92)
-				pillBorder := cs.OutlineVariant.Alpha(0.35)
-
-				ui.Row(c).Absolute().Top(12).Left(16).Right(16).
-					Justify(ui.SpaceBetween).AlignItems(ui.Center).Gap(12).Children(func() {
-					if len(items) > 1 || item.Title != "" {
-						infoPill := md3e.Surface(c, md3e.SurfaceOptions{
+						ctrlPill := md3e.Surface(c, md3e.SurfaceOptions{
+							Elevation:    tokens.Level3,
 							Color:        pillBg,
-							ContentColor: cs.OnSurface,
+							ContentColor: hudCs.OnSurface,
 							ShapeScale:   tokens.ShapeFull,
 							BorderWidth:  1,
 							BorderColor:  pillBorder,
-						}).PaddingX(14).PaddingY(8)
-						infoPill.Clicked()
-						infoPill.Children(func() {
-							ui.Row(c).AlignItems(ui.Center).Gap(10).Children(func() {
-								if len(items) > 1 {
-									md3e.TextWith(c, fmt.Sprintf("%d / %d", idx+1, len(items)), md3e.TextOptions{
-										Role:        tokens.LabelLarge,
-										Emphasized:  true,
-										TabularNums: true,
-									})
+						}).Shrink(0).PaddingX(8).PaddingY(4).InsetShadow(0, 1, 0, 0, pillInset)
+						ctrlPill.Clicked()
+						ctrlPill.Children(func() {
+							zoomPct := int(math.Round(float64(st.zoom * 100)))
+							ui.Row(c).AlignItems(ui.Center).Gap(4).Children(func() {
+								if md3e.IconButton(c, "Zoom out", symbols.ZoomOut.Draw, md3e.IconButtonOptions{
+									Variant:  md3e.IconButtonStandard,
+									Size:     tokens.SizeS,
+									Disabled: st.zoom <= minZ+0.001,
+								}).Clicked() {
+									st.zoom = clampF32(st.zoom-0.5, minZ, maxZ)
+									lightboxClampPan(st)
 								}
-								if item.Title != "" {
-									md3e.TextWith(c, item.Title, md3e.TextOptions{
-										Role:     tokens.TitleSmall,
-										MaxLines: 1,
-									})
+								if md3e.TabularNums(md3e.Button(c, fmt.Sprintf("%d%%", zoomPct), md3e.ButtonOptions{
+									Variant: md3e.ButtonText,
+									Size:    tokens.SizeXS,
+									Label:   fmt.Sprintf("Reset zoom %d%%", zoomPct),
+								})).Clicked() {
+									st.zoom = minZ
+									st.panX, st.panY = 0, 0
+								}
+								if md3e.IconButton(c, "Zoom in", symbols.ZoomIn.Draw, md3e.IconButtonOptions{
+									Variant:  md3e.IconButtonStandard,
+									Size:     tokens.SizeS,
+									Disabled: st.zoom >= maxZ-0.001,
+								}).Clicked() {
+									st.zoom = clampF32(st.zoom+0.5, minZ, maxZ)
+									lightboxClampPan(st)
+								}
+								ui.Box(c).Size(1, 18).MarginX(2).Background(ui.RGBA(255, 255, 255, 0.18))
+								if md3e.IconButton(c, "Close image viewer", symbols.Close.Draw, md3e.IconButtonOptions{
+									Variant: md3e.IconButtonStandard,
+									Size:    tokens.SizeS,
+								}).Clicked() {
+									closeLightbox()
 								}
 							})
 						})
-					} else {
-						ui.Box(c).Size(1, 1)
+					})
+
+					// Bottom caption pill (only when Caption is provided; avoids duplicating single-item Title).
+					if item.Caption != "" {
+						ui.Row(c).Absolute().Bottom(14).Left(24).Right(24).Justify(ui.Center).Children(func() {
+							capCard := md3e.Surface(c, md3e.SurfaceOptions{
+								Elevation:    tokens.Level3,
+								Color:        pillBg,
+								ContentColor: hudCs.OnSurface,
+								ShapeScale:   tokens.ShapeLarge,
+								BorderWidth:  1,
+								BorderColor:  pillBorder,
+							}).MaxWidth(560).PaddingX(18).PaddingY(10).InsetShadow(0, 1, 0, 0, pillInset)
+							capCard.Clicked()
+							capCard.Children(func() {
+								md3e.TextWith(c, item.Caption, md3e.TextOptions{
+									Role:     tokens.BodyMedium,
+									Color:    hudCs.OnSurfaceVariant,
+									MaxLines: 2,
+								})
+							})
+						})
 					}
-
-					ctrlPill := md3e.Surface(c, md3e.SurfaceOptions{
-						Color:        pillBg,
-						ContentColor: cs.OnSurface,
-						ShapeScale:   tokens.ShapeFull,
-						BorderWidth:  1,
-						BorderColor:  pillBorder,
-					}).PaddingX(8).PaddingY(4)
-					ctrlPill.Clicked()
-					ctrlPill.Children(func() {
-						zoomPct := int(math.Round(float64(st.zoom * 100)))
-						ui.Row(c).AlignItems(ui.Center).Gap(4).Children(func() {
-							if md3e.IconButton(c, "Zoom out", symbols.ZoomOut.Draw, md3e.IconButtonOptions{
-								Variant:  md3e.IconButtonStandard,
-								Size:     tokens.SizeS,
-								Disabled: st.zoom <= minZ+0.001,
-							}).Clicked() {
-								st.zoom = clampF32(st.zoom-0.5, minZ, maxZ)
-								lightboxClampPan(st)
-							}
-							if md3e.TabularNums(md3e.Button(c, fmt.Sprintf("%d%%", zoomPct), md3e.ButtonOptions{
-								Variant: md3e.ButtonText,
-								Size:    tokens.SizeXS,
-								Label:   fmt.Sprintf("Reset zoom %d%%", zoomPct),
-							})).Clicked() {
-								st.zoom = minZ
-								st.panX, st.panY = 0, 0
-							}
-							if md3e.IconButton(c, "Zoom in", symbols.ZoomIn.Draw, md3e.IconButtonOptions{
-								Variant:  md3e.IconButtonStandard,
-								Size:     tokens.SizeS,
-								Disabled: st.zoom >= maxZ-0.001,
-							}).Clicked() {
-								st.zoom = clampF32(st.zoom+0.5, minZ, maxZ)
-								lightboxClampPan(st)
-							}
-							if md3e.IconButton(c, "Close image viewer", symbols.Close.Draw, md3e.IconButtonOptions{
-								Variant: md3e.IconButtonStandard,
-								Size:    tokens.SizeS,
-							}).Clicked() {
-								closeLightbox()
-							}
-						})
-					})
 				})
-
-				// Bottom caption pill when title or caption is provided.
-				if item.Caption != "" || (len(items) == 1 && item.Title != "") {
-					ui.Row(c).Absolute().Bottom(14).Left(24).Right(24).Justify(ui.Center).Children(func() {
-						capCard := md3e.Surface(c, md3e.SurfaceOptions{
-							Color:        pillBg,
-							ContentColor: cs.OnSurface,
-							ShapeScale:   tokens.ShapeLarge,
-							BorderWidth:  1,
-							BorderColor:  pillBorder,
-						}).MaxWidth(560).PaddingX(18).PaddingY(10)
-						capCard.Clicked()
-						capCard.Children(func() {
-							ui.Column(c).Gap(2).Children(func() {
-								if item.Title != "" && len(items) == 1 {
-									md3e.TextWith(c, item.Title, md3e.TextOptions{
-										Role:       tokens.TitleSmall,
-										Emphasized: true,
-									})
-								}
-								if item.Caption != "" {
-									md3e.TextWith(c, item.Caption, md3e.TextOptions{
-										Role:     tokens.BodyMedium,
-										Color:    cs.OnSurfaceVariant,
-										MaxLines: 2,
-									})
-								}
-							})
-						})
-					})
-				}
-			})
+			}).Fill()
 		})
 	})
 	return anchor

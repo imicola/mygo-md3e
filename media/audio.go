@@ -148,12 +148,14 @@ func AudioPlayerCard(c *ui.Context, track TrackInfo, opts ...AudioPlayerOptions)
 			elev = o.Elevation
 		}
 
+		cardRad := th.Shapes.Radius(tokens.ShapeExtraLarge)
 		card := md3e.Surface(c, md3e.SurfaceOptions{
 			Elevation:    elev,
 			Color:        cs.SurfaceContainerHigh,
 			ContentColor: cs.OnSurface,
 			ShapeScale:   tokens.ShapeExtraLarge,
 			Hairline:     true,
+			Clip:         true,
 		}).Padding(18)
 		card.Role(ui.RoleRegion).Label(firstNonEmpty(o.Label, track.Title, "Audio player"))
 		if isPositiveFiniteF32(o.Width) {
@@ -161,14 +163,43 @@ func AudioPlayerCard(c *ui.Context, track TrackInfo, opts ...AudioPlayerOptions)
 		} else {
 			card.FillWidth()
 		}
+		if cs.Primary.A > 0 {
+			glowCol := cs.Primary
+			glowAlpha := float32(0.08)
+			if th.Dark {
+				glowAlpha = 0.11
+			}
+			rtl := c.Direction() == ui.RightToLeft
+			card.Draw(func(p *ui.Painter, r ui.Rect) {
+				if !rectIntersects(r, p.Visible()) {
+					return
+				}
+				cx := float32(0.16)
+				if rtl {
+					cx = 0.84
+				}
+				stops := [3]ui.GradientStop{
+					{Color: glowCol.Alpha(glowAlpha), At: 0},
+					{Color: glowCol.Alpha(glowAlpha * 0.35), At: 0.48},
+					{Color: glowCol.Alpha(0), At: 1},
+				}
+				p.Clip(r, cardRad, func() {
+					p.FillRadialGradient(r, ui.RadialGradient{
+						Stops:  stops[:],
+						Center: ui.Point{X: cx, Y: 0.16},
+						Oklab:  true,
+					}, 0)
+				})
+			})
+		}
 
 		card.Children(func() {
 			ui.Column(c).FillWidth().Gap(14).Children(func() {
 				// Artwork + Track Info header row.
 				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(14).Children(func() {
 					artSize := float32(72)
-					renderTrackArtwork(c, coverSrc, track.ArtworkURL, artSize, o.ArtworkShape, firstNonEmpty(track.Title, "Album artwork"))
-					ui.Column(c).Grow(1).Gap(3).Children(func() {
+					renderTrackArtwork(c, th, coverSrc, track.ArtworkURL, artSize, o.ArtworkShape, firstNonEmpty(track.Title, "Album artwork"))
+					ui.Column(c).Grow(1).MinWidth(0).Gap(3).Children(func() {
 						md3e.TextWith(c, firstNonEmpty(track.Title, "Untitled track"), md3e.TextOptions{
 							Role:       tokens.TitleMedium,
 							Emphasized: true,
@@ -190,7 +221,7 @@ func AudioPlayerCard(c *ui.Context, track TrackInfo, opts ...AudioPlayerOptions)
 					})
 				})
 
-				// Expressive wavy scrubber + tabular timestamps.
+				// Expressive wavy scrubber + tabular timestamps aligned with track ends.
 				ui.Column(c).FillWidth().Gap(2).Children(func() {
 					mediaScrubber(c.Key(audioScrubberKey{}), scrubberOptions{
 						position:   track.Position,
@@ -210,7 +241,7 @@ func AudioPlayerCard(c *ui.Context, track TrackInfo, opts ...AudioPlayerOptions)
 						label:      "Audio playback timeline",
 						onSeek:     o.OnSeek,
 					})
-					ui.Row(c).FillWidth().Justify(ui.SpaceBetween).Children(func() {
+					ui.Row(c).FillWidth().PaddingX(scrubberPadX).Justify(ui.SpaceBetween).Children(func() {
 						md3e.TextWith(c, formatMediaTime(track.Position), md3e.TextOptions{
 							Role:        tokens.LabelSmall,
 							Color:       cs.OnSurfaceVariant,
@@ -224,19 +255,23 @@ func AudioPlayerCard(c *ui.Context, track TrackInfo, opts ...AudioPlayerOptions)
 					})
 				})
 
-				// Transport bar inside horizontal FocusGroup.
+				// Transport bar inside horizontal FocusGroup with balanced start/end slots.
+				slotMinW := float32(40)
+				if o.Repeat != nil && o.OnQueue != nil {
+					slotMinW = 78
+				}
 				ui.Row(c).FillWidth().Justify(ui.SpaceBetween).AlignItems(ui.Center).
 					FocusGroup(ui.Horizontal).Children(func() {
-					if o.Shuffle != nil {
-						if md3e.ToggleIconButton(c.Key(audioShuffleBtnKey{}), o.Shuffle, "Shuffle", symbols.Shuffle.Draw, md3e.ToggleIconButtonOptions{
-							Variant: md3e.IconButtonStandard,
-							Size:    tokens.SizeS,
-						}).Changed() && o.OnShuffle != nil {
-							o.OnShuffle(*o.Shuffle)
+					ui.Row(c).MinWidth(slotMinW).AlignItems(ui.Center).Justify(ui.Start).Children(func() {
+						if o.Shuffle != nil {
+							if md3e.ToggleIconButton(c.Key(audioShuffleBtnKey{}), o.Shuffle, "Shuffle", symbols.Shuffle.Draw, md3e.ToggleIconButtonOptions{
+								Variant: md3e.IconButtonStandard,
+								Size:    tokens.SizeS,
+							}).Changed() && o.OnShuffle != nil {
+								o.OnShuffle(*o.Shuffle)
+							}
 						}
-					} else {
-						ui.Box(c).Size(36, 1)
-					}
+					})
 
 					ui.Row(c).AlignItems(ui.Center).Gap(10).Children(func() {
 						if md3e.IconButton(c, "Previous track", symbols.SkipPrevious.Draw, md3e.IconButtonOptions{
@@ -273,29 +308,25 @@ func AudioPlayerCard(c *ui.Context, track TrackInfo, opts ...AudioPlayerOptions)
 						}
 					})
 
-					if o.Repeat != nil || o.OnQueue != nil {
-						ui.Row(c).AlignItems(ui.Center).Gap(2).Children(func() {
-							if o.Repeat != nil {
-								if md3e.ToggleIconButton(c.Key(audioRepeatBtnKey{}), o.Repeat, "Repeat", symbols.Repeat.Draw, md3e.ToggleIconButtonOptions{
-									Variant:      md3e.IconButtonStandard,
-									Size:         tokens.SizeS,
-									SelectedIcon: symbols.RepeatOne.Draw,
-								}).Changed() && o.OnRepeat != nil {
-									o.OnRepeat(*o.Repeat)
-								}
+					ui.Row(c).MinWidth(slotMinW).AlignItems(ui.Center).Justify(ui.End).Gap(2).Children(func() {
+						if o.Repeat != nil {
+							if md3e.ToggleIconButton(c.Key(audioRepeatBtnKey{}), o.Repeat, "Repeat", symbols.Repeat.Draw, md3e.ToggleIconButtonOptions{
+								Variant:      md3e.IconButtonStandard,
+								Size:         tokens.SizeS,
+								SelectedIcon: symbols.RepeatOne.Draw,
+							}).Changed() && o.OnRepeat != nil {
+								o.OnRepeat(*o.Repeat)
 							}
-							if o.OnQueue != nil {
-								if md3e.IconButton(c, "Queue", symbols.QueueMusic.Draw, md3e.IconButtonOptions{
-									Variant: md3e.IconButtonStandard,
-									Size:    tokens.SizeS,
-								}).Clicked() {
-									o.OnQueue()
-								}
+						}
+						if o.OnQueue != nil {
+							if md3e.IconButton(c, "Queue", symbols.QueueMusic.Draw, md3e.IconButtonOptions{
+								Variant: md3e.IconButtonStandard,
+								Size:    tokens.SizeS,
+							}).Clicked() {
+								o.OnQueue()
 							}
-						})
-					} else {
-						ui.Box(c).Size(36, 1)
-					}
+						}
+					})
 				})
 			})
 		})
@@ -365,23 +396,28 @@ func MiniPlayer(c *ui.Context, track TrackInfo, opts ...MiniPlayerOptions) ui.El
 
 		bar.Children(func() {
 			ui.Column(c).Fill().Justify(ui.SpaceBetween).Children(func() {
-				ui.Row(c).FillWidth().Grow(1).PaddingX(12).AlignItems(ui.Center).Gap(10).Children(func() {
+				ui.Row(c).FillWidth().Grow(1).PaddingX(10).AlignItems(ui.Center).Gap(8).Children(func() {
 					// Clickable track info area when OnExpand is supplied.
-					infoBox := ui.Row(c).Grow(1).AlignItems(ui.Center).Gap(10)
+					infoRad := th.Shapes.Radius(tokens.ShapeSmall)
+					infoBox := ui.Row(c).Grow(1).MinWidth(0).AlignItems(ui.Center).Gap(10).Padding(4, 6).Radius(infoRad)
 					if o.OnExpand != nil {
 						infoLabel := "Expand player"
 						if track.Title != "" {
 							infoLabel = fmt.Sprintf("Expand %s", track.Title)
 						}
-						infoBox.Role(ui.RoleButton).Label(infoLabel).Focusable()
+						infoBox.Role(ui.RoleButton).Label(infoLabel).Focusable().FocusRing(false)
+						md3e.AttachRipple(c, infoBox, md3e.StateLayerOptions{
+							Color:  cs.OnSurface,
+							Radius: infoRad,
+						})
 						if infoBox.Clicked() {
 							o.OnExpand()
 						}
 					}
 					infoBox.Children(func() {
 						artSize := max(32, h-20)
-						renderTrackArtwork(c, coverSrc, track.ArtworkURL, artSize, nil, firstNonEmpty(track.Title, "Album artwork"))
-						ui.Column(c).Grow(1).Gap(1).Children(func() {
+						renderTrackArtwork(c, th, coverSrc, track.ArtworkURL, artSize, nil, firstNonEmpty(track.Title, "Album artwork"))
+						ui.Column(c).Grow(1).MinWidth(0).Gap(1).Children(func() {
 							md3e.TextWith(c, firstNonEmpty(track.Title, "Untitled track"), md3e.TextOptions{
 								Role:       tokens.TitleSmall,
 								Emphasized: true,
@@ -434,7 +470,7 @@ func MiniPlayer(c *ui.Context, track TrackInfo, opts ...MiniPlayerOptions) ui.El
 					})
 				})
 
-				// Edge-to-edge bottom playback progress bar (wavy only when playing & !ReduceMotion).
+				// Inset bottom playback progress bar so rounded bar corners never clip the track.
 				progress := 0.0
 				if track.Duration > 0 {
 					progress = clampF64(track.Position.Seconds()/track.Duration.Seconds(), 0, 1)
@@ -444,11 +480,13 @@ func MiniPlayer(c *ui.Context, track TrackInfo, opts ...MiniPlayerOptions) ui.El
 					Buffer:    clampF64(track.Buffered, 0, 1),
 					Label:     "Track progress",
 				}
-				if playing && wavy && !reduce {
-					md3e.LinearWavyProgress(c, progress, progOpts).FillWidth()
-				} else {
-					md3e.LinearProgress(c, progress, progOpts).FillWidth()
-				}
+				ui.Box(c).FillWidth().Padding(0, 14, 3, 14).Children(func() {
+					if playing && wavy && !reduce {
+						md3e.LinearWavyProgress(c, progress, progOpts).FillWidth()
+					} else {
+						md3e.LinearProgress(c, progress, progOpts).FillWidth()
+					}
+				})
 			})
 		})
 	}
@@ -542,9 +580,10 @@ func resolveTrackCoverAndTheme(
 	return cover, memo.cachedTheme, true
 }
 
-func renderTrackArtwork(c *ui.Context, src ui.ImageSource, url string, size float32, poly *shape.RoundedPolygon, label string) ui.Element {
+func renderTrackArtwork(c *ui.Context, th *md3e.Theme, src ui.ImageSource, url string, size float32, poly *shape.RoundedPolygon, label string) ui.Element {
+	var el ui.Element
 	if src == nil && url != "" {
-		return NetImage(c, url, NetImageOptions{
+		el = NetImage(c, url, NetImageOptions{
 			Width:      size,
 			Height:     size,
 			Fit:        ui.Cover,
@@ -552,14 +591,20 @@ func renderTrackArtwork(c *ui.Context, src ui.ImageSource, url string, size floa
 			Shape:      poly,
 			Label:      label,
 		})
+	} else {
+		el = md3e.Image(c, src, md3e.ImageOptions{
+			Width:      size,
+			Height:     size,
+			Fit:        ui.Cover,
+			ShapeScale: tokens.ShapeMedium,
+			Shape:      poly,
+			NoFade:     true,
+			Label:      label,
+		})
 	}
-	return md3e.Image(c, src, md3e.ImageOptions{
-		Width:      size,
-		Height:     size,
-		Fit:        ui.Cover,
-		ShapeScale: tokens.ShapeMedium,
-		Shape:      poly,
-		NoFade:     true,
-		Label:      label,
-	})
+	if poly == nil && th != nil {
+		el.Border(1, th.Colors.OnSurface.Alpha(0.10))
+		md3e.ApplyElevationShadows(th, el, tokens.Level2)
+	}
+	return el
 }

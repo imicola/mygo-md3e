@@ -45,6 +45,8 @@ type (
 		lastFrac   float64
 		lastBuf    float64
 		lastThumbW float32
+		waveAmp    float32
+		haloAlpha  float32
 		path       *ui.Path
 	}
 
@@ -194,6 +196,8 @@ func mediaScrubber(c *ui.Context, o scrubberOptions) ui.Element {
 		curBuf := st.lastBuf
 		curPhase := st.lastPhase
 		curThumbW := st.lastThumbW
+		curAmp := st.waveAmp
+		curHalo := st.haloAlpha
 		if curThumbW <= 0 {
 			curThumbW = scrubberThumbRestW
 		}
@@ -205,39 +209,71 @@ func mediaScrubber(c *ui.Context, o scrubberOptions) ui.Element {
 			st.lastBuf = curBuf
 
 			now := p.Now()
+			dt := float64(0)
+			if !st.lastAt.IsZero() && now.After(st.lastAt) {
+				dt = now.Sub(st.lastAt).Seconds()
+			}
+			st.lastAt = now
+
+			pressed := !snap.disabled && sl.Pressed()
+			hovered := !snap.disabled && sl.Hovered()
 			targetW := scrubberThumbRestW
-			if !snap.disabled && sl.Pressed() {
+			if pressed {
 				targetW = scrubberThumbDragW
 			}
+			targetHalo := float32(0)
+			if pressed {
+				targetHalo = 0.20
+			} else if hovered {
+				targetHalo = 0.12
+			}
+			targetAmp := float32(0)
+			if snap.wavy && snap.playing && !snap.disabled && curFrac > 0 && !red {
+				targetAmp = 1
+			}
+
 			if red {
 				curThumbW = targetW
-				st.lastAt = now
+				curHalo = targetHalo
+				curAmp = targetAmp
 			} else {
-				dt := float64(0)
-				if !st.lastAt.IsZero() && now.After(st.lastAt) {
-					dt = now.Sub(st.lastAt).Seconds()
-				}
-				st.lastAt = now
+				needFrame := false
 				if dt > 0 {
 					curThumbW += (targetW - curThumbW) * float32(1-math.Exp(-dt/0.04))
+					curHalo += (targetHalo - curHalo) * float32(1-math.Exp(-dt/0.05))
+					curAmp += (targetAmp - curAmp) * float32(1-math.Exp(-dt/0.06))
 				}
 				if math.Abs(float64(targetW-curThumbW)) <= 0.02 {
 					curThumbW = targetW
 				} else {
+					needFrame = true
+				}
+				if math.Abs(float64(targetHalo-curHalo)) <= 0.005 {
+					curHalo = targetHalo
+				} else {
+					needFrame = true
+				}
+				if math.Abs(float64(targetAmp-curAmp)) <= 0.015 {
+					curAmp = targetAmp
+				} else {
+					needFrame = true
+				}
+				if targetAmp > 0 {
+					if st.waveStart.IsZero() {
+						st.waveStart = now
+					}
+					elapsed := max(now.Sub(st.waveStart), 0)
+					curPhase = (float64(elapsed%scrubberWavePeriod) / float64(scrubberWavePeriod)) * 2 * math.Pi
+					st.lastPhase = curPhase
+					needFrame = true
+				}
+				if needFrame {
 					p.AnimationFrame()
 				}
 			}
 			st.lastThumbW = curThumbW
-
-			if snap.wavy && snap.playing && !snap.disabled && curFrac > 0 && !red {
-				if st.waveStart.IsZero() {
-					st.waveStart = now
-				}
-				elapsed := max(now.Sub(st.waveStart), 0)
-				curPhase = (float64(elapsed%scrubberWavePeriod) / float64(scrubberWavePeriod)) * 2 * math.Pi
-				st.lastPhase = curPhase
-				p.AnimationFrame()
-			}
+			st.haloAlpha = curHalo
+			st.waveAmp = curAmp
 		}
 
 		visualFrac := curFrac
@@ -247,7 +283,7 @@ func mediaScrubber(c *ui.Context, o scrubberOptions) ui.Element {
 		tx := x0 + trackLen*float32(visualFrac)
 		gap := curThumbW*0.5 + scrubberTrackGap
 
-		// 1. Inactive base track ahead of thumb (and behind buffered portion if present).
+		// 1. Inactive base track painted continuously first (eliminates hourglass pinch at buffer edge).
 		var aheadLo, aheadHi float32
 		if snap.rtl {
 			aheadLo = x0
@@ -257,32 +293,33 @@ func mediaScrubber(c *ui.Context, o scrubberOptions) ui.Element {
 			aheadHi = x1
 		}
 		if aheadHi > aheadLo {
-			if snap.buf > curFrac {
-				bufEdge := x0 + trackLen*float32(snap.buf)
+			p.Fill(ui.Rect{X: aheadLo, Y: cy - scrubberTrackH*0.5, W: aheadHi - aheadLo, H: scrubberTrackH}, snap.track, scrubberTrackH*0.5)
+			if curBuf > curFrac {
 				if snap.rtl {
-					bufEdge = x1 - trackLen*float32(snap.buf)
+					bufEdge := x1 - trackLen*float32(curBuf)
 					bufLo := max(aheadLo, bufEdge)
 					if aheadHi > bufLo {
 						p.Fill(ui.Rect{X: bufLo, Y: cy - scrubberTrackH*0.5, W: aheadHi - bufLo, H: scrubberTrackH}, snap.buffer, scrubberTrackH*0.5)
 					}
-					if bufLo > aheadLo {
-						p.Fill(ui.Rect{X: aheadLo, Y: cy - scrubberTrackH*0.5, W: bufLo - aheadLo, H: scrubberTrackH}, snap.track, scrubberTrackH*0.5)
-					}
 				} else {
+					bufEdge := x0 + trackLen*float32(curBuf)
 					bufHi := min(aheadHi, bufEdge)
 					if bufHi > aheadLo {
 						p.Fill(ui.Rect{X: aheadLo, Y: cy - scrubberTrackH*0.5, W: bufHi - aheadLo, H: scrubberTrackH}, snap.buffer, scrubberTrackH*0.5)
 					}
-					if aheadHi > bufHi {
-						p.Fill(ui.Rect{X: bufHi, Y: cy - scrubberTrackH*0.5, W: aheadHi - bufHi, H: scrubberTrackH}, snap.track, scrubberTrackH*0.5)
-					}
 				}
-			} else {
-				p.Fill(ui.Rect{X: aheadLo, Y: cy - scrubberTrackH*0.5, W: aheadHi - aheadLo, H: scrubberTrackH}, snap.track, scrubberTrackH*0.5)
+			}
+			// Subtle MD3E trailing stop dot at track end.
+			if aheadHi-aheadLo > 8 {
+				dotX := aheadHi - 2.5
+				if snap.rtl {
+					dotX = aheadLo + 2.5
+				}
+				p.Fill(ui.Rect{X: dotX - 1.5, Y: cy - 1.5, W: 3, H: 3}, snap.active.Alpha(0.75), 1.5)
 			}
 		}
 
-		// 2. Active segment (wavy when playing, crisp capsule when paused/reduced motion).
+		// 2. Active segment (wavy with smooth amplitude damping on pause, crisp capsule otherwise).
 		var actLo, actHi float32
 		if snap.rtl {
 			actLo = min(x1, tx+gap)
@@ -292,19 +329,22 @@ func mediaScrubber(c *ui.Context, o scrubberOptions) ui.Element {
 			actHi = max(x0, tx-gap)
 		}
 		if actHi > actLo {
-			drawWavy := snap.wavy && snap.playing && !snap.disabled && !red && (actHi-actLo) > 6
-			if drawWavy {
+			if curAmp > 0.02 && !snap.disabled && !red && (actHi-actLo) > 6 {
 				if st.path == nil {
 					st.path = &ui.Path{}
 				}
-				buildWavyScrubPath(st.path, actLo, actHi, cy, curPhase)
+				buildWavyScrubPath(st.path, actLo, actHi, cy, curPhase, scrubberWaveAmp*float64(curAmp))
 				p.StrokePath(st.path, scrubberTrackH, snap.active)
 			} else {
 				p.Fill(ui.Rect{X: actLo, Y: cy - scrubberTrackH*0.5, W: actHi - actLo, H: scrubberTrackH}, snap.active, scrubberTrackH*0.5)
 			}
 		}
 
-		// 3. Focus ring when keyboard focused (checked only while live).
+		// 3. Soft hover/press halo + keyboard focus ring.
+		if curHalo > 0.005 {
+			haloR := snap.thumbH*0.5 + 4
+			p.Fill(ui.Rect{X: tx - haloR, Y: cy - haloR, W: haloR * 2, H: haloR * 2}, snap.active.Alpha(curHalo), haloR)
+		}
 		if live && sl.Focused() {
 			ring := ui.Rect{
 				X: tx - curThumbW*0.5 - 3,
@@ -353,7 +393,7 @@ func mediaScrubber(c *ui.Context, o scrubberOptions) ui.Element {
 	return sl
 }
 
-func buildWavyScrubPath(path *ui.Path, x0, x1, cy float32, phase float64) {
+func buildWavyScrubPath(path *ui.Path, x0, x1, cy float32, phase, amp float64) {
 	path.Reset()
 	span := float64(x1 - x0)
 	if span <= 0 {
@@ -366,7 +406,7 @@ func buildWavyScrubPath(path *ui.Path, x0, x1, cy float32, phase float64) {
 		edgeDist := min(t*span, (1-t)*span)
 		fade := clampF64(edgeDist/10.0, 0, 1)
 		fade = fade * fade * (3 - 2*fade)
-		py := cy + float32(scrubberWaveAmp*fade*math.Sin((float64(px)/scrubberWaveLength)*2*math.Pi-phase))
+		py := cy + float32(amp*fade*math.Sin((float64(px)/scrubberWaveLength)*2*math.Pi-phase))
 		if i == 0 {
 			path.MoveTo(px, py)
 		} else {
@@ -392,7 +432,8 @@ func showTimeBubble(c *ui.Context, th *md3e.Theme, text string, cx, anchorTop, p
 	}
 	scale := 0.65 + 0.35*clampF32(progress, 0, 1.1)
 	opacity := clampF32(progress, 0, 1)
-	tipX := clampF32(cx-left, 8, w-8)
+	rad := h * 0.5
+	tipX := clampF32(cx-left, rad, max(rad, w-rad))
 
 	ui.Overlay(c, func() {
 		box := ui.Box(c).
@@ -406,11 +447,16 @@ func showTimeBubble(c *ui.Context, th *md3e.Theme, text string, cx, anchorTop, p
 			Scale(scale, scale).
 			Opacity(opacity)
 		tri := ui.Local(box, timeBubblePathKey{}, func() ui.Path { return ui.Path{} })
+		rimCol := fg.Alpha(0.14)
 
 		box.Draw(func(p *ui.Painter, r ui.Rect) {
 			pillR := ui.Rect{X: r.X, Y: r.Y, W: r.W, H: r.H - tail}
-			rad := pillR.H * 0.5
-			p.Fill(pillR, bg, rad)
+			pr := pillR.H * 0.5
+			// Soft ambient + key elevation shadow behind pill.
+			p.Fill(ui.Rect{X: pillR.X - 1, Y: pillR.Y + 2, W: pillR.W + 2, H: pillR.H + 1}, ui.RGBA(0, 0, 0, 0.14), pr+1)
+			p.Fill(ui.Rect{X: pillR.X, Y: pillR.Y + 1, W: pillR.W, H: pillR.H}, ui.RGBA(0, 0, 0, 0.18), pr)
+			p.Fill(pillR, bg, pr)
+			p.Stroke(pillR, rimCol, pr, 1)
 			if tail > 0 {
 				tri.Reset()
 				tx := r.X + tipX
