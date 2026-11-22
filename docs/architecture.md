@@ -193,3 +193,4 @@ MyGo 的 `ui.Context` 本身携带有 `*ui.Theme`（通过 `c.Theme()` 读取、
    - 所有容器背景、圆角、阴影及 tonal elevation 通过 `surface.go` 的统一原语绘制，禁止在各组件中硬编码阴影参数或散落写死色值。
    - 所有交互组件的 Hover / Focus / Pressed 状态层叠加及 Ripple 波纹通过 `ripple.go` 的统一附加器（`AttachStateLayer` / `AttachRipple`）处理。
    - 所有内置小图标从 `internal/mdicon` 统一提取，避免多个组件各自复制同一 SVG 路径字符串。
+   - `RoundedPolygon.WriteTo(dst, rect)` 将单位方形内的轮廓写入调用方持有的 `ui.Path`。用 `shape.ClipShapeTo` 可以复用同一个缓冲完成裁切。控件将跨帧使用的绘制缓冲放在 `ui.Local` 中。MyGo 在 `FillPath`、`StrokePath` 和 `ClipPath` 调用期间展开路径，回调可以依次复用缓冲。退场元素仍使用其保存的几何和视觉参数绘制。

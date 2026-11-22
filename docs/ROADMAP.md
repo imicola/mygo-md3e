@@ -166,14 +166,16 @@ tokens  ──►  motion  ──►  shape  ──►  md3e (根包：核心美
 #### M15 — 零分配性能治理、自动化基准与多场景旗舰 Demo
 > **目标**：用真实 benchmark 数据与可运行的高颜值应用，验证“比 Flutter 更轻、更快、更美”。
 
-- [ ] **M15.1 热路径零分配与离屏零功耗治理**
-  - `shape/polygon.go` 新增 `WriteTo(dst *ui.Path, r ui.Rect)`，改造 `shape.ClipShape`、`Surface`、`Ripple`、`ShapeButton` 全部复用本地 `ui.Path`，消除每帧堆分配。
+- [x] **M15.1 热路径零分配与离屏零功耗治理**
+  - `shape/polygon.go` 新增 `WriteTo(dst *ui.Path, r ui.Rect)`，新增接收调用方缓冲的 `shape.ClipShapeTo`，在 `Surface`、`Ripple`、`ShapeButton` 等控件复用本地 `ui.Path`。
   - 全面审计 `tabs.go`、`buttongroup.go`、`ripple.go`、`list.go` 中的每帧临时切片与逃逸闭包。
   - 为 `LinearWavyProgress`、`CircularWavyProgress`、`LoadingIndicator`、`StatusPill`、`Skeleton`、`AreaSparkline` 增加 `p.Visible()` 视口相交检测，滚出可视区域后自动停止请求动画帧。
-- [ ] **M15.2 性能、内存与 DCE 回归门禁（`bench_test.go`）**
+- [x] **M15.2 性能、内存与 DCE 回归门禁（`bench_test.go`）**
   - 稳态单帧耗时与分配基准（`BenchmarkDashboardSteady`、`BenchmarkDataTable100K`、`BenchmarkSparklineTick`、`BenchmarkShapeMorphDraw`）。
   - 常驻堆内存测试（`TestRetainedHeap`），防止 Theme/Ripple/Path 缓存泄漏。
-  - 自动化按需裁剪体积检查脚本/测试（确认 `Button` 最小二进制不链接 `symbols/`、`charts/`、`media/`、`docview/`）。
+  - 自动化按需裁剪体积检查脚本/测试（确认 `Button` 最小二进制不链接 `symbols/`、`charts/`、`media/`、`docview/`、`codeview/`、上游扩展与未引用形状）。
+  - 在 Linux/amd64、Go 1.27.4、`CGO_ENABLED=0 GOMAXPROCS=1` 下，以 `-benchmem -count=3 -benchtime=200ms` 对比 `e7d0698`。中位数每帧分配从 93 降到 89（仪表盘）、181 降到 175（10 万行 DataTable 稳态）、8 降到 0（预热后的形状稳态绘制）。常驻 Go 堆中位数为 467,696 B，低于 5 MB 门限。
+  - 同一环境的普通构建中，最小 Button 体积为 13,847,648 B（原 13,842,388 B），Gallery 为 18,385,867 B（原 18,364,770 B）。DCE 测试同时检查链接符号和 Linux/amd64 Go 1.27 的字节上限（13,900,000 B 与 18,500,000 B）。
 - [ ] **M15.3 多场景标杆参考应用（实战反哺组件库）**
   - `examples/workbench`（或拆分轻量示例）：在同一个 `AdaptiveScaffold` + `WindowTitleBar` 中内置 **3 个真实级业务页面**，覆盖 80% 场景验证：
     1. **实时监控仪表盘**（类 FlClash 风格：暖橙深色 Bento 网格、异形曲奇启停键、实时上传/下载曲线、内存分段条、万级虚拟连接/DNS 数据表、实时进程内存自显）；

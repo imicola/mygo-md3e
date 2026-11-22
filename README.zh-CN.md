@@ -184,6 +184,7 @@ func main() {
 | 弹簧方案与令牌 | `motion.Expressive`、`motion.Standard`、`motion.FastSpatial`..`motion.SlowEffects` |
 | 规格与动画求解 | `motion.SpecOf`、`motion.Spring`、`motion.Resolve`、`motion.Snap` |
 | 35 种内置形状 | `shape.All()`、`shape.ByName`、`shape.Circle`..`shape.Heart`、`shape.RegularPolygon`、`shape.Star` |
+| 复用多边形路径与裁切缓冲 | `RoundedPolygon.WriteTo`、`shape.ClipShapeTo` |
 | 双向变形与裁切 | `shape.NewMorph`、`Morph.AsPath`、`shape.DrawMorph`、`shape.ClipShape` |
 
 ### 主题与基础设施（`md3e`）
@@ -352,6 +353,11 @@ CGO_ENABLED=0 go test -count=1 ./...
 # 仅在有意调整视觉输出时更新 Golden 基线
 MYGO_UPDATE_GOLDEN=1 CGO_ENABLED=0 go test -count=1 -run TestGolden .
 ```
+
+性能基准覆盖预热后的仪表盘、虚拟化表格、图卡采样及形状绘制。
+`TestRetainedHeap` 检查常驻 Go 堆与主题缓存回收，
+`TestButtonDeadCodeElimination` 校验最小 Button 二进制的链接符号，并记录
+Button 和 Gallery 体积。
 
 ### 全套构建与交叉编译命令
 

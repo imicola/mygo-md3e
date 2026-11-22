@@ -184,6 +184,7 @@ Dependencies are strictly acyclic: `tokens` -> `motion` -> `shape` -> root `md3e
 | Spring Schemes & Tokens | `motion.Expressive`, `motion.Standard`, `motion.FastSpatial`..`motion.SlowEffects` |
 | Resolution Helpers | `motion.SpecOf`, `motion.Spring`, `motion.Resolve`, `motion.Snap` |
 | 35 Expressive Shapes | `shape.All()`, `shape.ByName`, `shape.Circle`..`shape.Heart`, `shape.RegularPolygon`, `shape.Star` |
+| Reusable polygon paths and clipping | `RoundedPolygon.WriteTo`, `shape.ClipShapeTo` |
 | Bidirectional Morphing | `shape.NewMorph`, `Morph.AsPath`, `shape.DrawMorph`, `shape.ClipShape` |
 
 ### Core Primitives (`md3e`)
@@ -352,6 +353,11 @@ CGO_ENABLED=0 go test -count=1 ./...
 # Regenerate golden baselines only when intentionally changing visual output
 MYGO_UPDATE_GOLDEN=1 CGO_ENABLED=0 go test -count=1 -run TestGolden .
 ```
+
+The performance suite measures warmed dashboard and virtual table frames, plus
+chart ticks and shape drawing. `TestRetainedHeap` checks live Go heap and
+theme cache cleanup. `TestButtonDeadCodeElimination` checks the minimal button
+binary's links and logs both the Button and Gallery sizes.
 
 ### Full Check & Cross-Compilation Suite
 

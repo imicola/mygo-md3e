@@ -167,7 +167,7 @@ MD3E 将动效分为 **Spatial（空间：位移、缩放、尺寸、圆角、�
 6. **LoadingIndicator（Shape-Morphing）**：
    - 连续在多边形序列（默认 `SoftBurst -> Cookie9Sided -> Pentagon -> Pill -> Sunny -> Cookie4Sided -> Oval` 循环）间以 Expressive Spring 驱动 `shape.Morph` 过渡并伴随柔和旋转。
    - 提供 `Standard`（无背景容器，图形用 `Primary`）与 `Contained`（圆形容器 `PrimaryContainer`，图形用 `OnPrimaryContainer`）两种样式。
-   - `ReduceMotion` 时静止展示首帧特征形状，不请求动画帧。
+   - 离开视口时暂停相位与绘制，重新可见后继续。`Paused` 冻结当前形状。`ReduceMotion` 静态展示首个形状。
 7. **Wavy & Linear Progress Indicators（Linear & Circular）**：
    - `LinearProgress` / `LinearWavyProgress`：活跃段在 Wavy 模式下绘制正弦平滑波浪轨迹，确定态（Determinate `0..1`）在接近 0% 或 100% 端点时振幅平滑衰减至 0，未完成轨道留有明确间隙（track gap）及末端停靠点（stop indicator）；支持可选 `ProgressOptions.Buffer`（`0..1`）在主进度与未完成轨道间以 `TrackGap` 间距绘制半透明缓冲段；不确定态（`value < 0`）采用 MD3 双段连续伸缩接力（Primary + Trailing）实现周期无断档流动，并在滚出可视区域（`p.Visible()`）时自动暂停请求动画帧。
    - `CircularProgress` / `CircularWavyProgress`：极坐标正弦波动圆环（$r(\theta) = R + A \sin(k\theta + \phi)$），支持确定态弧长推进（含 `Buffer` 缓冲弧）、不确定态旋转伸缩与视口外零帧暂停。
@@ -249,13 +249,13 @@ MD3E 将动效分为 **Spatial（空间：位移、缩放、尺寸、圆角、�
 - **零重算防抖原则**：所有播放器仅在封面图像引用变化时触发提取并将结果记忆在 `ui.Local`，杜绝每帧遍历像素。
 
 ### 9.2 根包局部图像 `md3e.Image`（`image.go`）
-- **多形态与适应度**：支持 `*ui.Bitmap`、`*ui.SVG` 与通用 `ui.ImageSource`，提供 `Fit`（默认 `Contain`）、`ObjectPosition`（默认 `[0.5, 0.5]`）与 `Grayscale`；支持 `ShapeScale` / `Radius` / `Radii` 四角独立圆角或任意 `*shape.RoundedPolygon` 几何裁切（`shape.ClipShape`）。
+- **多形态与适应度**：支持 `*ui.Bitmap`、`*ui.SVG` 与通用 `ui.ImageSource`，提供 `Fit`（默认 `Contain`）、`ObjectPosition`（默认 `[0.5, 0.5]`）与 `Grayscale`；支持 `ShapeScale` / `Radius` / `Radii` 四角独立圆角或任意 `*shape.RoundedPolygon` 几何裁切（`shape.ClipShape` 或复用路径缓冲的 `shape.ClipShapeTo`）。
 - **状态迁移与幽灵绘制**：`Loading` 复用适配形变的 Tonal `Skeleton`；`Failed` / `Error` 渲染图标容器与可选重试按钮；异步 `Loading/nil -> src` 过渡使用 `motion.DefaultEffects` 从 `0 -> 1` 平滑淡入并响应 `ReduceMotion` / `NoFade`；支持可选 `MatchKey` 共享元素过渡；严守根包零引入 `media/`、`ui/netimage` 与 `ui/video`。
 
 ### 9.3 网络图、模态灯箱与 Expressive 音视频播放器（`media/`）
 - **`media.NetImage`**：在 `github.com/egoist/mygo/ui/netimage` 上叠加 MD3E 骨架屏占位、网络失败重试（点击通过 `c.Services()` + `ForgetImage` 清除失败退避后立即重新拉取）与空白 URL 安全空占位，并导出 `PreloadImages`、`ForgetImage`、`ClearImageCache` 与 `SetImageHTTPClient`。
 - **`media.ImageLightbox`**：基于全屏 `ui.Overlay` + `Modal()` 的照片预览器（含退场动画隔离与关闭归还焦点）。支持工具栏 / 滚轮 / 双指捏合 / 双击 / `=` `-` `0` 键 `1x..5x` 缩放（默认），支持按放大倍比与视口尺寸钳位的拖拽与触控板平移、RTL 自动镜像的上/下页按钮与左右方向键切换、顶部计数栏、底部标题/副标题浮层、`MatchKey` 共享元素进场及 `Escape`/Scrim 外部点击关闭。
-- **`media.VideoPlayer`**：封装 `ui.Video` / `*ui.VideoPlayer` 与 `OpenVideo`/`OpenVideoURL`/`OpenVideoData` 辅助构造器。提供基于虚拟时钟（`c.Now()` + `c.After`）在播放闲置 `AutoHideDelay`（默认 `3s`）后平滑收起、鼠标移入/按键/操作即刻唤起的底部渐变与半透明控制条；集成 `MorphIconButton`（`Circle ↔ Square`）播放切换、共享 `mediaScrubber`（播放态 `LinearWavy` 波浪与缓冲进度段 + 拖拽/聚焦时显示水滴 `TabularNums` 时间气泡）、`TabularNums` 时长文本、静音开关与音量条、倍速 `MenuButton`、`Fullscreen` 钩子、居中缓冲 `LoadingIndicator`、错误重试覆盖层及全套键盘快捷键（`Space`/`K`、`M`、`F`、RTL 感知 `Left`/`Right`）。
+- **`media.VideoPlayer`**：封装 `ui.Video` / `*ui.VideoPlayer` 与 `OpenVideo`/`OpenVideoURL`/`OpenVideoData` 辅助构造器。提供基于虚拟时钟（`c.Now()` 与可见时的 `p.After`）在播放闲置 `AutoHideDelay`（默认 `3s`）后平滑收起、鼠标移入/按键/操作即刻唤起的底部渐变与半透明控制条；集成 `MorphIconButton`（`Circle ↔ Square`）播放切换、共享 `mediaScrubber`（播放态 `LinearWavy` 波浪与缓冲进度段 + 拖拽/聚焦时显示水滴 `TabularNums` 时间气泡）、`TabularNums` 时长文本、静音开关与音量条、倍速 `MenuButton`、`Fullscreen` 钩子、居中缓冲 `LoadingIndicator`、错误重试覆盖层及全套键盘快捷键（`Space`/`K`、`M`、`F`、RTL 感知 `Left`/`Right`）。
 - **`media.AudioPlayerCard` & `media.MiniPlayer`**：支持 `TrackInfo` 封面显示与可选异形裁切（`ArtworkShape`），并在 `DynamicColor: true` 或 `SeedColor` 开启时记忆提取主题并包裹于 `md3e.AnimatedThemeScope` 实现跨曲目 Oklab 平滑换肤。`AudioPlayerCard` 提供展开封面信息、波浪拖拽轨、时间显示与 `FocusGroup` 传输按钮栏；`MiniPlayer` 随 `Theme.Density` 自适应高度（`64`/`56`/`52` DIP）并在底部边沿使用仅播放且未启用 `ReduceMotion` 时波动的 `LinearWavyProgress`（暂停与 `ReduceMotion` 下切换静止 `LinearProgress`，保证 `FramePending() == false`）。
 - **DCE 硬边界验证**：通过独立编译 `media/dce_test.go` 验证仅引用 `md3e.Button`+`md3e.Image` 时零链接 `media/`、`ui/netimage`、`ui/video` 与 `symbols/`，且仅引用 `media.NetImage` 时零链接 `ui/video` 与 `tokens.SeedFromImage`。
 
