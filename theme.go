@@ -835,6 +835,40 @@ func lookupScopedTheme(uiT *ui.Theme) (*Theme, bool) {
 	return e.theme, true
 }
 
+func registerThemeAlias(uiT *ui.Theme, th *Theme) {
+	if uiT == nil || th == nil {
+		return
+	}
+	wp := weak.Make(uiT)
+	themeRegMu.RLock()
+	if e, ok := themeByUI[wp]; ok && e.theme == th {
+		themeRegMu.RUnlock()
+		return
+	}
+	themeRegMu.RUnlock()
+
+	themeRegMu.Lock()
+	defer themeRegMu.Unlock()
+	if e, ok := themeByUI[wp]; ok {
+		if e.theme == th {
+			return
+		}
+		e.theme = th
+		themeByUI[wp] = e
+		return
+	}
+	themeSeq++
+	id := themeSeq
+	themeByUI[wp] = scopedThemeEntry{theme: th, id: id}
+	runtime.AddCleanup(uiT, func(k scopedUIKey) {
+		themeRegMu.Lock()
+		defer themeRegMu.Unlock()
+		if cur, ok := themeByUI[k.wp]; ok && cur.id == k.id {
+			delete(themeByUI, k.wp)
+		}
+	}, scopedUIKey{wp: wp, id: id})
+}
+
 func cachedThemeFromSeed(seed ui.Color, dark bool, variant tokens.Variant, prefs ui.Preferences) *Theme {
 	if seed.A == 0 {
 		seed = DefaultSeedColor
