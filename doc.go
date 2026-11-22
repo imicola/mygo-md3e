@@ -27,5 +27,5 @@
 // component's key is given to the context before the component is built.
 package md3e
 
-// Version is the library version. It is a placeholder until the first release.
-const Version = "0.0.0-dev"
+// Version is the semantic version of this release.
+const Version = "0.1.0"
