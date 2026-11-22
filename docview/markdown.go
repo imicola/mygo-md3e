@@ -1,6 +1,7 @@
 package docview
 
 import (
+	"math"
 	"strings"
 
 	"github.com/egoist/mygo/ui"
@@ -45,7 +46,7 @@ type MarkdownOptions struct {
 
 	// State optionally links this Markdown view with docview.Outline for heading
 	// extraction, layout offset measurement, active scroll-spy tracking, and
-	// programmatic section jumps.
+	// programmatic section jumps. Anchor also accepts the unique slugs from State.
 	State *State
 	// Scroll optionally supplies the enclosing ui.Scroll's ScrollState so
 	// State.JumpTo and Outline track and smoothly scroll the viewport.
@@ -90,8 +91,10 @@ type (
 )
 
 type mdViewLocalState struct {
-	opts     markdown.Options
-	revealed bool
+	opts               markdown.Options
+	revealed           bool
+	outlinePaintRootY  float32
+	outlineBuildQueued bool
 }
 
 // MarkdownTheme derives a *markdown.Theme from md3e.CurrentTheme(c).
@@ -287,19 +290,64 @@ func buildMarkdown(c *ui.Context, src string, o MarkdownOptions, streaming bool)
 		reveal = &markdown.Reveal{Unit: markdown.AtOnce, Fade: -1}
 	}
 
-	if o.State != nil {
-		o.State.syncDocument(src, o.Extensions)
-		if o.Scroll != nil {
-			o.State.attachScroll(o.Scroll)
-		}
-	}
-
 	// Wrap in a stable root column so caller c.Key(...) attaches to root and
 	// ui.Local preserves markdown.Options (including its internal image sync.Map)
-	// across rebuilds without zero-alloc or refetch churn.
+	// across rebuilds without refetch churn.
 	root := ui.Column(c).AlignSelf(ui.Stretch)
 	local := ui.Local(root, mdLocalStateKey{}, func() mdViewLocalState { return mdViewLocalState{} })
-	configureMarkdownOptions(&local.opts, th, mdTh, o, reveal, false, streaming)
+	var trackHeading func(ui.Element, int)
+	var previousRoot ui.Rect
+	var activeChanged bool
+	if state := o.State; state != nil {
+		hadHeadings := len(state.items) > 0
+		documentChanged := state.syncDocument(src, o.Extensions)
+		if o.Scroll != nil {
+			state.attachScroll(o.Scroll)
+		}
+		clear(state.headingTops)
+		previousRoot = root.LayoutBounds()
+		local.outlineBuildQueued = false
+		srv := c.Services()
+		requestLayoutBuild := func() {
+			if !local.outlineBuildQueued {
+				local.outlineBuildQueued = true
+				srv.Invalidate()
+			}
+		}
+		trackHeading = func(heading ui.Element, index int) {
+			previous := heading.LayoutBounds()
+			hasPrevious := previous.W > 0 && previous.H > 0 && previousRoot.W > 0 && previousRoot.H > 0
+			if hasPrevious {
+				state.recordHeadingTop(index, previous.Y)
+			}
+			// Compare document-relative positions so scrolling the whole view
+			// does not cause a measurement rebuild.
+			previousOffset := previous.Y - previousRoot.Y
+			heading.DrawOver(func(_ *ui.Painter, r ui.Rect) {
+				if heading.Valid() && r.W > 0 && r.H > 0 &&
+					(!hasPrevious || math.Abs(float64(r.Y-local.outlinePaintRootY-previousOffset)) > 0.5) {
+					requestLayoutBuild()
+				}
+			})
+		}
+		root.Draw(func(_ *ui.Painter, r ui.Rect) {
+			if root.Valid() {
+				local.outlinePaintRootY = r.Y
+			}
+		})
+		hasHeadings := len(state.items) > 0
+		root.DrawOver(func(_ *ui.Painter, r ui.Rect) {
+			if !root.Valid() || r.W <= 0 || r.H <= 0 {
+				return
+			}
+			outlineChanged := documentChanged && (hadHeadings || hasHeadings)
+			sizeChanged := hasHeadings && (r.W != previousRoot.W || r.H != previousRoot.H)
+			if outlineChanged || sizeChanged || activeChanged {
+				requestLayoutBuild()
+			}
+		})
+	}
+	configureMarkdownOptions(&local.opts, th, mdTh, o, reveal, false, streaming, trackHeading)
 
 	var inner ui.Element
 	root.Children(func() {
@@ -312,20 +360,7 @@ func buildMarkdown(c *ui.Context, src string, o MarkdownOptions, streaming bool)
 	local.revealed = markdown.Revealed(inner)
 
 	if o.State != nil {
-		state := o.State
-		srv := c.Services()
-		rb := root.LayoutBounds()
-		if rb.W > 0 && rb.H > 0 {
-			state.recordRootTop(rb.Y)
-		}
-		root.DrawOver(func(_ *ui.Painter, rr ui.Rect) {
-			if !root.Valid() || rr.W <= 0 || rr.H <= 0 {
-				return
-			}
-			if !state.measured {
-				srv.Invalidate()
-			}
-		})
+		activeChanged = o.State.updateOffsets(previousRoot.Y)
 	}
 	return root
 }
@@ -338,23 +373,30 @@ func configureMarkdownOptions(
 	reveal *markdown.Reveal,
 	inner bool,
 	streaming bool,
+	trackHeading func(ui.Element, int),
 ) {
 	anchor := o.Anchor
 	anchorVer := o.AnchorVersion
 	anchorBlock := o.AnchorBlock
-	if !inner && o.State != nil && o.State.anchorVersion > 0 && anchor == "" {
-		anchor = o.State.anchor
-		anchorVer = o.State.anchorVersion
-		state := o.State
+	if state := o.State; !inner && state != nil {
+		stateJump := state.anchorVersion > 0 && anchor == ""
+		if stateJump {
+			anchor = state.anchor
+			anchorVer = state.anchorVersion
+		}
 		userAnchorBlock := o.AnchorBlock
 		anchorBlock = func(d *parser.Document, name string) int {
-			if state.anchorBlock > 0 && (name == state.anchor || strings.EqualFold(name, state.anchor)) {
-				return state.anchorBlock
+			if stateJump && strings.EqualFold(name, anchor) {
+				if index := state.outlineBlock(d, name); index > 0 {
+					return index
+				}
 			}
 			if userAnchorBlock != nil {
-				return userAnchorBlock(d, name)
+				if index := userAnchorBlock(d, name); index > 0 && index < d.Len() {
+					return index
+				}
 			}
-			return -1
+			return state.outlineBlock(d, name)
 		}
 	}
 
@@ -406,25 +448,22 @@ func configureMarkdownOptions(
 	}
 
 	userBlock := o.Block
-	state := o.State
 	dst.Block = func(c *ui.Context, d *parser.Document, i int) bool {
 		if userBlock != nil && userBlock(c, d, i) {
 			return true
 		}
 		b := d.Block(i)
-		if state != nil && b.Kind == parser.Heading && (!streaming || !b.Open) {
+		if trackHeading != nil && b.Kind == parser.Heading && (!streaming || !b.Open) {
 			if b.Start >= 0 && b.End > b.Start && b.End <= len(d.Source()) {
 				hSrc := d.Source()[b.Start:b.End]
 				var innerOpts markdown.Options
-				configureMarkdownOptions(&innerOpts, th, mdTh, o, &markdown.Reveal{Unit: markdown.AtOnce, Fade: -1}, true, false)
+				configureMarkdownOptions(&innerOpts, th, mdTh, o, &markdown.Reveal{Unit: markdown.AtOnce, Fade: -1}, true, false, nil)
 				innerOpts.Anchor = ""
 				innerOpts.AnchorVersion = 0
 				innerOpts.AnchorBlock = nil
 
 				hBox := ui.Column(c.Key(mdBlockKey{i})).AlignSelf(ui.Stretch)
-				if hb := hBox.LayoutBounds(); hb.W > 0 && hb.H > 0 {
-					state.recordHeadingTop(i, hb.Y)
-				}
+				trackHeading(hBox, i)
 				hBox.Children(func() {
 					markdown.View(c.Key(mdHeadingInnerKey{}), hSrc, &innerOpts)
 				})
@@ -451,7 +490,7 @@ func configureMarkdownOptions(
 			innerTh.BlockSpacing = 0.5
 
 			var innerOpts markdown.Options
-			configureMarkdownOptions(&innerOpts, th, &innerTh, o, &markdown.Reveal{Unit: markdown.AtOnce, Fade: -1}, true, false)
+			configureMarkdownOptions(&innerOpts, th, &innerTh, o, &markdown.Reveal{Unit: markdown.AtOnce, Fade: -1}, true, false, nil)
 			innerOpts.Anchor = ""
 			innerOpts.AnchorVersion = 0
 			innerOpts.AnchorBlock = nil

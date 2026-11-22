@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/egoist/mygo/ui"
+	"github.com/egoist/mygo/ui/markdown/parser"
 
 	md3e "github.com/imicola/mygo-md3e"
 	"github.com/imicola/mygo-md3e/docview"
@@ -39,6 +40,104 @@ func TestExtractOutlineAndUniqueSlugs(t *testing.T) {
 		if it.Slug != wantSlugs[i] || it.Level != wantLevels[i] {
 			t.Fatalf("item %d: got slug=%q level=%d, want slug=%q level=%d", i, it.Slug, it.Level, wantSlugs[i], wantLevels[i])
 		}
+	}
+	items = docview.ExtractOutline("# API\n\n# API\n\n# API-1\n\n# API\n")
+	for i, want := range []string{"api", "api-1", "api-1-1", "api-2"} {
+		if got := items[i].Slug; got != want {
+			t.Errorf("heading %d: slug = %q, want %q", i, got, want)
+		}
+	}
+}
+
+func TestMarkdownOutlineLayoutSettles(t *testing.T) {
+	for _, tc := range []struct {
+		name, src string
+		stream    bool
+		custom    bool
+	}{
+		{name: "no headings", src: "A paragraph."},
+		{name: "open heading", src: "A paragraph.\n\n# Growing heading", stream: true},
+		{name: "custom heading", src: "# Custom\n\n## Measured\n", custom: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var state docview.State
+			src, builds := tc.src, 0
+			tt := ui.NewTester(func(c *ui.Context) {
+				builds++
+				opts := docview.MarkdownOptions{State: &state}
+				if tc.custom {
+					opts.Block = func(c *ui.Context, _ *parser.Document, i int) bool {
+						if i != 1 {
+							return false
+						}
+						ui.Text(c, "Custom heading")
+						return true
+					}
+				}
+				if tc.stream {
+					docview.MarkdownStream(c, src, opts)
+				} else {
+					docview.Markdown(c, src, opts)
+				}
+			}, 360, 240)
+			tt.SetPreferences(ui.Preferences{ReduceMotion: true})
+			tt.Advance(200 * time.Millisecond)
+			if tt.FramePending() {
+				t.Errorf("layout did not settle after %d builds", builds)
+			}
+			before := builds
+			tt.Advance(200 * time.Millisecond)
+			if builds != before {
+				t.Errorf("idle view rebuilt %d times", builds-before)
+			}
+			if tc.custom {
+				items := state.Items()
+				if len(items) != 2 || items[0].HasOffset || !items[1].HasOffset {
+					t.Errorf("unexpected custom and default heading offsets: %+v", items)
+				}
+			}
+			if tc.stream {
+				src += "\n\nDone.\n"
+				tt.Frame()
+				items := state.Items()
+				if tt.FramePending() || len(items) != 1 || !items[0].HasOffset {
+					t.Errorf("completed stream did not settle and measure its heading: %+v", items)
+				}
+			}
+		})
+	}
+}
+
+func TestMarkdownOutlineRemeasuresAfterResize(t *testing.T) {
+	var state docview.State
+	src := "# Start\n\n" + strings.Repeat("Wrapping words in a long paragraph. ", 20) + "\n\n## Next\n"
+	tt := ui.NewTester(func(c *ui.Context) {
+		ui.Scroll(c).Fill().Children(func() {
+			docview.Markdown(c, src, docview.MarkdownOptions{State: &state})
+		})
+	}, 640, 360)
+	before := state.Items()[1]
+	tt.SetSize(250, 360)
+	tt.Advance(200 * time.Millisecond)
+	after := state.Items()[1]
+	if !before.HasOffset || !after.HasOffset || after.OffsetY <= before.OffsetY || tt.FramePending() {
+		t.Fatalf("outline did not remeasure and settle: before=%+v after=%+v", before, after)
+	}
+}
+
+func TestMarkdownAnchorUsesDisambiguatedOutlineSlug(t *testing.T) {
+	var state docview.State
+	src := "# API\n\n" + strings.Repeat("First section.\n\n", 16) +
+		"# API\n\n" + strings.Repeat("Repeated section.\n\n", 16) +
+		"# API-1\n\nLiteral anchor paragraph.\n\n" + strings.Repeat("Final section.\n\n", 16)
+	tt := ui.NewTester(func(c *ui.Context) {
+		ui.Scroll(c).Fill().Children(func() {
+			docview.Markdown(c, src, docview.MarkdownOptions{State: &state, Anchor: "api-1-1"})
+		})
+	}, 360, 180)
+	tt.Advance(500 * time.Millisecond)
+	if !tt.HasText("Literal anchor paragraph.") {
+		t.Fatalf("disambiguated anchor did not reach its section, visible text: %v", tt.Texts())
 	}
 }
 

@@ -50,7 +50,8 @@ func extractOutlineFromDoc(doc *parser.Document, dst []OutlineItem) []OutlineIte
 		return dst[:0]
 	}
 	dst = dst[:0]
-	var seen map[string]int
+	var used map[string]bool
+	var nextSuffix map[string]int
 	for i := 1; i < doc.Len(); i++ {
 		b := doc.Block(i)
 		if b.Kind != parser.Heading {
@@ -65,13 +66,21 @@ func extractOutlineFromDoc(doc *parser.Document, dst []OutlineItem) []OutlineIte
 			base = fmt.Sprintf("section-%d", len(dst)+1)
 		}
 		slug := base
-		if seen == nil {
-			seen = map[string]int{}
+		if used == nil {
+			used = make(map[string]bool)
 		}
-		if count := seen[base]; count > 0 {
-			slug = fmt.Sprintf("%s-%d", base, count)
+		if used[slug] {
+			n := max(1, nextSuffix[base])
+			for used[slug] {
+				slug = fmt.Sprintf("%s-%d", base, n)
+				n++
+			}
+			if nextSuffix == nil {
+				nextSuffix = make(map[string]int)
+			}
+			nextSuffix[base] = n
 		}
-		seen[base]++
+		used[slug] = true
 
 		dst = append(dst, OutlineItem{
 			Title:      title,
@@ -92,15 +101,11 @@ type State struct {
 	doc *parser.Document
 
 	items       []OutlineItem
-	indexByBlk  map[int]int
 	headingTops map[int]float32
-	rootTop     float32
-	hasRootTop  bool
-	measured    bool
+	hasOffsets  bool
 
 	scroll        *ui.ScrollState
 	anchor        string
-	anchorBlock   int
 	anchorVersion uint64
 
 	pendingJumpIdx int
@@ -147,7 +152,7 @@ func (s *State) ActiveIndex(scrollY ...float32) int {
 		}
 	}
 
-	if !hasScroll || !s.measured {
+	if !hasScroll || !s.hasOffsets {
 		if s.hasPendingJump && s.pendingJumpIdx >= 0 && s.pendingJumpIdx < len(s.items) {
 			return s.pendingJumpIdx
 		}
@@ -195,8 +200,17 @@ func (s *State) JumpTo(slug string) {
 		}
 	}
 	s.anchor = clean
-	s.anchorBlock = -1
+	s.hasPendingJump = false
 	s.anchorVersion++
+}
+
+func (s *State) outlineBlock(doc *parser.Document, slug string) int {
+	for _, item := range s.items {
+		if strings.EqualFold(item.Slug, slug) && item.BlockIndex < doc.Len() && doc.Block(item.BlockIndex).Kind == parser.Heading {
+			return item.BlockIndex
+		}
+	}
+	return -1
 }
 
 // JumpToIndex scrolls the linked Markdown view to heading index idx.
@@ -221,7 +235,6 @@ func (s *State) jumpToIndex(idx int, anim ui.Animation, preferScroll bool) {
 		return
 	}
 	s.anchor = item.Slug
-	s.anchorBlock = item.BlockIndex
 	s.anchorVersion++
 }
 
@@ -248,50 +261,26 @@ func (s *State) attachScroll(scroll *ui.ScrollState) {
 	}
 }
 
-func (s *State) syncDocument(src string, ext parser.Extensions) {
-	if s == nil {
-		return
-	}
+func (s *State) syncDocument(src string, ext parser.Extensions) bool {
 	if ext == 0 {
 		ext = parser.Default
 	}
 	if s.doc != nil && s.src == src && s.ext == ext {
-		return
+		return false
 	}
 	if s.doc == nil || s.ext != ext {
 		s.doc = parser.New(ext)
 		s.ext = ext
 	}
-	prevOffsets := make(map[int]float32, len(s.items))
-	for _, it := range s.items {
-		if it.HasOffset && it.BlockIndex > 0 {
-			prevOffsets[it.BlockIndex] = it.OffsetY
-		}
-	}
 	s.doc.Set(src)
 	s.src = src
-	s.measured = false
-	if s.headingTops != nil {
-		clear(s.headingTops)
-	}
+	s.hasOffsets = false
 	s.items = extractOutlineFromDoc(s.doc, s.items)
-	if s.indexByBlk == nil {
-		s.indexByBlk = map[int]int{}
-	} else {
-		clear(s.indexByBlk)
-	}
-	for i := range s.items {
-		blk := s.items[i].BlockIndex
-		s.indexByBlk[blk] = i
-		if off, ok := prevOffsets[blk]; ok {
-			s.items[i].OffsetY = off
-			s.items[i].HasOffset = true
-		}
-	}
 	if s.pendingJumpIdx >= len(s.items) {
 		s.hasPendingJump = false
 		s.pendingJumpIdx = -1
 	}
+	return true
 }
 
 func (s *State) recordHeadingTop(blockIdx int, y float32) {
@@ -304,37 +293,20 @@ func (s *State) recordHeadingTop(blockIdx int, y float32) {
 	s.headingTops[blockIdx] = y
 }
 
-func (s *State) recordRootTop(rootY float32) bool {
-	if s == nil || len(s.items) == 0 {
-		return false
-	}
-	if len(s.headingTops) == 0 {
-		return !s.measured
-	}
-	wasMeasured := s.measured
+func (s *State) updateOffsets(rootY float32) bool {
 	prevActive := s.ActiveIndex()
-	s.rootTop = rootY
-	s.hasRootTop = true
-	changed := false
-	allMeasured := true
+	s.hasOffsets = false
 	for i := range s.items {
-		blk := s.items[i].BlockIndex
-		if top, ok := s.headingTops[blk]; ok {
-			off := max(float32(0), top-rootY)
-			if !s.items[i].HasOffset || math.Abs(float64(s.items[i].OffsetY-off)) > 0.5 {
-				changed = true
-			}
-			s.items[i].OffsetY = off
-			s.items[i].HasOffset = true
-		} else {
-			allMeasured = false
+		item := &s.items[i]
+		top, ok := s.headingTops[item.BlockIndex]
+		item.HasOffset = ok
+		item.OffsetY = 0
+		if ok {
+			item.OffsetY = max(float32(0), top-rootY)
+			s.hasOffsets = true
 		}
 	}
-	if allMeasured {
-		s.measured = true
-	}
-	newActive := s.ActiveIndex()
-	return (!wasMeasured && allMeasured) || (changed && newActive != prevActive) || newActive != prevActive
+	return s.ActiveIndex() != prevActive
 }
 
 func jumpAnimationFor(th *md3e.Theme, c *ui.Context) ui.Animation {
