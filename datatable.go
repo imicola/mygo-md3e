@@ -338,6 +338,49 @@ func DataTable(c *ui.Context, columns []DataTableColumn, count int, cell func(ro
 	syncDataTableLayoutIn(state, o, track)
 
 	uiCols := track.updateColumns(columns)
+	headerBg := SurfaceColorForElevation(th, tokens.Level2)
+	if o.Elevation >= tokens.Level2 {
+		headerBg = SurfaceColorForElevation(th, min(o.Elevation+1, tokens.Level5))
+	}
+	activeSortCol := func(col int) bool {
+		if col < 0 || col >= len(uiCols) {
+			return false
+		}
+		id := uiCols[col].ID
+		if id == "" {
+			id = uiCols[col].Title
+		}
+		if id == "" {
+			return false
+		}
+		if state.Sort != nil && state.Sort.Column == id {
+			return true
+		}
+		if state.SortBy != nil {
+			for _, so := range *state.SortBy {
+				if so.Column == id {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	userHeaderCell := o.HeaderCell
+	primaryInk := th.Colors.Primary
+	state.HeaderCell = func(cell ui.Element, col int) {
+		cell.Background(headerBg)
+		if !disabled && activeSortCol(col) && primaryInk.A > 0 {
+			cell.DrawOver(func(p *ui.Painter, r ui.Rect) {
+				if r.W <= 0 || r.H <= 2 {
+					return
+				}
+				p.Fill(ui.Rect{X: r.X, Y: r.Y + r.H - 2, W: r.W, H: 2}, primaryInk, 0)
+			})
+		}
+		if userHeaderCell != nil {
+			userHeaderCell(cell, col)
+		}
+	}
 	onRowClick := !disabled && o.OnRowClick != nil
 	onRowSubmit := !disabled && o.OnRowSubmit != nil
 	monoFont := th.MonoFont
@@ -554,6 +597,15 @@ func resolveDataTableState(root ui.Element, th *Theme, o DataTableOptions) *ui.L
 		}
 	}
 
+	if s.CellSelect && s.CellsStyle == (ui.CellsStyle{}) {
+		cs := th.Colors
+		s.CellsStyle = ui.CellsStyle{
+			Cell:     cs.PrimaryContainer,
+			CellText: cs.OnPrimaryContainer,
+			Row:      cs.SecondaryContainer.Alpha(0.45),
+			Stripe:   cs.OnSurface.Alpha(0.03),
+		}
+	}
 	if isPositiveFiniteF32(o.RowHeight) {
 		s.RowHeight = o.RowHeight
 	} else {

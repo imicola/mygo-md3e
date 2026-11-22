@@ -65,8 +65,6 @@ const (
 	navBarLabelTop = 48
 )
 
-type navBarIndicatorKey struct{}
-
 type navBarItemKey struct{ i int }
 
 // NavigationBar builds a Material Design 3 Expressive navigation bar: a row of
@@ -106,6 +104,9 @@ func NavigationBar(c *ui.Context, destinations []NavigationDestination, opts ...
 		Role(ui.RoleNavigation).
 		FocusGroup(ui.Horizontal).
 		Label(label)
+	if hl := resolveHairlineColor(th, ui.Color{}); hl.A > 0 {
+		bar.Border(1, hl).BorderWidth(1, 0, 0, 0)
+	}
 	bar.Disabled(o.Disabled)
 
 	bar.Children(func() {
@@ -133,13 +134,10 @@ func navBarDestination(c *ui.Context, th *Theme, cs tokens.ColorScheme, dest *Na
 	if selected {
 		target = 1
 	}
-	indicator := animateWithTheme(el, th, navBarIndicatorKey{}, target, motion.FastSpatial)
-	iconInk := cs.OnSurfaceVariant
-	labelInk := cs.OnSurfaceVariant
-	if selected {
-		iconInk = cs.OnSecondaryContainer
-		labelInk = cs.OnSurface
-	}
+	expand := animateWithTheme(el, th, animChan0, target, motion.FastSpatial)
+	alpha := clampF32(animateEffect(c, el, th, animChan1, target, motion.FastEffects), 0, 1)
+	iconInk := cs.OnSurfaceVariant.MixOklab(cs.OnSecondaryContainer, alpha)
+	labelInk := cs.OnSurfaceVariant.MixOklab(cs.OnSurface, alpha)
 	if disabled {
 		iconInk = cs.OnSurface.Alpha(float32(tokens.DisabledContentOpacity))
 		labelInk = iconInk
@@ -148,18 +146,30 @@ func navBarDestination(c *ui.Context, th *Theme, cs tokens.ColorScheme, dest *Na
 
 	showLabel := o.Labels == NavigationLabelsAlways ||
 		(o.Labels == NavigationLabelsSelectedOnly && selected)
+	centeredTop := float32(navBarHeight-navBarIndicatorHigh) / 2
+	targetTop := float32(navBarIndicatorTop)
+	if !showLabel {
+		targetTop = centeredTop
+	}
+	pillTop := targetTop
+	if o.Labels == NavigationLabelsSelectedOnly {
+		pillTop = animateWithTheme(el, th, animChan2, targetTop, motion.FastSpatial)
+	}
+
 	el.Children(func() {
 		// The pill and the label are placed by their exact boxes, so their
-		// geometry does not depend on whether a label is shown.
+		// geometry stays aligned across label modes.
 		pillBox := ui.Box(c).Width(navBarIndicatorWide).MaxWidthPercent(100).Height(navBarIndicatorHigh).Center().
-			Attach(ui.AnchorTop, ui.AnchorTop).Top(navBarIndicatorTop)
+			Attach(ui.AnchorTop, ui.AnchorTop).Top(pillTop)
 		pillBox.Draw(func(p *ui.Painter, r ui.Rect) {
-			if !pillBox.Valid() || indicator <= 0.001 || r.W <= 0 || r.H <= 0 {
+			if alpha <= 0.001 || r.W <= 0 || r.H <= 0 {
 				return
 			}
-			alpha := clampF32(indicator, 0, 1)
-			scale := min(indicator, 1.1)
-			w := r.W * scale
+			// Bloom horizontally from a 32x32 circle to the 64x32 capsule
+			// instead of collapsing to a sliver at low progress.
+			minW := min(r.H, r.W)
+			t := clampF32(expand, 0, 1.08)
+			w := minW + (r.W-minW)*t
 			box := ui.Rect{X: r.X + (r.W-w)/2, Y: r.Y, W: w, H: r.H}
 			pill := cs.SecondaryContainer.Alpha(alpha)
 			if disabled {
@@ -172,7 +182,7 @@ func navBarDestination(c *ui.Context, th *Theme, cs tokens.ColorScheme, dest *Na
 			})
 		if showLabel {
 			txt := ui.Text(c, dest.Label).SingleLine().MaxWidthPercent(96)
-			applyTypeStyleWithTheme(th, txt, tokens.LabelMedium)
+			applyTypeStyleWithTheme(th, txt, tokens.LabelMedium, selected && !disabled)
 			txt.TextColor(labelInk)
 			txt.Attach(ui.AnchorTop, ui.AnchorTop).Top(navBarLabelTop)
 		}
@@ -187,6 +197,7 @@ func navBarDestination(c *ui.Context, th *Theme, cs tokens.ColorScheme, dest *Na
 	}
 	// The whole cell stays the hot zone, focus target and accessible tab; the
 	// hover, focus and ripple feedback paint only in the pill.
+	clipTop := pillTop
 	attachRippleWithContext(c, th, el, StateLayerOptions{
 		Color:    iconInk,
 		Disabled: disabled,
@@ -194,7 +205,7 @@ func navBarDestination(c *ui.Context, th *Theme, cs tokens.ColorScheme, dest *Na
 			pillW := min(float32(navBarIndicatorWide), r.W)
 			box := ui.Rect{
 				X: r.X + (r.W-pillW)/2,
-				Y: r.Y + navBarIndicatorTop,
+				Y: r.Y + clipTop,
 				W: pillW,
 				H: navBarIndicatorHigh,
 			}

@@ -62,17 +62,6 @@ const (
 	carouselAlignSlack    = 1.5
 )
 
-// Locals and animation channels of a carousel.
-type (
-	carouselIndexKey  struct{}
-	carouselLastKey   struct{}
-	carouselScrollKey struct{}
-	carouselSizeKey   struct{}
-	carouselDragKey   struct{}
-	carouselWidthKey  struct{}
-	carouselItemKey   struct{ i int }
-)
-
 // carouselSizeState remembers the viewport width and whether the first real
 // layout has placed the slides.
 type carouselSizeState struct {
@@ -144,14 +133,14 @@ func Carousel(c *ui.Context, items []CarouselItem, opts ...CarouselOptions) ui.E
 
 	index := o.Index
 	if index == nil {
-		index = ui.Local(root, carouselIndexKey{}, func() int { return 0 })
+		index = localInt(root, animChan0)
 	}
-	size := ui.Local(root, carouselSizeKey{}, func() carouselSizeState { return carouselSizeState{} })
-	drag := ui.Local(root, carouselDragKey{}, func() carouselDragState { return carouselDragState{} })
+	size := localPtr(root, animChan1, func() *carouselSizeState { return &carouselSizeState{} })
+	drag := localPtr(root, animChan2, func() *carouselDragState { return &carouselDragState{} })
 	// -1 rather than the initial index: a carousel the caller starts on a
 	// later slide lines that slide up as it first lays out.
-	lastIndex := ui.Local(root, carouselLastKey{}, func() int { return -1 })
-	scrollState := ui.Local(root, carouselScrollKey{}, func() ui.ScrollState { return ui.ScrollState{} })
+	lastIndex := localNegInt(root, animChan3)
+	scrollState := localScrollState(root, animChan4)
 
 	if len(items) == 0 {
 		*drag = carouselDragState{}
@@ -209,11 +198,20 @@ func Carousel(c *ui.Context, items []CarouselItem, opts ...CarouselOptions) ui.E
 		}
 	})
 
-	radius := th.Shapes.Radius(tokens.ShapeLarge)
+	radius := th.Shapes.Radius(tokens.ShapeExtraLarge)
 	base := SurfaceColorForElevation(th, tokens.Level1)
+	hairline := resolveHairlineColor(th, ui.Color{})
 	ink := cs.OnSurface
 	if disabled {
 		ink = cs.OnSurface.Alpha(float32(tokens.DisabledContentOpacity))
+	}
+	scrimBase := cs.Scrim
+	if scrimBase.A == 0 {
+		scrimBase = ui.RGB(0, 0, 0)
+	}
+	peekVeil := scrimBase.Alpha(0.05)
+	if th.Dark {
+		peekVeil = scrimBase.Alpha(0.12)
 	}
 
 	var stackEls [12]ui.Element
@@ -249,19 +247,31 @@ func Carousel(c *ui.Context, items []CarouselItem, opts ...CarouselOptions) ui.E
 					}
 					target := carouselItemWidth(o.Layout, dist, size.viewW)
 
-					c.Key(carouselItemKey{i: i})
+					c.Key(i)
 					el := ui.Box(c).
 						DimDisabled(false).
 						Focusable().
+						FocusRing(false).
 						Disabled(disabled).
 						Shrink(0).
 						Height(height).
+						Radius(radius).
 						ClipInset(0, 0, 0, 0, radius).
 						Label(item.Label).
 						Role(ui.RoleButton).
 						AccessSelected(i == *index).
 						Background(base).
 						TextColor(ink)
+					if !disabled {
+						if hairline.A > 0 {
+							el.Border(1, hairline)
+						}
+						if drag.active {
+							el.Cursor(ui.CursorGrabbing)
+						} else {
+							el.Cursor(ui.CursorGrab)
+						}
+					}
 					itemEls[i] = el
 					idx := i
 					el.HandleInput(func(ev ui.InputEvent) bool {
@@ -318,25 +328,39 @@ func Carousel(c *ui.Context, items []CarouselItem, opts ...CarouselOptions) ui.E
 					}
 
 					widthTarget := target
-					width := animateValue(el, carouselWidthKey{}, widthTarget, th.Animation(motion.DefaultSpatial), reduce || jump)
+					width := animateValue(el, animChan0, widthTarget, th.Animation(motion.DefaultSpatial), reduce || jump)
 					el.Width(width)
 
 					el.Children(func() {
 						if item.Content != nil {
 							if content := item.Content(); content.Valid() {
 								content.Fill()
-								return
 							}
+						} else {
+							caption := ui.Column(c).FillWidth().FillHeight().
+								Justify(ui.Center).AlignItems(ui.Center).Padding(16)
+							caption.Children(func() {
+								txt := ui.Text(c, item.Label)
+								applyTypeStyleWithTheme(th, txt, tokens.TitleMedium)
+								txt.TextColor(ink)
+							})
 						}
-						caption := ui.Column(c).FillWidth().FillHeight().
-							Justify(ui.Center).AlignItems(ui.Center).Padding(16)
-						caption.Children(func() {
-							txt := ui.Text(c, item.Label)
-							applyTypeStyleWithTheme(th, txt, tokens.TitleMedium)
-							txt.TextColor(ink)
-						})
+						if !disabled && i != *index && o.Layout != CarouselUncontained {
+							ui.Box(c).Absolute().Left(0).Top(0).Right(0).Bottom(0).
+								Background(peekVeil).PassThrough()
+						}
 					})
-					attachRippleWithContext(c, th, el, StateLayerOptions{Color: ink, Radius: radius, Disabled: disabled})
+					borderInset := float32(0)
+					if !disabled && hairline.A > 0 {
+						borderInset = 1
+					}
+					attachRippleWithContext(c, th, el, StateLayerOptions{
+						Color:          ink,
+						Radius:         radius,
+						BorderInset:    borderInset,
+						FocusHaloColor: cs.Surface,
+						Disabled:       disabled,
+					})
 					if el.Clicked() && !disabled {
 						pressed = i
 					}

@@ -68,12 +68,6 @@ const (
 
 type listRowKey struct{ i int }
 
-type listTopRadiusKey struct{}
-
-type listBottomRadiusKey struct{}
-
-type listSelectKey struct{}
-
 // listTrailingKey gives the trailing slot a stable container identity, so a
 // Meta text appearing or disappearing never re-keys the control inside it.
 type listTrailingKey struct{}
@@ -267,11 +261,21 @@ func listRow(c *ui.Context, th *Theme, st listStyle, item *ListItem, i, n int, o
 			topTarget, bottomTarget = target[0], target[2]
 		}
 		pressed := interactive && !disabled && row.Pressed()
-		if selected || pressed {
+		cornerSpec := motion.DefaultSpatial
+		switch {
+		case selected && pressed:
+			// Tactile micro-tighten when re-pressing an already-selected row.
+			r := max(st.large-4, st.small)
+			topTarget, bottomTarget = r, r
+			cornerSpec = motion.FastSpatial
+		case pressed:
+			topTarget, bottomTarget = st.large, st.large
+			cornerSpec = motion.FastSpatial
+		case selected:
 			topTarget, bottomTarget = st.large, st.large
 		}
-		topR := animateWithTheme(row, th, listTopRadiusKey{}, topTarget, motion.DefaultSpatial)
-		bottomR := animateWithTheme(row, th, listBottomRadiusKey{}, bottomTarget, motion.DefaultSpatial)
+		topR := max(animateWithTheme(row, th, animChan0, topTarget, cornerSpec), 0)
+		bottomR := max(animateWithTheme(row, th, animChan1, bottomTarget, cornerSpec), 0)
 		radii = [4]float32{topR, topR, bottomR, bottomR}
 		row.Radius(topR, topR, bottomR, bottomR)
 	}
@@ -281,17 +285,17 @@ func listRow(c *ui.Context, th *Theme, st listStyle, item *ListItem, i, n int, o
 		if selected {
 			selectedT = 1
 		}
-		selectedT = clampF32(animateWithTheme(row, th, listSelectKey{}, selectedT, motion.DefaultEffects), 0, 1)
+		selectedT = clampF32(animateWithTheme(row, th, animChan2, selectedT, motion.DefaultEffects), 0, 1)
 	}
 	bg := st.base
 	if st.selectedBg.A > 0 && selectedT > 0.001 {
-		bg = st.base.Mix(st.selectedBg, selectedT)
+		bg = st.base.MixOklab(st.selectedBg, selectedT)
 	}
 	content := st.content
 	supporting := st.supporting
-	if selected {
-		content = st.selectedContent
-		supporting = st.selectedContent
+	if selectedT > 0.001 {
+		content = st.content.MixOklab(st.selectedContent, selectedT)
+		supporting = st.supporting.MixOklab(st.selectedContent.Alpha(0.78), selectedT)
 	}
 	if disabled {
 		bg = st.disabledBg
@@ -299,12 +303,20 @@ func listRow(c *ui.Context, th *Theme, st listStyle, item *ListItem, i, n int, o
 		supporting = st.disabledContent
 	}
 	row.Background(bg).TextColor(content)
+	borderInset := float32(0)
+	if o.Segmented && !disabled && !selected && th.Dark {
+		if hl := resolveHairlineColor(th, ui.Color{}); hl.A > 0 {
+			row.Border(1, hl)
+			borderInset = 1
+		}
+	}
 	if interactive {
 		attachRippleWithContext(c, th, row, StateLayerOptions{
-			Color:    content,
-			Radii:    radii,
-			HasRadii: true,
-			Disabled: disabled,
+			Color:       content,
+			Radii:       radii,
+			HasRadii:    true,
+			BorderInset: borderInset,
+			Disabled:    disabled,
 		})
 	}
 
@@ -325,7 +337,7 @@ func listRow(c *ui.Context, th *Theme, st listStyle, item *ListItem, i, n int, o
 			}
 			if item.Headline != "" {
 				h := ui.Text(c, item.Headline).SingleLine()
-				applyTypeStyleWithTheme(th, h, st.headlineRole)
+				applyTypeStyleWithTheme(th, h, st.headlineRole, selected && !disabled)
 				h.TextColor(content)
 			}
 			if item.SupportingText != "" {

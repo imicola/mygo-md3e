@@ -225,28 +225,45 @@ func Pagination(c *ui.Context, page *int, totalPages int, opts ...PaginationOpti
 			el.Current(ui.CurrentPage)
 		}
 
-		pal := paginationPagePalette(th, o.Variant, active, disabledAll)
-		el.TextColor(pal.content)
-		if pal.container.A > 0 {
-			el.Background(pal.container)
+		var container, content, border ui.Color
+		if !disabledAll {
+			selT := clampF32(animateEffect(c, el, th, animChan0, boolFloat(active), motion.FastEffects), 0, 1)
+			offPal := paginationPagePalette(th, o.Variant, false, false)
+			onPal := paginationPagePalette(th, o.Variant, true, false)
+			container = mixOptionalColor(offPal.container, onPal.container, selT)
+			content = offPal.content.MixOklab(onPal.content, selT)
+			border = mixOptionalColor(offPal.border, onPal.border, selT)
+		} else {
+			pal := paginationPagePalette(th, o.Variant, active, true)
+			container, content, border = pal.container, pal.content, pal.border
 		}
-		if pal.border.A > 0 {
-			el.Border(1, pal.border)
+		if border.A == 0 && active && o.Variant == ButtonElevated && !disabledAll && th.Dark {
+			border = resolveHairlineColor(th, ui.Color{})
+		}
+		el.TextColor(content)
+		if container.A > 0 {
+			el.Background(container)
+		}
+		if border.A > 0 {
+			el.Border(1, border)
+		}
+		if active && o.Variant == ButtonElevated && !disabledAll {
+			ApplyElevationShadows(th, el, tokens.Level1)
 		}
 
 		targetR := pm.btnH / 2
 		if !disabledAll && el.Pressed() {
 			targetR = pm.pressedR
 		}
-		radius := animateWithTheme(el, th, paginationCornerKey{}, targetR, motion.FastSpatial)
+		radius := max(animateWithTheme(el, th, paginationCornerKey{}, targetR, motion.FastSpatial), 0)
 		el.Radius(radius)
 
 		borderInset := float32(0)
-		if pal.border.A > 0 {
+		if border.A > 0 {
 			borderInset = 1
 		}
 		attachRippleWithContext(c, th, el, StateLayerOptions{
-			Color:       pal.content,
+			Color:       content,
 			Radius:      radius,
 			BorderInset: borderInset,
 			Disabled:    disabledAll,
@@ -256,7 +273,7 @@ func Pagination(c *ui.Context, page *int, totalPages int, opts ...PaginationOpti
 			txt := ui.Text(c, pageText).NoWrap()
 			applyTypeStyleWithTheme(th, txt, pm.typeRole, active)
 			TabularNums(txt)
-			txt.TextColor(pal.content)
+			txt.TextColor(content)
 		})
 
 		if !disabledAll && el.Clicked() {
@@ -266,7 +283,7 @@ func Pagination(c *ui.Context, page *int, totalPages int, opts ...PaginationOpti
 	}
 
 	buildEllipsis := func(end bool) {
-		ink := cs.OnSurfaceVariant
+		ink := cs.OnSurfaceVariant.Alpha(0.65)
 		if disabledAll {
 			ink = cs.OnSurface.Alpha(float32(tokens.DisabledContentOpacity))
 		}
@@ -355,13 +372,14 @@ func drawPaginationFirstIcon(p *ui.Painter, r ui.Rect, ink ui.Color) {
 	}
 	barW := max(float32(1.5), r.W*0.09)
 	barH := r.H * 0.5
-	barX := r.X + r.W*0.22
+	barX := r.X + r.W*0.20
 	barY := r.Y + (r.H-barH)/2
 	p.Fill(ui.Rect{X: barX, Y: barY, W: barW, H: barH}, ink, barW/2)
+	// Keep the chevron box square (full r.H) so mdicon does not shrink height to 84%.
 	mdicon.ChevronLeft.Draw(p, ui.Rect{
-		X: r.X + r.W*0.16,
+		X: r.X + r.W*0.10,
 		Y: r.Y,
-		W: r.W * 0.84,
+		W: r.W,
 		H: r.H,
 	}, ink)
 }
@@ -372,13 +390,13 @@ func drawPaginationLastIcon(p *ui.Painter, r ui.Rect, ink ui.Color) {
 	}
 	barW := max(float32(1.5), r.W*0.09)
 	barH := r.H * 0.5
-	barX := r.X + r.W*0.78 - barW
+	barX := r.X + r.W*0.80 - barW
 	barY := r.Y + (r.H-barH)/2
 	p.Fill(ui.Rect{X: barX, Y: barY, W: barW, H: barH}, ink, barW/2)
 	mdicon.ChevronRight.Draw(p, ui.Rect{
-		X: r.X,
+		X: r.X - r.W*0.10,
 		Y: r.Y,
-		W: r.W * 0.84,
+		W: r.W,
 		H: r.H,
 	}, ink)
 }

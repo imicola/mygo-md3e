@@ -80,15 +80,6 @@ const (
 	floatingToolbarFabGap  = 12
 )
 
-// toolbarLengthKey is the AnimateTo channel of a collapsed toolbar's length.
-type toolbarLengthKey struct{}
-
-// toolbarScaleKey is the AnimateTo channel of a toolbar's hidden scale.
-type toolbarScaleKey struct{}
-
-// toolbarFadeKey is the AnimateTo channel of a toolbar's hidden opacity.
-type toolbarFadeKey struct{}
-
 // FloatingToolbar builds a Material Design 3 Expressive floating toolbar: an
 // elevated pill that gathers related actions, horizontal (64 DIP high) or
 // vertical (64 DIP wide), in the standard raised surface or the vibrant
@@ -177,18 +168,23 @@ func floatingToolbarBar(c *ui.Context, items []FloatingToolbarItem, o FloatingTo
 		Orientation(toolbarOrientation(o.Orientation)).
 		FocusGroup(toolbarOrientation(o.Orientation)).
 		Label(label)
+	if o.Tone == ToolbarStandard && th.Dark {
+		bar.Border(1, resolveHairlineColor(th, ui.Color{}))
+	}
 	ApplyElevationShadows(th, bar, tokens.Level3)
 
+	reduce := th.ReduceMotion || c.Preferences().ReduceMotion
 	shown := len(items)
 	if !expanded {
 		shown = min(shown, 1)
 	}
 	length := float32(floatingToolbarPadding*2 + shown*floatingToolbarItem + max(shown-1, 0)*floatingToolbarGap)
-	animated := animateWithTheme(bar, th, toolbarLengthKey{}, length, motion.DefaultSpatial)
+	animated := animateWithTheme(bar, th, animChan0, length, motion.DefaultSpatial)
+	pillLen := max(animated, float32(floatingToolbarSide))
 	if o.Orientation == ToolbarVertical {
-		bar.Height(animated)
+		bar.Height(pillLen)
 	} else {
-		bar.Width(animated)
+		bar.Width(pillLen)
 	}
 
 	if o.Visible != nil {
@@ -196,9 +192,9 @@ func floatingToolbarBar(c *ui.Context, items []FloatingToolbarItem, o FloatingTo
 		if !visible {
 			scaleTarget, fadeTarget = 0.6, 0
 		}
-		scale := animateWithTheme(bar, th, toolbarScaleKey{}, scaleTarget, motion.FastSpatial)
-		fade := animateWithTheme(bar, th, toolbarFadeKey{}, fadeTarget, motion.FastEffects)
-		bar.Scale(scale, scale).Opacity(fade)
+		scale := animateWithTheme(bar, th, animChan1, scaleTarget, motion.FastSpatial)
+		fade := animateWithTheme(bar, th, animChan2, fadeTarget, motion.FastEffects)
+		bar.Scale(scale, scale).Opacity(clampF32(fade, 0, 1))
 		if !visible {
 			bar.Disabled(true)
 		}
@@ -206,11 +202,10 @@ func floatingToolbarBar(c *ui.Context, items []FloatingToolbarItem, o FloatingTo
 
 	bar.Children(func() {
 		for i := range items {
-			// Only build the items the animated pill currently has room for:
-			// the ones past its clipped edge must leave the focus order and
-			// the access tree while the toolbar is collapsed.
+			// Always keep item 0 so collapse spring undershoot never blinks out
+			// the anchor action; only drop trailing items past the animated pill.
 			slotEnd := float32(floatingToolbarPadding*2 + (i+1)*floatingToolbarItem + i*floatingToolbarGap)
-			if slotEnd > animated+0.5 {
+			if i > 0 && slotEnd > animated+0.5 {
 				continue
 			}
 			item := &items[i]
@@ -225,10 +220,23 @@ func floatingToolbarBar(c *ui.Context, items []FloatingToolbarItem, o FloatingTo
 			if disabled {
 				itemInk = ink.Alpha(float32(tokens.DisabledContentOpacity))
 			}
-			btn.Disabled(item.Disabled).TextColor(itemInk).Radius(floatingToolbarItem / 2)
-			attachRippleWithTheme(th, btn, StateLayerOptions{
+			radTarget := float32(floatingToolbarItem / 2)
+			if !disabled && btn.Pressed() {
+				radTarget = 12
+			}
+			rad := max(animateWithTheme(btn, th, animChan0, radTarget, motion.FastSpatial), 0)
+			btn.Disabled(item.Disabled).TextColor(itemInk).Radius(rad)
+			if i > 0 && !reduce {
+				prevEnd := float32(floatingToolbarPadding*2 + i*floatingToolbarItem + (i-1)*floatingToolbarGap)
+				reveal := clampF32((animated-prevEnd)/float32(floatingToolbarItem), 0, 1)
+				if reveal < 0.999 {
+					s := 0.85 + 0.15*reveal
+					btn.Opacity(reveal).Scale(s, s)
+				}
+			}
+			attachRippleWithContext(c, th, btn, StateLayerOptions{
 				Color:    itemInk,
-				Radius:   floatingToolbarItem / 2,
+				Radius:   rad,
 				Disabled: disabled,
 			})
 			clicked := btn.Clicked()

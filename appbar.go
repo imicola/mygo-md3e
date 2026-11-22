@@ -1,9 +1,12 @@
 package md3e
 
 import (
+	"time"
+
 	"github.com/egoist/mygo/ui"
 
 	"github.com/imicola/mygo-md3e/internal/mdicon"
+	"github.com/imicola/mygo-md3e/motion"
 	"github.com/imicola/mygo-md3e/tokens"
 )
 
@@ -98,8 +101,14 @@ func TopAppBar(c *ui.Context, title string, opts ...TopAppBarOptions) ui.Element
 	switch o.Variant {
 	case TopAppBarMedium:
 		expandedHeight = topAppBarMediumHeight
+		if o.Subtitle != "" {
+			expandedHeight += 24
+		}
 	case TopAppBarLarge:
 		expandedHeight = topAppBarLargeHeight
+		if o.Subtitle != "" {
+			expandedHeight += 24
+		}
 	}
 	height := expandedHeight + (topAppBarCollapsedHeight-expandedHeight)*p
 
@@ -107,7 +116,7 @@ func TopAppBar(c *ui.Context, title string, opts ...TopAppBarOptions) ui.Element
 	if collapsedBG.A == 0 {
 		collapsedBG = SurfaceColorForElevation(th, tokens.Level2)
 	}
-	background := cs.Surface.Mix(collapsedBG, p)
+	background := cs.Surface.MixOklab(collapsedBG, p)
 
 	bar := ui.Column(c).
 		Height(height).
@@ -116,6 +125,15 @@ func TopAppBar(c *ui.Context, title string, opts ...TopAppBarOptions) ui.Element
 		TextColor(cs.OnSurface).
 		Role(ui.RoleRegion).
 		Label(labelOr(o.Label, title))
+	if p > 0.01 {
+		hairline := resolveHairlineColor(th, ui.Color{}).Alpha(p)
+		bar.DrawOver(func(p *ui.Painter, r ui.Rect) {
+			if !isPositiveFiniteF32(r.W) || !isPositiveFiniteF32(r.H) {
+				return
+			}
+			p.Fill(ui.Rect{X: r.X, Y: r.Y + r.H - 1, W: r.W, H: 1}, hairline, 0)
+		})
+	}
 
 	bigRole := tokens.HeadlineMedium
 	switch o.Variant {
@@ -131,7 +149,14 @@ func TopAppBar(c *ui.Context, title string, opts ...TopAppBarOptions) ui.Element
 	titleLine := (float32(bigStyle.LineHeight) + (float32(smallStyle.LineHeight)-float32(bigStyle.LineHeight))*p) * textScale
 	titleTracking := (float32(bigStyle.Tracking) + (float32(smallStyle.Tracking)-float32(bigStyle.Tracking))*p) * textScale
 
-	inlineTitle := o.Variant == TopAppBarSmall || o.Variant == TopAppBarCenterAligned || p >= 0.999
+	alwaysInline := o.Variant == TopAppBarSmall || o.Variant == TopAppBarCenterAligned
+	showInline := alwaysInline || p >= 0.5
+	showExpanded := !alwaysInline && p < 0.92
+	inlineAlpha := float32(1)
+	if !alwaysInline {
+		inlineAlpha = clampF32((p-0.5)/0.4, 0, 1)
+	}
+	expandedAlpha := clampF32(1-(p-0.08)/0.55, 0, 1)
 	centered := o.Variant == TopAppBarCenterAligned
 
 	bar.Children(func() {
@@ -149,7 +174,7 @@ func TopAppBar(c *ui.Context, title string, opts ...TopAppBarOptions) ui.Element
 				}
 			}
 			switch {
-			case centered && inlineTitle:
+			case centered && showInline:
 				// Symmetric side slots keep the title on the bar's geometric
 				// center, however many navigation or trailing icons there are.
 				side := float32(0)
@@ -162,54 +187,64 @@ func TopAppBar(c *ui.Context, title string, opts ...TopAppBarOptions) ui.Element
 				lead := ui.Row(c).Width(side).Shrink(0).AlignItems(ui.Center)
 				lead.Children(func() {
 					if o.NavigationIcon != nil {
-						appBarIconSide(c, th, labelOr(o.NavigationLabel, "Back"), o.NavigationIcon, o.OnNavigation, false)
+						appBarIconSide(c, th, labelOr(o.NavigationLabel, "Back"), o.NavigationIcon, o.OnNavigation, false, false)
 					}
 				})
-				slot := ui.Column(c).Grow(1).Justify(ui.Center).AlignItems(ui.Center)
+				slot := ui.Column(c).Grow(1).Shrink(1).MinWidth(0).Justify(ui.Center).AlignItems(ui.Center)
 				slot.Children(inlineTitleSubtitle)
 				trail := ui.Row(c).Width(side).Shrink(0).Justify(ui.End).AlignItems(ui.Center)
 				trail.Children(func() {
 					for i := range o.Actions {
 						action := &o.Actions[i]
-						appBarIconSide(c, th, action.Label, action.Icon, action.OnClick, false)
+						appBarIconSide(c, th, action.Label, action.Icon, action.OnClick, false, true)
 					}
 				})
-			case inlineTitle:
+			case showInline:
 				if o.NavigationIcon != nil {
-					appBarIconSide(c, th, labelOr(o.NavigationLabel, "Back"), o.NavigationIcon, o.OnNavigation, false)
+					appBarIconSide(c, th, labelOr(o.NavigationLabel, "Back"), o.NavigationIcon, o.OnNavigation, false, false)
 				}
-				slot := ui.Column(c).Grow(1).Justify(ui.Center)
+				slot := ui.Column(c).Grow(1).Shrink(1).MinWidth(0).Justify(ui.Center)
 				if o.NavigationIcon == nil {
 					// The bar's own 4 DIP padding plus this lands the title
 					// 16 DIP from the edge, as MD3E specifies.
 					slot.PaddingStart(12)
 				}
+				if inlineAlpha < 1 {
+					slot.Opacity(inlineAlpha)
+				}
 				slot.Children(inlineTitleSubtitle)
 				for i := range o.Actions {
 					action := &o.Actions[i]
-					appBarIconSide(c, th, action.Label, action.Icon, action.OnClick, false)
+					appBarIconSide(c, th, action.Label, action.Icon, action.OnClick, false, true)
 				}
 			default:
 				if o.NavigationIcon != nil {
-					appBarIconSide(c, th, labelOr(o.NavigationLabel, "Back"), o.NavigationIcon, o.OnNavigation, false)
+					appBarIconSide(c, th, labelOr(o.NavigationLabel, "Back"), o.NavigationIcon, o.OnNavigation, false, false)
 				}
 				ui.Box(c).Grow(1)
 				for i := range o.Actions {
 					action := &o.Actions[i]
-					appBarIconSide(c, th, action.Label, action.Icon, action.OnClick, false)
+					appBarIconSide(c, th, action.Label, action.Icon, action.OnClick, false, true)
 				}
 			}
 		})
 
-		if !inlineTitle {
+		if showExpanded {
+			padBot := 16 * (1 - p)
 			area := ui.Column(c).
 				FillWidth().
 				Grow(1).
-				Padding(0, 0, 16, 0).
+				Padding(0, 0, padBot, 0).
 				PaddingStart(16).
 				PaddingEnd(16).
 				Justify(ui.End).
 				Clip()
+			if expandedAlpha < 1 {
+				area.Opacity(expandedAlpha)
+			}
+			if showInline {
+				area.AccessHidden(true)
+			}
 			area.Children(func() {
 				applyAppBarTitle(c, title, titleSize, titleLine, bigStyle.Weight, titleTracking, th.Font)
 				if o.Subtitle != "" {
@@ -223,7 +258,7 @@ func TopAppBar(c *ui.Context, title string, opts ...TopAppBarOptions) ui.Element
 
 // applyAppBarTitle adds the title text with the interpolated metrics.
 func applyAppBarTitle(c *ui.Context, title string, size, line float32, weight int, tracking float32, font string) {
-	t := ui.Text(c, title).NoWrap().Height(line).FontSize(size).FontWeight(weight).
+	t := ui.Text(c, title).SingleLine().MinWidth(0).Height(line).FontSize(size).FontWeight(weight).
 		FixedLineHeight(line).LetterSpacing(tracking)
 	if font != "" {
 		t.Font(font)
@@ -236,7 +271,7 @@ func applyAppBarSubtitle(c *ui.Context, subtitle string, th *Theme) {
 	style := th.TypeStyle(tokens.BodyMedium, false)
 	scale := th.EffectiveTextScale()
 	line := float32(style.LineHeight) * scale
-	t := ui.Text(c, subtitle).NoWrap().Height(line).
+	t := ui.Text(c, subtitle).SingleLine().MinWidth(0).Height(line).
 		FontSize(float32(style.Size) * scale).
 		FontWeight(style.Weight).
 		FixedLineHeight(line).
@@ -248,19 +283,35 @@ func applyAppBarSubtitle(c *ui.Context, subtitle string, th *Theme) {
 }
 
 // appBarIconSide builds a 48 DIP icon button of an app bar.
-func appBarIconSide(c *ui.Context, th *Theme, label string, icon IconDraw, onClick func(), disabled bool) ui.Element {
+func appBarIconSide(c *ui.Context, th *Theme, label string, icon IconDraw, onClick func(), disabled, trailing bool) ui.Element {
+	return appBarIconButton(c, th, label, icon, onClick, disabled, trailing, true)
+}
+
+func appBarIconButton(c *ui.Context, th *Theme, label string, icon IconDraw, onClick func(), disabled, trailing, morphPress bool) ui.Element {
 	btn := ui.ButtonBase(c).
 		DimDisabled(false).
 		FocusRing(false).
 		Size(appBarIconSize, appBarIconSize).
+		Shrink(0).
 		Label(label)
 	disabled = disabled || btn.IsDisabled()
 	ink := th.Colors.OnSurface
-	if disabled {
-		ink = ink.Alpha(float32(tokens.DisabledContentOpacity))
+	if trailing && th.Colors.OnSurfaceVariant.A > 0 {
+		ink = th.Colors.OnSurfaceVariant
 	}
-	btn.Disabled(disabled).TextColor(ink).Radius(appBarIconSize / 2)
-	attachRippleWithTheme(th, btn, StateLayerOptions{Color: ink, Radius: appBarIconSize / 2, Disabled: disabled})
+	if disabled {
+		ink = th.Colors.OnSurface.Alpha(float32(tokens.DisabledContentOpacity))
+	}
+	rad := float32(appBarIconSize / 2)
+	if morphPress {
+		radTarget := rad
+		if !disabled && btn.Pressed() {
+			radTarget = 12
+		}
+		rad = max(animateWithTheme(btn, th, animChan0, radTarget, motion.FastSpatial), 0)
+	}
+	btn.Disabled(disabled).TextColor(ink).Radius(rad)
+	attachRippleWithContext(c, th, btn, StateLayerOptions{Color: ink, Radius: rad, Disabled: disabled})
 	clicked := btn.Clicked()
 	btn.Children(func() {
 		drawIconBox(c, icon, 24, ink)
@@ -360,14 +411,62 @@ func SearchAppBar(c *ui.Context, query *string, opts ...SearchAppBarOptions) ui.
 		Label(fieldLabel)
 	disabled := o.Disabled || bar.IsDisabled()
 	fieldInk := ink
+	placeholderInk := cs.OnSurfaceVariant
+	if placeholderInk.A == 0 {
+		placeholderInk = ink.Alpha(0.7)
+	}
+	clearInk := cs.OnSurfaceVariant
+	if clearInk.A == 0 {
+		clearInk = ink
+	}
 	if disabled {
 		fieldInk = ink.Alpha(float32(tokens.DisabledContentOpacity))
+		placeholderInk = fieldInk
+		clearInk = fieldInk
 	}
 	bar.TextColor(fieldInk)
-	ApplyElevationShadows(th, bar, tokens.Level2)
+	if !disabled {
+		ApplyElevationShadows(th, bar, tokens.Level2)
+	}
 	if o.Disabled {
 		bar.Disabled(true)
 	}
+
+	hoverSt := localHaloFade(bar, animChan0)
+	thReduce := th.ReduceMotion
+	hairline := resolveHairlineColor(th, ui.Color{})
+	focusCol := cs.Primary
+	darkMode := th.Dark
+	bar.DrawOver(func(p *ui.Painter, r ui.Rect) {
+		if !isPositiveFiniteF32(r.W) || !isPositiveFiniteF32(r.H) {
+			return
+		}
+		rad := r.H * 0.5
+		if !bar.Valid() {
+			if darkMode && !disabled && hairline.A > 0 {
+				p.Stroke(insetRect(r, 0.5), hairline, max(0, rad-0.5), 1)
+			}
+			return
+		}
+		focused := !disabled && bar.FocusWithin()
+		hovered := !disabled && !focused && bar.Hovered()
+		target := float32(0)
+		if hovered {
+			target = float32(tokens.StateHoverOpacity)
+		}
+		alpha, needFrame := hoverSt.step(target, p.Now(), thReduce || p.Preferences().ReduceMotion)
+		if needFrame && rectIntersects(r, p.Visible()) {
+			p.After(16 * time.Millisecond)
+		}
+		if alpha > 0.002 {
+			p.Fill(r, ink.Alpha(alpha), rad)
+		}
+		if focused && focusCol.A > 0 {
+			p.Stroke(insetRect(r, 1), focusCol, max(0, rad-1), 1.75)
+		} else if darkMode && !disabled && hairline.A > 0 {
+			p.Stroke(insetRect(r, 0.5), hairline, max(0, rad-0.5), 1)
+		}
+	})
 
 	bar.Children(func() {
 		if o.OnLeading != nil {
@@ -375,10 +474,11 @@ func SearchAppBar(c *ui.Context, query *string, opts ...SearchAppBarOptions) ui.
 				DimDisabled(false).
 				FocusRing(false).
 				Size(appBarIconSize, appBarIconSize).
+				Shrink(0).
 				Label(leadingLabel)
 			leadingDisabled := disabled || btn.IsDisabled()
-			btn.Disabled(o.Disabled).TextColor(fieldInk).Radius(appBarIconSize / 2)
-			attachRippleWithTheme(th, btn, StateLayerOptions{Color: fieldInk, Radius: appBarIconSize / 2, Disabled: leadingDisabled})
+			btn.Disabled(disabled).TextColor(fieldInk).Radius(appBarIconSize / 2)
+			attachRippleWithContext(c, th, btn, StateLayerOptions{Color: fieldInk, Radius: appBarIconSize / 2, Disabled: leadingDisabled})
 			clicked := btn.Clicked()
 			btn.Children(func() {
 				drawIconBox(c, leadingIcon, 24, fieldInk)
@@ -387,19 +487,22 @@ func SearchAppBar(c *ui.Context, query *string, opts ...SearchAppBarOptions) ui.
 				o.OnLeading()
 			}
 		} else {
-			ui.Box(c).Size(appBarIconSize, appBarIconSize).Center().Children(func() {
+			ui.Box(c).Size(appBarIconSize, appBarIconSize).Shrink(0).Center().Children(func() {
 				drawIconBox(c, leadingIcon, 24, fieldInk)
 			})
 		}
 
 		input := ui.TextInputBase(c.Key("search-query"), query).
 			DimDisabled(false).
+			FocusRing(false).
 			Grow(1).
+			MinWidth(0).
 			Label(fieldLabel).
 			Placeholder(placeholder).
+			PlaceholderColor(placeholderInk).
 			TextColor(fieldInk).
 			CaretColor(cs.Primary).
-			Disabled(o.Disabled)
+			Disabled(disabled)
 		applyTypeStyleWithTheme(th, input, tokens.BodyLarge, false)
 		if o.AutoFocus {
 			input.AutoFocus()
@@ -412,12 +515,13 @@ func SearchAppBar(c *ui.Context, query *string, opts ...SearchAppBarOptions) ui.
 				DimDisabled(false).
 				FocusRing(false).
 				Size(appBarIconSize, appBarIconSize).
+				Shrink(0).
 				Label("Clear search")
-			clear.Disabled(o.Disabled).TextColor(fieldInk).Radius(appBarIconSize / 2)
-			attachRippleWithTheme(th, clear, StateLayerOptions{Color: fieldInk, Radius: appBarIconSize / 2, Disabled: o.Disabled})
+			clear.Disabled(disabled).TextColor(clearInk).Radius(appBarIconSize / 2)
+			attachRippleWithContext(c, th, clear, StateLayerOptions{Color: clearInk, Radius: appBarIconSize / 2, Disabled: disabled})
 			clicked := clear.Clicked()
 			clear.Children(func() {
-				drawIconBox(c, mdicon.Clear.Draw, 24, fieldInk)
+				drawIconBox(c, mdicon.Close.Draw, 22, clearInk)
 			})
 			if clicked {
 				*query = ""
@@ -428,7 +532,7 @@ func SearchAppBar(c *ui.Context, query *string, opts ...SearchAppBarOptions) ui.
 		}
 		for i := range o.Trailing {
 			action := &o.Trailing[i]
-			appBarIconSide(c.Key(searchTrailingKey{index: i}), th, action.Label, action.Icon, action.OnClick, o.Disabled)
+			appBarIconButton(c.Key(searchTrailingKey{index: i}), th, action.Label, action.Icon, action.OnClick, disabled, true, false)
 		}
 
 		if changed && o.OnChanged != nil {

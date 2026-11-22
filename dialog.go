@@ -2,6 +2,7 @@ package md3e
 
 import (
 	"sync"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 
@@ -118,12 +119,6 @@ const (
 	alertDialogContentLimit = 260
 )
 
-// Locals and channels of an alert or full-screen dialog.
-type (
-	alertDialogStateKey struct{}
-	alertDialogShowKey  struct{}
-)
-
 // alertDialogState remembers a dialog through its exit animation, so the
 // overlay can fade out before it goes and gives the focus back.
 type alertDialogState struct {
@@ -163,7 +158,7 @@ func AlertDialog(c *ui.Context, open *bool, opts ...AlertDialogOptions) ui.Eleme
 	}
 	th := CurrentTheme(c)
 	cs := th.Colors
-	st := ui.Local(anchor, alertDialogStateKey{}, func() alertDialogState { return alertDialogState{} })
+	st := localPtr(anchor, animChan2, func() *alertDialogState { return &alertDialogState{} })
 	reduce := th.ReduceMotion || c.Preferences().ReduceMotion
 
 	if !*open && !st.shown {
@@ -176,15 +171,18 @@ func AlertDialog(c *ui.Context, open *bool, opts ...AlertDialogOptions) ui.Eleme
 	if !*open {
 		target = 0
 	}
-	var show float32
+	var show, scrimT float32
 	switch {
 	case *open && !st.appeared:
 		st.appeared = true
 		if reduce {
-			show = anchor.Jump(alertDialogShowKey{}, 1)
+			show = anchor.Jump(animChan1, 1)
+			scrimT = anchor.Jump(animChan0, 1)
 		} else {
-			anchor.Jump(alertDialogShowKey{}, 0)
+			anchor.Jump(animChan1, 0)
+			anchor.Jump(animChan0, 0)
 			show = 0
+			scrimT = 0
 			c.Invalidate()
 		}
 	case !*open && reduce:
@@ -192,14 +190,16 @@ func AlertDialog(c *ui.Context, open *bool, opts ...AlertDialogOptions) ui.Eleme
 		c.Invalidate()
 		return anchor
 	case !*open:
-		show = animateValue(anchor, alertDialogShowKey{}, 0, th.Animation(motion.FastSpatial), false)
-		if anchor.Arrived(alertDialogShowKey{}) || (anchor.Settled(alertDialogShowKey{}) && show <= 0.001) {
+		show = animateValue(anchor, animChan1, 0, th.Animation(motion.FastEffects), false)
+		scrimT = animateValue(anchor, animChan0, 0, th.Animation(motion.FastEffects), false)
+		if anchor.Arrived(animChan1) || (anchor.Settled(animChan1) && show <= 0.001) {
 			st.shown, st.appeared = false, false
 			c.Invalidate()
 			return anchor
 		}
 	default:
-		show = animateValue(anchor, alertDialogShowKey{}, target, th.Animation(motion.FastSpatial), false)
+		show = animateValue(anchor, animChan1, target, th.Animation(motion.FastSpatial), false)
+		scrimT = animateValue(anchor, animChan0, 1, th.Animation(motion.FastEffects), false)
 	}
 
 	exiting := !*open
@@ -220,13 +220,16 @@ func AlertDialog(c *ui.Context, open *bool, opts ...AlertDialogOptions) ui.Eleme
 	ui.Overlay(c, func() {
 		back := ui.Row(c).Absolute().Left(0).Top(0).Right(0).Bottom(0).
 			Justify(ui.Center).AlignItems(ui.Center).
-			Background(scrim.Alpha(0.32 * clampF32(show, 0, 1)))
+			Background(scrim.Alpha(0.32 * clampF32(scrimT, 0, 1)))
 		if !exiting {
 			back.Modal()
 		}
 		back.IgnoreInput(exiting).AccessHidden(exiting)
 		withExitingOverlay(c, exiting, func() {
 			back.Children(func() {
+				scaleT := clampF32(show, 0, 1.06)
+				panelScale := 0.92 + 0.08*scaleT
+				panelY := (1 - scaleT) * 10
 				panel := ui.Column(c).
 					Width(alertDialogWidth).
 					MaxWidthPercent(92).
@@ -237,8 +240,12 @@ func AlertDialog(c *ui.Context, open *bool, opts ...AlertDialogOptions) ui.Eleme
 					TextColor(cs.OnSurface).
 					Role(ui.RoleAlertDialog).
 					Label(labelOr(o.Label, o.Headline)).
-					Opacity(clampF32(show, 0, 1)).
-					Scale(0.9+0.1*clampF32(show, 0, 1), 0.9+0.1*clampF32(show, 0, 1))
+					Opacity(clampF32(scrimT, 0, 1)).
+					Scale(panelScale, panelScale).
+					Translate(0, panelY)
+				if hl := resolveHairlineColor(th, ui.Color{}); hl.A > 0 {
+					panel.Border(1, hl)
+				}
 				ApplyElevationShadows(th, panel, tokens.Level3)
 				// A press on the panel's own surface must not reach the scrim.
 				panel.Clicked()
@@ -254,6 +261,9 @@ func AlertDialog(c *ui.Context, open *bool, opts ...AlertDialogOptions) ui.Eleme
 					if o.Headline != "" {
 						title := ui.Text(c, o.Headline)
 						title.TextColor(cs.OnSurface)
+						if o.Icon != nil {
+							title.FillWidth().TextAlign(ui.Center)
+						}
 						applyTypeStyleWithTheme(th, title, tokens.HeadlineSmall)
 					}
 					if o.SupportingText != "" {
@@ -262,15 +272,22 @@ func AlertDialog(c *ui.Context, open *bool, opts ...AlertDialogOptions) ui.Eleme
 						applyTypeStyleWithTheme(th, body, tokens.BodyMedium)
 					}
 					if o.Content != nil {
-						scroll := ui.Scroll(c).MaxHeight(alertDialogContentLimit).Scrollbars(false)
-						scroll.Children(func() {
-							if content := o.Content(); content.Valid() {
-								content.FillWidth()
-							}
+						hl := resolveHairlineColor(th, ui.Color{})
+						scrollWrap := ui.Column(c).FillWidth()
+						if hl.A > 0 {
+							scrollWrap.Border(1, hl).BorderWidth(1, 0, 1, 0).PaddingY(8)
+						}
+						scrollWrap.Children(func() {
+							scroll := ui.Scroll(c).MaxHeight(alertDialogContentLimit).Scrollbars(false)
+							scroll.Children(func() {
+								if content := o.Content(); content.Valid() {
+									content.FillWidth()
+								}
+							})
 						})
 					}
 					if o.Dismiss != nil || o.Confirm != nil {
-						actions := ui.Row(c).FillWidth().Justify(ui.End).Gap(8)
+						actions := ui.Row(c).FillWidth().Justify(ui.End).Gap(8).Margin(8, 0, 0, 0)
 						actions.Children(func() {
 							if o.Dismiss != nil && o.Dismiss.Label != "" {
 								dismiss := Button(c, o.Dismiss.Label, ButtonOptions{Variant: ButtonText})
@@ -357,15 +374,22 @@ func FullScreenDialog(c *ui.Context, open *bool, opts ...FullScreenDialogOptions
 	}
 	dismissed := false
 
+	reduce := th.ReduceMotion || c.Preferences().ReduceMotion
 	panel := ui.DialogBase(c, open, func(backdrop, panel ui.Element) {
 		backdrop.Background(cs.Scrim.Alpha(0.32))
 		panel.FillWidth().FillHeight().Column().
 			Background(cs.Surface).TextColor(cs.OnSurface).
 			Role(ui.RoleDialog).
 			Label(labelOr(o.Label, o.Title))
+		if !reduce {
+			panel.Transition(ui.ElementTransition{
+				Duration: 180 * time.Millisecond,
+				Enter:    &ui.Motion{Opacity: 0, Y: 24},
+			})
+		}
 		panel.Children(func() {
 			bar := ui.Row(c).Height(fullScreenBarHeight).FillWidth().
-				PaddingX(4).AlignItems(ui.Center).Gap(4)
+				PaddingStart(4).PaddingEnd(12).AlignItems(ui.Center).Gap(4)
 			bar.Children(func() {
 				close := IconButton(c, closeLabel, mdicon.Close.Draw, IconButtonOptions{Size: tokens.SizeS})
 				if close.Clicked() {

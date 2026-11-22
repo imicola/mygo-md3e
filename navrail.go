@@ -71,14 +71,9 @@ const (
 )
 
 type (
-	navRailExpandKey   struct{}
-	navRailExpandedKey struct{}
 	navRailScrollKey   struct{}
 	navRailListKey     struct{}
 	navRailIndStateKey struct{}
-	navRailIndYKey     struct{}
-	navRailIndHKey     struct{}
-	navRailIndAlphaKey struct{}
 	navRailItemKey     struct{ i int }
 )
 
@@ -132,10 +127,17 @@ func NavigationRail(c *ui.Context, destinations []NavigationDestination, opts ..
 		Role(ui.RoleNavigation).
 		FocusGroup(ui.Vertical).
 		Label(label)
+	if hl := resolveHairlineColor(th, ui.Color{}); hl.A > 0 {
+		if c.Direction() == ui.RightToLeft {
+			root.Border(1, hl).BorderWidth(0, 0, 0, 1)
+		} else {
+			root.Border(1, hl).BorderWidth(0, 1, 0, 0)
+		}
+	}
 	root.Disabled(o.Disabled)
 	expanded := o.Expanded
 	if expanded == nil {
-		expanded = ui.Local(root, navRailExpandedKey{}, func() bool { return false })
+		expanded = localBool(root, animChan1)
 	}
 	expandTarget := float32(0)
 	if *expanded {
@@ -147,7 +149,7 @@ func NavigationRail(c *ui.Context, destinations []NavigationDestination, opts ..
 	reduce := th.ReduceMotion || c.Preferences().ReduceMotion
 	rtl := c.Direction() == ui.RightToLeft
 	expandedW := resolveNavRailExpandedWidth(o.ExpandedWidth, th.Density)
-	expand := animateValue(root, navRailExpandKey{}, expandTarget, th.Animation(motion.DefaultSpatial), reduce)
+	expand := animateValue(root, animChan0, expandTarget, th.Animation(motion.DefaultSpatial), reduce)
 	railW := navRailCollapsedWidth + (expandedW-navRailCollapsedWidth)*expand
 	root.Width(railW)
 	itemW := max(0, railW-2*navRailPaddingX)
@@ -191,8 +193,8 @@ func NavigationRail(c *ui.Context, destinations []NavigationDestination, opts ..
 	if o.Selected != nil && *o.Selected >= 0 && *o.Selected < len(destinations) {
 		selIdx = *o.Selected
 	}
-	ind := ui.Local(listCol, navRailIndStateKey{}, func() navRailIndicatorState {
-		return navRailIndicatorState{}
+	ind := localPtr(listCol, navRailIndStateKey{}, func() *navRailIndicatorState {
+		return &navRailIndicatorState{}
 	})
 	ind.paintedListValid = false
 
@@ -213,19 +215,19 @@ func NavigationRail(c *ui.Context, destinations []NavigationDestination, opts ..
 		if !ind.set || !ind.hasSel {
 			// First frame or appearing from deselected (-1): snap coordinates
 			// immediately so the indicator never flies in from y = 0.
-			ind.y = listCol.Jump(navRailIndYKey{}, targetY)
-			ind.h = listCol.Jump(navRailIndHKey{}, targetH)
+			ind.y = listCol.Jump(animChan0, targetY)
+			ind.h = listCol.Jump(animChan1, targetH)
 			if !ind.set {
-				ind.alpha = listCol.Jump(navRailIndAlphaKey{}, 1)
+				ind.alpha = listCol.Jump(animChan2, 1)
 			} else {
-				ind.alpha = animateValue(listCol, navRailIndAlphaKey{}, 1, th.Animation(motion.FastEffects), reduce)
+				ind.alpha = animateValue(listCol, animChan2, 1, th.Animation(motion.FastEffects), reduce)
 			}
 			ind.set = true
 			ind.hasSel = true
 		} else {
-			ind.y = animateValue(listCol, navRailIndYKey{}, targetY, th.Animation(motion.FastSpatial), reduce)
-			ind.h = animateValue(listCol, navRailIndHKey{}, targetH, th.Animation(motion.FastSpatial), reduce)
-			ind.alpha = animateValue(listCol, navRailIndAlphaKey{}, 1, th.Animation(motion.FastEffects), reduce)
+			ind.y = animateValue(listCol, animChan0, targetY, th.Animation(motion.FastSpatial), reduce)
+			ind.h = animateValue(listCol, animChan1, targetH, th.Animation(motion.FastSpatial), reduce)
+			ind.alpha = animateValue(listCol, animChan2, 1, th.Animation(motion.FastEffects), reduce)
 		}
 
 		if selEl.Valid() {
@@ -243,12 +245,12 @@ func NavigationRail(c *ui.Context, destinations []NavigationDestination, opts ..
 		}
 	} else {
 		if !ind.set {
-			ind.alpha = listCol.Jump(navRailIndAlphaKey{}, 0)
+			ind.alpha = listCol.Jump(animChan2, 0)
 			ind.set = true
 			ind.hasSel = false
 		} else {
 			ind.hasSel = false
-			ind.alpha = animateValue(listCol, navRailIndAlphaKey{}, 0, th.Animation(motion.FastEffects), reduce)
+			ind.alpha = animateValue(listCol, animChan2, 0, th.Animation(motion.FastEffects), reduce)
 		}
 	}
 
@@ -325,19 +327,24 @@ func navRailDestination(c *ui.Context, th *Theme, cs tokens.ColorScheme, dest *N
 	disabled := o.Disabled || dest.Disabled || el.IsDisabled()
 	selected := o.Selected != nil && *o.Selected == i
 
-	iconInk := cs.OnSurfaceVariant
-	labelInk := cs.OnSurfaceVariant
-	if selected {
-		iconInk = cs.OnSecondaryContainer
-		labelInk = cs.OnSecondaryContainer
-	}
+	selT := clampF32(animateEffect(c, el, th, animChan0, boolFloat(selected), motion.FastEffects), 0, 1)
+	iconInk := cs.OnSurfaceVariant.MixOklab(cs.OnSecondaryContainer, selT)
+	// Collapsed short labels rest below the pill on the rail surface (OnSurface);
+	// expanded long labels sit inside the SecondaryContainer pill (OnSecondaryContainer).
+	shortInk := cs.OnSurfaceVariant.MixOklab(cs.OnSurface, selT)
+	longInk := cs.OnSurfaceVariant.MixOklab(cs.OnSecondaryContainer, selT)
 	if disabled {
 		iconInk = cs.OnSurface.Alpha(float32(tokens.DisabledContentOpacity))
-		labelInk = iconInk
+		shortInk = iconInk
+		longInk = iconInk
 	}
 	el.Disabled(dest.Disabled).AccessSelected(selected)
 
 	t := clampF32(expand, 0, 1)
+	// Smooth crossfade that fades the short label cleanly after mid-expansion
+	// while bringing the long label in so endpoints never ghost each other.
+	shortAlpha := clampF32(1-(t-0.12)/0.56, 0, 1)
+	longAlpha := clampF32((t-0.30)/0.55, 0, 1)
 	rtl := c.Direction() == ui.RightToLeft
 	el.Row().AlignItems(ui.Center).Radius(navRailItemHeight / 2)
 
@@ -355,22 +362,22 @@ func navRailDestination(c *ui.Context, th *Theme, cs tokens.ColorScheme, dest *N
 		// slot so it stays beneath the icon as the item grows.
 		shortWrap := ui.Row(c).Width(navRailCollapsedItemW).Justify(ui.Center).
 			Attach(ui.AnchorTopStart, ui.AnchorTopStart).Start(0).Top(navRailLabelTop).
-			Clip().Opacity(1 - t)
+			Clip().Opacity(shortAlpha)
 		shortWrap.Children(func() {
 			short := ui.Text(c, dest.Label).SingleLine().MaxWidthPercent(100)
-			applyTypeStyleWithTheme(th, short, tokens.LabelSmall)
-			short.TextColor(labelInk)
+			applyTypeStyleWithTheme(th, short, tokens.LabelSmall, selected && !disabled)
+			short.TextColor(shortInk)
 		})
 		// Constrain the expanded label within [Start(52), itemW-12] so long
 		// titles ellipsize cleanly inside their cell.
 		longW := max(0, itemW-52-12)
 		longWrap := ui.Row(c).Width(longW).Clip().
 			Attach(ui.AnchorStart, ui.AnchorStart).Start(52).
-			Opacity(t)
+			Opacity(longAlpha)
 		longWrap.Children(func() {
 			long := ui.Text(c, dest.Label).SingleLine().MaxWidthPercent(100)
-			applyTypeStyleWithTheme(th, long, tokens.LabelLarge)
-			long.TextColor(labelInk)
+			applyTypeStyleWithTheme(th, long, tokens.LabelLarge, selected && !disabled)
+			long.TextColor(longInk)
 		})
 	})
 	if el.Clicked() && !disabled {

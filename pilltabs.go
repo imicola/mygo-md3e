@@ -56,15 +56,18 @@ type (
 	pillTabsIndWKey      struct{}
 	pillTabsScrollKey    struct{}
 	pillTabsTabKey       struct{ i int }
+	pillTabsTabMixKey    struct{}
 )
 
 type pillTabsIndicatorState struct {
-	x, w       float32
-	set        bool
-	builtRelX  float32
-	builtTabW  float32
-	builtListW float32
-	paintedTab ui.Rect
+	x, w           float32
+	set            bool
+	builtRelX      float32
+	builtTabW      float32
+	builtListW     float32
+	paintedListX   float32
+	paintedListW   float32
+	paintedTab     ui.Rect
 }
 
 type pillTabsMetrics struct {
@@ -137,10 +140,24 @@ func pillTabsPaletteOf(th *Theme, tone PillTabsTone, segmented, disabled bool) p
 			dotCol:       cs.Error,
 		}
 	case PillTabsToneSurface:
+		trough := cs.SurfaceContainer
+		capsule := cs.SurfaceContainerLowest
+		if th.Dark {
+			// In dark mode, keep the trough deeper than the active capsule so
+			// the selected segment reads as raised rather than sunken.
+			trough = cs.SurfaceContainerLowest
+			if trough.A == 0 {
+				trough = cs.SurfaceDim
+			}
+			capsule = cs.SurfaceContainerHigh
+			if capsule.A == 0 {
+				capsule = SurfaceColorForElevation(th, tokens.Level3)
+			}
+		}
 		pal = pillTabsPalette{
-			trough:       cs.SurfaceContainer,
+			trough:       trough,
 			troughBorder: resolveHairlineColor(th, ui.Color{}),
-			capsule:      cs.SurfaceContainerLowest,
+			capsule:      capsule,
 			capsuleEdge:  resolveHairlineColor(th, ui.Color{}),
 			activeInk:    cs.OnSurface,
 			inactiveInk:  cs.OnSurfaceVariant,
@@ -304,10 +321,8 @@ func buildPillTabs(c *ui.Context, items []TabItem, o PillTabsOptions, segmented 
 
 				on := *selected == i
 				itemDisabled := disabledAll || item.Disabled || tab.IsDisabled()
-				ink := pal.inactiveInk
-				if on {
-					ink = pal.activeInk
-				}
+				selMix := clampF32(animateValue(tab, pillTabsTabMixKey{}, boolFloat(on), th.Animation(motion.FastEffects), reduce), 0, 1)
+				ink := pal.inactiveInk.MixOklab(pal.activeInk, selMix)
 				if itemDisabled {
 					ink = disabledInk
 				}
@@ -331,10 +346,8 @@ func buildPillTabs(c *ui.Context, items []TabItem, o PillTabsOptions, segmented 
 						txt.TextColor(ink)
 					}
 					if item.Badge != "" {
-						bdgBg, bdgInk := pal.badgeBg, pal.badgeInk
-						if on {
-							bdgBg, bdgInk = pal.activeBdgBg, pal.activeBdgInk
-						}
+						bdgBg := pal.badgeBg.MixOklab(pal.activeBdgBg, selMix)
+						bdgInk := pal.badgeInk.MixOklab(pal.activeBdgInk, selMix)
 						if itemDisabled {
 							bdgBg = disabledContainer
 							bdgInk = disabledInk
@@ -354,9 +367,10 @@ func buildPillTabs(c *ui.Context, items []TabItem, o PillTabsOptions, segmented 
 				})
 
 				attachRippleWithContext(c, th, tab, StateLayerOptions{
-					Color:    ink,
-					Radius:   innerRadius,
-					Disabled: itemDisabled,
+					Color:     ink,
+					Radius:    innerRadius,
+					FocusRing: FocusRingInset,
+					Disabled:  itemDisabled,
 				})
 			}
 		})
@@ -451,12 +465,23 @@ func buildPillTabs(c *ui.Context, items []TabItem, o PillTabsOptions, segmented 
 	}
 
 	srv := c.Services()
+	builtRelX, builtTabW, builtListW := indicator.builtRelX, indicator.builtTabW, indicator.builtListW
 	if selTab.Valid() {
-		selTab.DrawOver(func(p *ui.Painter, tr ui.Rect) {
+		// Measure painted tab geometry inside Draw (not DrawOver) so the selected
+		// tab retains its StateLayer & Ripple, and compare against tabList's
+		// painted bounds which ran just prior to child painting.
+		selTab.Draw(func(p *ui.Painter, tr ui.Rect) {
 			if !selTab.Valid() || tr.W <= 0 || tr.H <= 0 {
 				return
 			}
 			indicator.paintedTab = tr
+			if indicator.paintedListW > 0 {
+				if absF32(tr.W-builtTabW) > 0.5 ||
+					absF32((tr.X-indicator.paintedListX)-builtRelX) > 0.5 ||
+					absF32(indicator.paintedListW-builtListW) > 0.5 {
+					srv.Invalidate()
+				}
+			}
 		})
 	}
 
@@ -464,21 +489,25 @@ func buildPillTabs(c *ui.Context, items []TabItem, o PillTabsOptions, segmented 
 	indW := indicator.w
 	indReady := indicator.set
 	trackPad := m.trackPad
+	elevatedCapsule := (o.Tone == PillTabsToneSurface || (segmented && o.Tone == PillTabsToneAuto)) && !disabledAll && !selTab.IsDisabled()
+	shadowCol := th.Colors.Shadow
+	if shadowCol.A == 0 {
+		shadowCol = ui.RGB(0, 0, 0)
+	}
+	darkMode := th.Dark
 
 	// Paint the sliding capsule in Draw (underneath the tab labels, icons, and ripples).
 	tabList := tabs.List
 	tabList.Draw(func(p *ui.Painter, r ui.Rect) {
-		if !indReady || r.W <= 0 || r.H <= 0 {
+		if r.W <= 0 || r.H <= 0 {
 			return
 		}
 		if tabList.Valid() {
-			if pt := indicator.paintedTab; pt.W > 0 {
-				if absF32(pt.W-indicator.builtTabW) > 0.5 ||
-					absF32((pt.X-r.X)-indicator.builtRelX) > 0.5 ||
-					absF32(r.W-indicator.builtListW) > 0.5 {
-					srv.Invalidate()
-				}
-			}
+			indicator.paintedListX = r.X
+			indicator.paintedListW = r.W
+		}
+		if !indReady {
+			return
 		}
 		capH := max(r.H-2*trackPad, 0)
 		capW := min(max(indW, 0), max(r.W-indX-trackPad, 0))
@@ -492,11 +521,22 @@ func buildPillTabs(c *ui.Context, items []TabItem, o PillTabsOptions, segmented 
 			W: capW,
 			H: capH,
 		}
+		if elevatedCapsule && capsuleCol.A > 0 {
+			ambA, keyA := float32(0.12), float32(0.08)
+			if darkMode {
+				ambA, keyA = 0.28, 0.16
+			}
+			p.Shadow(capRect, rad, 0, 1, 3, 0, shadowCol.Alpha(ambA))
+			p.Shadow(capRect, rad, 0, 1, 1, 0, shadowCol.Alpha(keyA))
+		}
 		if capsuleCol.A > 0 {
 			p.Fill(capRect, capsuleCol, rad)
 		}
 		if capsuleEdge.A > 0 {
-			p.Stroke(capRect, capsuleEdge, rad, 1)
+			inRect := insetRect(capRect, 0.5)
+			if inRect.W > 0 && inRect.H > 0 {
+				p.Stroke(inRect, capsuleEdge, max(0, rad-0.5), 1)
+			}
 		}
 	})
 

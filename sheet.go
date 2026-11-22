@@ -1,6 +1,8 @@
 package md3e
 
 import (
+	"time"
+
 	"github.com/egoist/mygo/ui"
 
 	"github.com/imicola/mygo-md3e/motion"
@@ -41,16 +43,6 @@ const (
 	bottomSheetHandleTall    = 4
 	bottomSheetDismissMin    = 96
 	bottomSheetDismissShare  = 0.25
-)
-
-// Locals and channels of a bottom sheet.
-type (
-	bottomSheetStateKey      struct{}
-	bottomSheetShowKey       struct{}
-	bottomSheetHeightKey     struct{}
-	bottomSheetDetentKey     struct{}
-	bottomSheetDragKey       struct{}
-	bottomSheetDragOffsetKey struct{}
 )
 
 // bottomSheetState remembers a modal sheet through its exit animation.
@@ -108,15 +100,15 @@ func BottomSheet(c *ui.Context, open *bool, opts ...BottomSheetOptions) ui.Eleme
 			return ui.Box(c).Size(0, 0)
 		}
 		height := sanitizePositiveF32(o.Height, bottomSheetDefaultHeight)
-		return bottomSheetPanel(c, th, height, label, o, false, nil)
+		return bottomSheetPanel(c, th, height, label, o, false, false, nil)
 	}
 
 	anchor := ui.Box(c).Size(0, 0)
-	st := ui.Local(anchor, bottomSheetStateKey{}, func() bottomSheetState { return bottomSheetState{} })
-	drag := ui.Local(anchor, bottomSheetDragKey{}, func() bottomSheetDragState { return bottomSheetDragState{} })
+	st := localPtr(anchor, animChan2, func() *bottomSheetState { return &bottomSheetState{} })
+	drag := localPtr(anchor, animChan3, func() *bottomSheetDragState { return &bottomSheetDragState{} })
 	detent := o.Detent
 	if detent == nil {
-		detent = ui.Local(anchor, bottomSheetDetentKey{}, func() int { return 0 })
+		detent = localInt(anchor, animChan4)
 	}
 	detents := normalizeDetents(o.Detents)
 	*detent = max(0, min(*detent, len(detents)-1))
@@ -144,15 +136,18 @@ func BottomSheet(c *ui.Context, open *bool, opts ...BottomSheetOptions) ui.Eleme
 		st.exitHeight, st.exitOffset = 0, 0
 	}
 	exiting := !*open
-	var show float32
+	var show, scrimT float32
 	switch {
 	case *open && !st.appeared:
 		st.appeared = true
 		if reduce {
-			show = anchor.Jump(bottomSheetShowKey{}, 1)
+			show = anchor.Jump(animChan1, 1)
+			scrimT = anchor.Jump(animChan0, 1)
 		} else {
-			anchor.Jump(bottomSheetShowKey{}, 0)
+			anchor.Jump(animChan1, 0)
+			anchor.Jump(animChan0, 0)
 			show = 0
+			scrimT = 0
 			c.Invalidate()
 		}
 	case exiting && reduce:
@@ -162,8 +157,9 @@ func BottomSheet(c *ui.Context, open *bool, opts ...BottomSheetOptions) ui.Eleme
 		c.Invalidate()
 		return anchor
 	case exiting:
-		show = animateValue(anchor, bottomSheetShowKey{}, 0, th.Animation(motion.FastSpatial), false)
-		if anchor.Arrived(bottomSheetShowKey{}) || (anchor.Settled(bottomSheetShowKey{}) && show <= 0.001) {
+		show = animateValue(anchor, animChan1, 0, th.Animation(motion.FastEffects), false)
+		scrimT = animateValue(anchor, animChan0, 0, th.Animation(motion.FastEffects), false)
+		if anchor.Arrived(animChan1) || (anchor.Settled(animChan1) && show <= 0.001) {
 			st.shown, st.appeared = false, false
 			st.exitHeight, st.exitOffset = 0, 0
 			*drag = bottomSheetDragState{}
@@ -171,7 +167,8 @@ func BottomSheet(c *ui.Context, open *bool, opts ...BottomSheetOptions) ui.Eleme
 			return anchor
 		}
 	default:
-		show = animateValue(anchor, bottomSheetShowKey{}, 1, th.Animation(motion.FastSpatial), false)
+		show = animateValue(anchor, animChan1, 1, th.Animation(motion.DefaultSpatial), false)
+		scrimT = animateValue(anchor, animChan0, 1, th.Animation(motion.DefaultEffects), false)
 	}
 
 	scrim := th.Colors.Scrim
@@ -215,7 +212,7 @@ func BottomSheet(c *ui.Context, open *bool, opts ...BottomSheetOptions) ui.Eleme
 	ui.Overlay(c, func() {
 		back = ui.Row(c).Absolute().Left(0).Top(0).Right(0).Bottom(0).
 			AlignItems(ui.End).
-			Background(scrim.Alpha(0.32 * clampF32(show, 0, 1)))
+			Background(scrim.Alpha(0.32 * clampF32(scrimT, 0, 1)))
 		if !exiting {
 			back.Modal()
 		}
@@ -283,22 +280,21 @@ func BottomSheet(c *ui.Context, open *bool, opts ...BottomSheetOptions) ui.Eleme
 				} else if dismissTriggered {
 					panelBaseH = st.exitHeight
 				}
-				panel := bottomSheetPanel(c, th, panelBaseH, label, o, true, handleInput)
-				panel.Opacity(clampF32(show, 0, 1))
+				panel := bottomSheetPanel(c, th, panelBaseH, label, o, true, drag.active, handleInput)
 
 				var height, slideY float32
 				switch {
 				case exiting || dismissTriggered:
-					height = panel.Jump(bottomSheetHeightKey{}, panelBaseH)
+					height = panel.Jump(animChan0, panelBaseH)
 					slideY = st.exitOffset + (1-clampF32(show, 0, 1))*max(height-st.exitOffset, 0)
 				case drag.active:
 					targetH := clampF32(rawH, minH, maxH)
-					height = panel.Jump(bottomSheetHeightKey{}, targetH)
-					dragTranslate := panel.Jump(bottomSheetDragOffsetKey{}, max(float32(0), minH-rawH))
+					height = panel.Jump(animChan0, targetH)
+					dragTranslate := panel.Jump(animChan1, max(float32(0), minH-rawH))
 					slideY = (1-clampF32(show, 0, 1))*height + dragTranslate
 				default:
-					height = animateValue(panel, bottomSheetHeightKey{}, baseH, th.Animation(motion.DefaultSpatial), reduce)
-					dragTranslate := animateValue(panel, bottomSheetDragOffsetKey{}, 0, th.Animation(motion.FastSpatial), reduce)
+					height = animateValue(panel, animChan0, baseH, th.Animation(motion.DefaultSpatial), reduce)
+					dragTranslate := animateValue(panel, animChan1, 0, th.Animation(motion.FastSpatial), reduce)
 					slideY = (1-clampF32(show, 0, 1))*height + dragTranslate
 				}
 				panel.Height(height)
@@ -324,7 +320,7 @@ func BottomSheet(c *ui.Context, open *bool, opts ...BottomSheetOptions) ui.Eleme
 // column, rounding its top corners and clipping its content. A modal panel is
 // a dialog whose handle takes the pull through handle; a standard panel is a
 // region laid out inline and takes none.
-func bottomSheetPanel(c *ui.Context, th *Theme, height float32, label string, o BottomSheetOptions, modal bool, handle func(ui.InputEvent) bool) ui.Element {
+func bottomSheetPanel(c *ui.Context, th *Theme, height float32, label string, o BottomSheetOptions, modal, dragActive bool, handle func(ui.InputEvent) bool) ui.Element {
 	cs := th.Colors
 	radius := th.Shapes.Radius(tokens.ShapeExtraLarge)
 	panel := ui.Column(c).
@@ -334,26 +330,79 @@ func bottomSheetPanel(c *ui.Context, th *Theme, height float32, label string, o 
 		Radius(radius, radius, 0, 0).
 		Background(SurfaceColorForElevation(th, tokens.Level2)).
 		TextColor(cs.OnSurface)
+	if hl := resolveHairlineColor(th, ui.Color{}); hl.A > 0 {
+		panel.Border(1, hl).BorderWidth(1, 1, 0, 1)
+	}
 	if modal {
 		panel.Role(ui.RoleDialog).Label(label)
 		ApplyElevationShadows(th, panel, tokens.Level3)
 	} else {
 		panel.Role(ui.RoleRegion).Label(label)
+		ApplyElevationShadows(th, panel, tokens.Level1)
 	}
+	thReduce := th.ReduceMotion
 	panel.Children(func() {
 		handleRow := ui.Row(c).FillWidth().Height(bottomSheetHandleHeight).
 			Justify(ui.Center).AlignItems(ui.Center)
 		if handle != nil {
 			handleRow.HandleInput(handle)
+			if dragActive {
+				handleRow.Cursor(ui.CursorGrabbing)
+			} else {
+				handleRow.Cursor(ui.CursorGrab)
+			}
 		}
 		handleRow.Children(func() {
-			ui.Box(c).Size(bottomSheetHandleWidth, bottomSheetHandleTall).
-				Radius(bottomSheetHandleTall / 2).
-				Background(cs.OnSurfaceVariant.Alpha(0.4))
+			pill := ui.Box(c).Size(48, 8)
+			hoverSt := localHaloFade(pill, animChan0)
+			dragSt := localHaloFade(pill, animChan1)
+			restCol := cs.OnSurfaceVariant.Alpha(0.40)
+			hoverCol := cs.OnSurfaceVariant.Alpha(0.68)
+			activeCol := cs.Primary
+			interactiveHandle := handle != nil
+			pill.Draw(func(p *ui.Painter, r ui.Rect) {
+				if r.W <= 0 || r.H <= 0 {
+					return
+				}
+				live := pill.Valid() && handleRow.Valid()
+				reduce := thReduce || p.Preferences().ReduceMotion
+				var hoverT, dragT float32
+				var needFrame bool
+				if live && interactiveHandle && rectIntersects(r, p.Visible()) {
+					now := p.Now()
+					ht := float32(0)
+					if handleRow.Hovered() {
+						ht = 1
+					}
+					dt := float32(0)
+					if dragActive {
+						dt = 1
+					}
+					var m1, m2 bool
+					hoverT, m1 = hoverSt.step(ht, now, reduce)
+					dragT, m2 = dragSt.step(dt, now, reduce)
+					needFrame = m1 || m2
+				} else {
+					hoverT = hoverSt.alpha
+					dragT = dragSt.alpha
+				}
+				w := float32(bottomSheetHandleWidth) + 8*hoverT + 8*dragT
+				w = min(w, 48)
+				h := float32(bottomSheetHandleTall) + 1*dragT
+				col := restCol.MixOklab(hoverCol, hoverT)
+				if dragT > 0.001 {
+					col = col.MixOklab(activeCol, dragT)
+				}
+				cx, cy := r.X+r.W/2, r.Y+r.H/2
+				p.Fill(ui.Rect{X: cx - w/2, Y: cy - h/2, W: w, H: h}, col, h/2)
+				if live && needFrame {
+					p.After(16 * time.Millisecond)
+				}
+			})
 		})
 		body := ui.Scroll(c).Grow(1).FillWidth().Scrollbars(false)
 		body.Children(func() {
-			content := ui.Column(c).FillWidth().Padding(24)
+			content := ui.Column(c).FillWidth().Padding(8, 24, 24, 24)
 			content.Children(func() {
 				if o.Content != nil {
 					if built := o.Content(); built.Valid() {

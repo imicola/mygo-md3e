@@ -59,16 +59,8 @@ const (
 	tabsSecondaryDividerThickness = 1
 )
 
-// Locals and animation channels of a tab bar.
-type (
-	tabsSelectedKey   struct{}
-	tabsLastKey       struct{}
-	tabsIndicatorKey  struct{}
-	tabsIndicatorXKey struct{}
-	tabsIndicatorWKey struct{}
-	tabsScrollKey     struct{}
-	tabsTabKey        struct{ i int }
-)
+// tabsTabKey keys an unkeyed tab by index without colliding with caller keys.
+type tabsTabKey struct{ i int }
 
 // tabsIndicatorState is the resting geometry of the sliding indicator,
 // relative to the tab bar's box.
@@ -128,12 +120,12 @@ func buildTabs(c *ui.Context, items []TabItem, opts []TabsOptions, primary bool)
 	root.Disabled(o.Disabled)
 	selected := o.Selected
 	if selected == nil {
-		selected = ui.Local(root, tabsSelectedKey{}, func() int { return 0 })
+		selected = localInt(root, animChan0)
 	}
 	// -1 so an initial selection starting off-screen scrolls into view once
 	// the scrollable tab strip lays out.
-	lastSelected := ui.Local(root, tabsLastKey{}, func() int { return -1 })
-	scrollState := ui.Local(root, tabsScrollKey{}, func() ui.ScrollState { return ui.ScrollState{} })
+	lastSelected := localNegInt(root, animChan1)
+	scrollState := localScrollState(root, animChan2)
 	if len(items) == 0 {
 		*lastSelected = -1
 		return root
@@ -168,6 +160,7 @@ func buildTabs(c *ui.Context, items []TabItem, opts []TabsOptions, primary bool)
 				c.Key(key)
 				tab := tabs.Tab(i).
 					DimDisabled(false).
+					FocusRing(false).
 					Height(tabH).
 					PaddingX(padX).
 					Gap(iconGap).
@@ -182,10 +175,8 @@ func buildTabs(c *ui.Context, items []TabItem, opts []TabsOptions, primary bool)
 
 				on := *selected == i
 				disabled := o.Disabled || item.Disabled || tab.IsDisabled()
-				ink := inactiveInk
-				if on {
-					ink = activeInk
-				}
+				selMix := clampF32(animateValue(tab, animChan0, boolFloat(on), th.Animation(motion.FastEffects), reduce), 0, 1)
+				ink := inactiveInk.MixOklab(activeInk, selMix)
 				if disabled {
 					ink = disabledTabInk
 				}
@@ -202,9 +193,10 @@ func buildTabs(c *ui.Context, items []TabItem, opts []TabsOptions, primary bool)
 				})
 				radius := th.Shapes.Radius(tokens.ShapeSmall)
 				attachRippleWithContext(c, th, tab, StateLayerOptions{
-					Color:    ink,
-					Radius:   radius,
-					Disabled: disabled,
+					Color:     ink,
+					Radius:    radius,
+					FocusRing: FocusRingInset,
+					Disabled:  disabled,
 				})
 			}
 		})
@@ -239,7 +231,7 @@ func buildTabs(c *ui.Context, items []TabItem, opts []TabsOptions, primary bool)
 	// tabs.List, so scrolling moves and clips the indicator together with the
 	// tabs inside ScrollHorizontal. Before the first layout there is no box
 	// yet, so the bar appears where it belongs instead of flying in from zero.
-	indicator := ui.Local(tabs.List, tabsIndicatorKey{}, func() tabsIndicatorState { return tabsIndicatorState{} })
+	indicator := localPtr(tabs.List, animChan0, func() *tabsIndicatorState { return &tabsIndicatorState{} })
 	indicator.paintedTab = ui.Rect{}
 	listBox := tabs.List.LayoutBounds()
 	selTab := tabEls[*selected]
@@ -251,11 +243,11 @@ func buildTabs(c *ui.Context, items []TabItem, opts []TabsOptions, primary bool)
 		indicator.builtRelX, indicator.builtTabW, indicator.builtListW = relX, tabBox.W, listBox.W
 		if !indicator.set {
 			indicator.set = true
-			indicator.x = tabs.List.Jump(tabsIndicatorXKey{}, targetX)
-			indicator.w = tabs.List.Jump(tabsIndicatorWKey{}, width)
+			indicator.x = tabs.List.Jump(animChan1, targetX)
+			indicator.w = tabs.List.Jump(animChan2, width)
 		} else {
-			indicator.x = animateValue(tabs.List, tabsIndicatorXKey{}, targetX, th.Animation(motion.FastSpatial), reduce)
-			indicator.w = animateValue(tabs.List, tabsIndicatorWKey{}, width, th.Animation(motion.FastSpatial), reduce)
+			indicator.x = animateValue(tabs.List, animChan1, targetX, th.Animation(motion.FastSpatial), reduce)
+			indicator.w = animateValue(tabs.List, animChan2, width, th.Animation(motion.FastSpatial), reduce)
 		}
 
 		// A scrollable bar brings the chosen tab into horizontal view using its
@@ -303,9 +295,9 @@ func buildTabs(c *ui.Context, items []TabItem, opts []TabsOptions, primary bool)
 	if o.Disabled || tabList.IsDisabled() || selTab.IsDisabled() {
 		indicatorInk = disabledTabInk
 	}
-	if !primary && dividerInk.A > 0 {
+	if dividerInk.A > 0 {
 		root.DrawOver(func(p *ui.Painter, r ui.Rect) {
-			if !root.Valid() || r.W <= 0 || r.H <= 0 {
+			if r.W <= 0 || r.H <= 0 {
 				return
 			}
 			p.Fill(ui.Rect{
@@ -316,41 +308,72 @@ func buildTabs(c *ui.Context, items []TabItem, opts []TabsOptions, primary bool)
 			}, dividerInk, 0)
 		})
 	}
+	if o.Scrollable && scrollEl.Valid() {
+		fadeBg := th.Colors.Surface
+		scrollEl.DrawOver(func(p *ui.Painter, r ui.Rect) {
+			if r.W <= 24 || r.H <= 0 || fadeBg.A == 0 || scrollState.MaxX <= 1 {
+				return
+			}
+			const edgeW = float32(18)
+			canLeft := scrollState.X > 1
+			canRight := scrollState.X < scrollState.MaxX-1
+			if rtl {
+				canLeft, canRight = canRight, canLeft
+			}
+			if canLeft {
+				p.FillGradient(ui.Rect{X: r.X, Y: r.Y, W: edgeW, H: r.H - 1}, ui.LinearGradient{
+					From:  fadeBg,
+					To:    fadeBg.Alpha(0),
+					Angle: 90,
+				}, 0)
+			}
+			if canRight {
+				p.FillGradient(ui.Rect{X: r.X + r.W - edgeW, Y: r.Y, W: edgeW, H: r.H - 1}, ui.LinearGradient{
+					From:  fadeBg.Alpha(0),
+					To:    fadeBg,
+					Angle: 90,
+				}, 0)
+			}
+		})
+	}
 	srv := c.Services()
 	if selTab.Valid() {
-		selTab.DrawOver(func(p *ui.Painter, tr ui.Rect) {
+		// Record painted tab bounds in Draw (not DrawOver) so attachRippleWithContext's
+		// StateLayer and Ripple on the selected tab are never overwritten.
+		selTab.Draw(func(p *ui.Painter, tr ui.Rect) {
 			if !selTab.Valid() || tr.W <= 0 || tr.H <= 0 {
 				return
 			}
 			indicator.paintedTab = tr
 		})
 	}
+	indX, indW, indSet := indicator.x, indicator.w, indicator.set
 	tabList.DrawOver(func(p *ui.Painter, r ui.Rect) {
-		if !tabList.Valid() || !indicator.set || r.W <= 0 || r.H <= 0 {
+		if !indSet || r.W <= 0 || r.H <= 0 {
 			return
 		}
-		if pt := indicator.paintedTab; pt.W > 0 {
-			if absF32(pt.W-indicator.builtTabW) > 0.5 ||
-				absF32((pt.X-r.X)-indicator.builtRelX) > 0.5 ||
-				absF32(r.W-indicator.builtListW) > 0.5 {
-				srv.Invalidate()
+		if tabList.Valid() {
+			if pt := indicator.paintedTab; pt.W > 0 {
+				if absF32(pt.W-indicator.builtTabW) > 0.5 ||
+					absF32((pt.X-r.X)-indicator.builtRelX) > 0.5 ||
+					absF32(r.W-indicator.builtListW) > 0.5 {
+					srv.Invalidate()
+				}
 			}
 		}
 		height := float32(tabsIndicatorHeight)
+		radii := [4]float32{height, height, 0, 0}
 		if !primary {
 			height = tabsSecondaryIndicatorHeight
+			radii = [4]float32{1, 1, 0, 0}
 		}
-		y := r.Y + r.H - height
-		if !primary {
-			y -= tabsSecondaryDividerThickness
-		}
-		half := height / 2
+		y := r.Y + r.H - height - tabsSecondaryDividerThickness
 		p.FillRadii(ui.Rect{
-			X: r.X + indicator.x,
+			X: r.X + indX,
 			Y: y,
-			W: min(indicator.w, max(r.W-indicator.x, 0)),
+			W: min(indW, max(r.W-indX, 0)),
 			H: height,
-		}, [4]float32{half, half, half, half}, indicatorInk)
+		}, radii, indicatorInk)
 	})
 	return root
 }

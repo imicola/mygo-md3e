@@ -260,14 +260,9 @@ func buildTreeNode(
 		if selMix > 0.001 && selectedBg.A > 0 {
 			bg = selectedBg.Alpha(selMix)
 		}
-		ink := cs.OnSurface
-		subInk := cs.OnSurfaceVariant
-		iconInk := cs.OnSurfaceVariant
-		if selected {
-			ink = selectedInk
-			subInk = selectedInk.Alpha(0.85)
-			iconInk = selectedInk
-		}
+		ink := cs.OnSurface.MixOklab(selectedInk, selMix)
+		subInk := cs.OnSurfaceVariant.MixOklab(selectedInk.Alpha(0.85), selMix)
+		iconInk := cs.OnSurfaceVariant.MixOklab(selectedInk, selMix)
 		if disabled {
 			ink = cs.OnSurface.Alpha(float32(tokens.DisabledContentOpacity))
 			subInk = ink
@@ -447,16 +442,22 @@ func buildTreeNode(
 			})
 			if groupCol.Valid() {
 				groupCol.FillWidth().Gap(m.rowGap)
+				if !(th.ReduceMotion || c.Preferences().ReduceMotion) {
+					groupCol.Transition(ui.ElementTransition{
+						Duration: 110 * time.Millisecond,
+						Enter:    &ui.Motion{Opacity: 0, Y: -4},
+					})
+				}
 				if o.ShowIndentGuides && len(n.Children) > 0 {
 					guideOffset := m.padStart + float32(depth)*m.indentStep + m.arrowSize/2
 					guideCol := cs.OutlineVariant
-					if guideCol.A == 0 {
+					if th.Contrast >= tokens.ContrastHigh && cs.Outline.A > 0 {
 						guideCol = cs.Outline
 					}
 					if disabled {
 						guideCol = cs.OnSurface.Alpha(float32(tokens.DisabledContainerOpacity))
 					}
-					groupCol.Draw(func(p *ui.Painter, r ui.Rect) {
+					groupCol.DrawOver(func(p *ui.Painter, r ui.Rect) {
 						if !isPositiveFiniteF32(r.W) || !isPositiveFiniteF32(r.H) || guideCol.A == 0 {
 							return
 						}

@@ -3,6 +3,7 @@ package md3e
 import (
 	"math"
 	"sync"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 
@@ -371,7 +372,7 @@ func ListDetailPane(c *ui.Context, list func(), detail func(), opts ...ListDetai
 	}
 
 	th := CurrentTheme(c)
-	class := resolveSizeClass(c, o.WidthOverride)
+	class := resolveContentSizeClass(c, o.WidthOverride)
 	rtl := c.Direction() == ui.RightToLeft
 
 	root := ui.Box(c).Fill().MinWidth(0).MinHeight(0)
@@ -456,8 +457,10 @@ func ListDetailPane(c *ui.Context, list func(), detail func(), opts ...ListDetai
 		} else {
 			sp = ui.Split(c.Key(paneSplitWidgetKey{}), splitPtr, firstPane, secondPane)
 		}
+		hoverSt := localHaloFade(sp, animChan0)
+		dragSt := localHaloFade(sp, animChan1)
 		sp.Fill().SplitReset(defaultVal).DrawOver(func(p *ui.Painter, r ui.Rect) {
-			drawSplitDragHandle(p, r, *firstRect, rtl, handleCol)
+			drawSplitDragHandle(p, sp, r, *firstRect, rtl, th, handleCol, hoverSt, dragSt)
 		})
 	})
 	return root
@@ -573,12 +576,14 @@ func SupportingPane(c *ui.Context, main func(), supporting func(), opts ...Suppo
 	}
 
 	root.Children(func() {
-		ui.SplitPercent(c.Key(paneSplitWidgetKey{}), pct, firstPane, secondPane).
+		sp := ui.SplitPercent(c.Key(paneSplitWidgetKey{}), pct, firstPane, secondPane).
 			Fill().
-			SplitReset(defaultPct).
-			DrawOver(func(p *ui.Painter, r ui.Rect) {
-				drawSplitDragHandle(p, r, *firstRect, rtl, handleCol)
-			})
+			SplitReset(defaultPct)
+		hoverSt := localHaloFade(sp, animChan0)
+		dragSt := localHaloFade(sp, animChan1)
+		sp.DrawOver(func(p *ui.Painter, r ui.Rect) {
+			drawSplitDragHandle(p, sp, r, *firstRect, rtl, th, handleCol, hoverSt, dragSt)
+		})
 	})
 	return root
 }
@@ -594,26 +599,74 @@ func paneHandleColor(th *Theme) ui.Color {
 	return cs.OnSurfaceVariant.Alpha(0.45)
 }
 
-func drawSplitDragHandle(p *ui.Painter, splitR, firstR ui.Rect, rtl bool, col ui.Color) {
+func drawSplitDragHandle(p *ui.Painter, sp ui.Element, splitR, firstR ui.Rect, rtl bool, th *Theme, col ui.Color, hoverSt, dragSt *haloFadeState) {
 	if !isPositiveFiniteF32(splitR.W) || !isPositiveFiniteF32(splitR.H) ||
 		!isPositiveFiniteF32(firstR.W) || col.A == 0 {
 		return
 	}
-	seamX := firstR.X + firstR.W
+	// ui.Split inserts a 1 DIP divider seam between the two panes; offset by
+	// +0.5 DIP (LTR) or -0.5 DIP (RTL) so the handle sits dead-center on it.
+	seamX := firstR.X + firstR.W + 0.5
 	if rtl {
-		seamX = firstR.X
+		seamX = firstR.X - 0.5
 	}
 	if seamX <= splitR.X+2 || seamX >= splitR.X+splitR.W-2 {
 		return
 	}
-	const handleW float32 = 4
-	handleH := min(float32(36), max(float32(12), splitR.H*0.25))
+	live := sp.Valid()
+	reduce := th.ReduceMotion || p.Preferences().ReduceMotion
+	var hoverT, dragT float32
+	var needFrame bool
+	if live && rectIntersects(splitR, p.Visible()) {
+		now := p.Now()
+		nearSeam := false
+		if px, _, ok := sp.PointerPosition(); ok && sp.Hovered() {
+			nearSeam = absF32(splitR.X+px-seamX) <= 10
+		}
+		ht := float32(0)
+		if nearSeam {
+			ht = 1
+		}
+		dt := float32(0)
+		if sp.Pressed() && (nearSeam || dragSt.alpha > 0.01) {
+			dt = 1
+		}
+		var m1, m2 bool
+		hoverT, m1 = hoverSt.step(ht, now, reduce)
+		dragT, m2 = dragSt.step(dt, now, reduce)
+		needFrame = m1 || m2
+	} else {
+		hoverT = hoverSt.alpha
+		dragT = dragSt.alpha
+	}
+
+	baseH := min(float32(36), max(float32(12), splitR.H*0.25))
+	handleW := float32(4) + 1.0*hoverT + 1.0*dragT
+	handleH := min(splitR.H-8, baseH+8*hoverT+10*dragT)
+	drawCol := col
+	if hoverT > 0.001 {
+		drawCol = col.MixOklab(th.Colors.OnSurfaceVariant, hoverT)
+	}
+	if dragT > 0.001 {
+		drawCol = drawCol.MixOklab(th.Colors.Primary, dragT)
+		haloW := handleW + 6
+		haloH := handleH + 8
+		p.Fill(ui.Rect{
+			X: seamX - haloW*0.5,
+			Y: splitR.Y + (splitR.H-haloH)*0.5,
+			W: haloW,
+			H: haloH,
+		}, th.Colors.Primary.Alpha(0.14*dragT), haloW*0.5)
+	}
 	p.Fill(ui.Rect{
 		X: seamX - handleW*0.5,
 		Y: splitR.Y + (splitR.H-handleH)*0.5,
 		W: handleW,
 		H: handleH,
-	}, col, handleW*0.5)
+	}, drawCol, handleW*0.5)
+	if live && needFrame {
+		p.After(16 * time.Millisecond)
+	}
 }
 
 // BentoGridOptions configures BentoGrid.

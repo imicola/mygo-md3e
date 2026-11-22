@@ -55,20 +55,6 @@ const (
 	navDrawerDragSlop       = 6
 )
 
-type navDrawerOpenKey struct{}
-
-type navDrawerStateKey struct{}
-
-type navDrawerShowKey struct{}
-
-type navDrawerWidthKey struct{}
-
-type navDrawerDragKey struct{}
-
-type navDrawerOffsetKey struct{}
-
-type navDrawerSelectKey struct{}
-
 type navDrawerItemKey struct{ i int }
 
 type navDrawerState struct {
@@ -127,10 +113,10 @@ func modalNavigationDrawer(c *ui.Context, th *Theme, items []NavigationDrawerIte
 	anchor := ui.Box(c).Size(0, 0)
 	open := o.Open
 	if open == nil {
-		open = ui.Local(anchor, navDrawerOpenKey{}, func() bool { return false })
+		open = localBool(anchor, animChan2)
 	}
-	st := ui.Local(anchor, navDrawerStateKey{}, func() navDrawerState { return navDrawerState{} })
-	drag := ui.Local(anchor, navDrawerDragKey{}, func() navDrawerDragState { return navDrawerDragState{} })
+	st := localPtr(anchor, animChan3, func() *navDrawerState { return &navDrawerState{} })
+	drag := localPtr(anchor, animChan4, func() *navDrawerDragState { return &navDrawerDragState{} })
 
 	// A disabled drawer leaves the caller's open state alone: re-enabling it
 	// brings the drawer back as it was, rather than silently closing it.
@@ -155,15 +141,18 @@ func modalNavigationDrawer(c *ui.Context, th *Theme, items []NavigationDrawerIte
 
 	exiting := !*open
 	reduce := th.ReduceMotion || c.Preferences().ReduceMotion
-	var show float32
+	var show, scrimAlpha float32
 	switch {
 	case *open && !st.appeared:
 		st.appeared = true
 		if reduce {
-			show = anchor.Jump(navDrawerShowKey{}, 1)
+			show = anchor.Jump(animChan1, 1)
+			scrimAlpha = anchor.Jump(animChan0, 1)
 		} else {
-			anchor.Jump(navDrawerShowKey{}, 0)
+			anchor.Jump(animChan1, 0)
+			anchor.Jump(animChan0, 0)
 			show = 0
+			scrimAlpha = 0
 			c.Invalidate()
 		}
 	case exiting && reduce:
@@ -173,8 +162,9 @@ func modalNavigationDrawer(c *ui.Context, th *Theme, items []NavigationDrawerIte
 		c.Invalidate()
 		return anchor
 	case exiting:
-		show = animateValue(anchor, navDrawerShowKey{}, 0, th.Animation(motion.FastSpatial), false)
-		if anchor.Arrived(navDrawerShowKey{}) || (anchor.Settled(navDrawerShowKey{}) && show <= 0.001) {
+		show = animateValue(anchor, animChan1, 0, th.Animation(motion.FastEffects), false)
+		scrimAlpha = animateValue(anchor, animChan0, 0, th.Animation(motion.FastEffects), false)
+		if anchor.Arrived(animChan1) || (anchor.Settled(animChan1) && show <= 0.001) {
 			st.shown, st.appeared = false, false
 			st.exitOffset = 0
 			*drag = navDrawerDragState{}
@@ -182,7 +172,8 @@ func modalNavigationDrawer(c *ui.Context, th *Theme, items []NavigationDrawerIte
 			return anchor
 		}
 	default:
-		show = animateValue(anchor, navDrawerShowKey{}, 1, th.Animation(motion.FastSpatial), false)
+		show = animateValue(anchor, animChan1, 1, th.Animation(motion.DefaultSpatial), false)
+		scrimAlpha = animateValue(anchor, animChan0, 1, th.Animation(motion.DefaultEffects), false)
 	}
 
 	rtl := c.Direction() == ui.RightToLeft
@@ -198,7 +189,7 @@ func modalNavigationDrawer(c *ui.Context, th *Theme, items []NavigationDrawerIte
 
 	ui.Overlay(c, func() {
 		back := ui.Row(c).Absolute().Left(0).Top(0).Right(0).Bottom(0).
-			Background(scrim.Alpha(0.32 * clampF32(show, 0, 1))).
+			Background(scrim.Alpha(0.32 * clampF32(scrimAlpha, 0, 1))).
 			Justify(ui.Start)
 		if !exiting {
 			back.Modal()
@@ -213,11 +204,18 @@ func modalNavigationDrawer(c *ui.Context, th *Theme, items []NavigationDrawerIte
 				Background(SurfaceColorForElevation(th, tokens.Level1)).
 				Role(ui.RoleDialog).
 				Label(label)
+			ApplyElevationShadows(th, panel, tokens.Level2)
 			edge := float32(th.Shapes.Radius(tokens.ShapeLarge))
 			if rtl {
 				panel.Radius(edge, 0, 0, edge)
+				if hl := resolveHairlineColor(th, ui.Color{}); hl.A > 0 {
+					panel.Border(1, hl).BorderWidth(0, 0, 0, 1)
+				}
 			} else {
 				panel.Radius(0, edge, edge, 0)
+				if hl := resolveHairlineColor(th, ui.Color{}); hl.A > 0 {
+					panel.Border(1, hl).BorderWidth(0, 1, 0, 0)
+				}
 			}
 			panel.Disabled(o.Disabled)
 
@@ -245,7 +243,7 @@ func modalNavigationDrawer(c *ui.Context, th *Theme, items []NavigationDrawerIte
 				if drag.offset*sign < 0 {
 					drag.offset = 0
 				}
-				liveOffset = panel.Jump(navDrawerOffsetKey{}, drag.offset)
+				liveOffset = panel.Jump(animChan0, drag.offset)
 				if absF32(drag.offset) >= navDrawerSwipeThreshold {
 					st.exitOffset = liveOffset
 					*open = false
@@ -258,7 +256,7 @@ func modalNavigationDrawer(c *ui.Context, th *Theme, items []NavigationDrawerIte
 				drag.travel = 0
 				drag.suppress = false
 				if !exiting {
-					liveOffset = animateValue(panel, navDrawerOffsetKey{}, 0, th.Animation(motion.FastSpatial), reduce)
+					liveOffset = animateValue(panel, animChan0, 0, th.Animation(motion.FastSpatial), reduce)
 				}
 			}
 
@@ -296,7 +294,7 @@ func inlineNavigationDrawer(c *ui.Context, th *Theme, items []NavigationDrawerIt
 		Label(label)
 	open := o.Open
 	if open == nil {
-		open = ui.Local(root, navDrawerOpenKey{}, func() bool { return false })
+		open = localBool(root, animChan1)
 	}
 	edge := float32(th.Shapes.Radius(tokens.ShapeLarge))
 	if c.Direction() == ui.RightToLeft {
@@ -308,11 +306,20 @@ func inlineNavigationDrawer(c *ui.Context, th *Theme, items []NavigationDrawerIt
 	if *open {
 		target = width
 	}
-	openWidth := animateWithTheme(root, th, navDrawerWidthKey{}, target, motion.DefaultSpatial)
+	openWidth := animateWithTheme(root, th, animChan0, target, motion.DefaultSpatial)
 	if openWidth < 0 {
 		openWidth = 0
 	}
 	root.Width(openWidth)
+	if openWidth > 1 {
+		if hl := resolveHairlineColor(th, ui.Color{}); hl.A > 0 {
+			if c.Direction() == ui.RightToLeft {
+				root.Border(1, hl).BorderWidth(0, 0, 0, 1)
+			} else {
+				root.Border(1, hl).BorderWidth(0, 1, 0, 0)
+			}
+		}
+	}
 	root.Disabled(o.Disabled)
 	exiting := !*open
 	root.IgnoreInput(exiting).AccessHidden(exiting)
@@ -346,8 +353,8 @@ func navDrawerContent(c *ui.Context, th *Theme, items []NavigationDrawerItem, o 
 						Divider(c, DividerOptions{Inset: 16})
 					}
 					label := ui.Text(c, item.Section).NoWrap()
-					applyTypeStyleWithTheme(th, label, tokens.LabelSmall)
-					label.TextColor(cs.OnSurfaceVariant).Padding(16, 8, 4, 8)
+					applyTypeStyleWithTheme(th, label, tokens.TitleSmall)
+					label.TextColor(cs.OnSurfaceVariant).Padding(16, 16, 6, 16)
 					lastSection = item.Section
 				}
 				navDrawerDestination(c, th, item, i, o, drag, exiting)
@@ -378,7 +385,7 @@ func navDrawerDestination(c *ui.Context, th *Theme, item *NavigationDrawerItem, 
 	if selected {
 		target = 1
 	}
-	pill := animateWithTheme(el, th, navDrawerSelectKey{}, target, motion.DefaultEffects)
+	pill := animateWithTheme(el, th, animChan0, target, motion.DefaultEffects)
 
 	if !exiting && drag != nil {
 		if dx, _, ok := el.Dragged(); ok {
@@ -396,22 +403,19 @@ func navDrawerDestination(c *ui.Context, th *Theme, item *NavigationDrawerItem, 
 	if selectedBg.A == 0 {
 		selectedBg = cs.PrimaryContainer
 	}
-	iconInk := cs.OnSurfaceVariant
-	labelInk := cs.OnSurface
-	if selected {
-		iconInk = cs.OnSecondaryContainer
-		labelInk = cs.OnSecondaryContainer
-	}
+	p := clampF32(pill, 0, 1)
+	iconInk := cs.OnSurfaceVariant.MixOklab(cs.OnSecondaryContainer, p)
+	labelInk := cs.OnSurface.MixOklab(cs.OnSecondaryContainer, p)
 	if disabled {
 		iconInk = cs.OnSurface.Alpha(float32(tokens.DisabledContentOpacity))
 		labelInk = iconInk
 	}
 	bg := base
-	if p := clampF32(pill, 0, 1); p > 0.001 {
+	if p > 0.001 {
 		if disabled {
 			bg = cs.OnSurface.Alpha(float32(tokens.DisabledContainerOpacity) * p)
 		} else if selectedBg.A > 0 {
-			bg = base.Mix(selectedBg, p)
+			bg = base.MixOklab(selectedBg, p)
 		}
 	}
 	el.Disabled(item.Disabled).AccessSelected(selected).Background(bg).TextColor(labelInk)
@@ -419,10 +423,10 @@ func navDrawerDestination(c *ui.Context, th *Theme, item *NavigationDrawerItem, 
 	el.Children(func() {
 		drawIconBox(c, item.Icon, navDrawerIconSize, iconInk)
 		txt := ui.Text(c, item.Label).NoWrap().Grow(1)
-		applyTypeStyleWithTheme(th, txt, tokens.LabelLarge)
+		applyTypeStyleWithTheme(th, txt, tokens.LabelLarge, selected && !disabled)
 		txt.TextColor(labelInk)
 		if item.Badge != "" {
-			badge := ui.Text(c, item.Badge).NoWrap().Shrink(0)
+			badge := TabularNums(ui.Text(c, item.Badge).NoWrap().Shrink(0))
 			applyTypeStyleWithTheme(th, badge, tokens.LabelMedium)
 			badge.TextColor(labelInk)
 		}

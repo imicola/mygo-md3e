@@ -325,9 +325,9 @@ func buildVirtualListRow(
 	rowShell := ui.Themed(r.Context, origUI).FillWidth().MinWidth(0)
 
 	if state.Header != nil && state.Header(r.Index) {
-		headerBg := cs.Surface
+		headerBg := SurfaceColorForElevation(th, tokens.Level1)
 		if o.Container {
-			headerBg = SurfaceColorForElevation(th, tokens.Level1)
+			headerBg = SurfaceColorForElevation(th, tokens.Level2)
 		}
 		headerInk := cs.OnSurfaceVariant
 		if disabled {
@@ -339,6 +339,9 @@ func buildVirtualListRow(
 			Justify(ui.Center).
 			PaddingStart(m.padX).
 			PaddingEnd(m.padX)
+		if hl := resolveHairlineColor(th, ui.Color{}); hl.A > 0 {
+			rowShell.Border(1, hl).BorderWidth(0, 0, 1, 0)
+		}
 		applyTypeStyleWithTheme(th, rowShell, m.headerRole)
 		rowShell.Children(func() {
 			if row != nil {
@@ -499,7 +502,8 @@ func attachVirtualListRowFeedback(
 			st.ripple.clearTransient()
 		}
 
-		targetAlpha := resolveStateLayerTarget(false, false, pressed, reduceMotion, false, hovered)
+		focused := rowShell.FocusVisible() || rowShell.FocusWithin()
+		targetAlpha := resolveStateLayerTarget(false, false, pressed, reduceMotion, focused, hovered)
 		layerAlpha, needFrame := st.ripple.halo.step(targetAlpha, now, reduceMotion)
 		st.lastAlpha = layerAlpha
 

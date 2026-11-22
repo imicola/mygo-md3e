@@ -254,7 +254,7 @@ func Breadcrumb(c *ui.Context, items []BreadcrumbItem, opts ...BreadcrumbOptions
 				Height(m.itemH).
 				PaddingX(m.padX).
 				Gap(m.itemGap).
-				Radius(m.radius).
+				Radius(m.itemH / 2).
 				AlignItems(ui.Center).
 				Background(bg).
 				TextColor(ink).
@@ -362,32 +362,44 @@ func Breadcrumb(c *ui.Context, items []BreadcrumbItem, opts ...BreadcrumbOptions
 			}
 			c.Key(breadcrumbOverflowKey{})
 			menuParts := ui.MenuBase(c, &st.open)
+			trigBg := cs.SurfaceContainerHigh
+			trigInk := mutedInk
+			if st.open && !disabledAll {
+				trigBg = curBg
+				trigInk = curInk
+			} else if disabledAll {
+				trigBg = ui.Transparent
+			}
+			trigRadius := m.itemH / 2
 			trig := menuParts.Trigger.
 				DimDisabled(false).
 				FocusRing(false).
 				Height(m.itemH).
 				MinWidth(m.overflowMinW).
 				PaddingX(m.overflowPadX).
-				Radius(m.radius).
+				Radius(trigRadius).
 				Shrink(0).
 				AlignItems(ui.Center).
 				Justify(ui.Center).
 				Disabled(disabledAll).
 				Label("More path items").
-				TextColor(mutedInk)
+				TextColor(trigInk)
+			if trigBg.A > 0 {
+				trig.Background(trigBg)
+			}
 			attachRippleWithContext(c, th, trig, StateLayerOptions{
-				Color:    cs.OnSurface,
-				Radius:   m.radius,
+				Color:    trigInk,
+				Radius:   trigRadius,
 				Disabled: disabledAll,
 			})
 			trig.Children(func() {
-				drawIconBox(c, mdicon.MoreHoriz.Draw, m.iconSize, mutedInk)
+				drawIconBox(c, mdicon.MoreHoriz.Draw, m.iconSize, trigInk)
 			})
 			overflowTrigger = trig
 
 			collapsedItems := items[plan.collapseStart:plan.collapseEnd]
 			menuParts.Popup(func(panel ui.Element) {
-				styleMenuPanel(th, panel, MenuOptions{Label: "More path items"})
+				styleMenuPanel(c, th, panel, MenuOptions{Label: "More path items"})
 				menuList := make([]MenuItem, len(collapsedItems))
 				for k := range collapsedItems {
 					it := &collapsedItems[k]

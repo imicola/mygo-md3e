@@ -1,9 +1,12 @@
 package md3e
 
 import (
+	"time"
+
 	"github.com/egoist/mygo/ui"
 
 	"github.com/imicola/mygo-md3e/internal/mdicon"
+	"github.com/imicola/mygo-md3e/motion"
 	"github.com/imicola/mygo-md3e/tokens"
 )
 
@@ -53,12 +56,6 @@ const (
 	menuPanelMinWidth = 180
 	menuTriggerHeight = 40
 	menuTriggerRadius = 20
-)
-
-// Locals and keys of the menu controls.
-type (
-	menuOpenKey        struct{}
-	contextMenuOpenKey struct{}
 )
 
 // DropdownMenu builds a Material Design 3 Expressive drop-down menu: a text
@@ -114,14 +111,23 @@ func DropdownMenu(c *ui.Context, label string, items []MenuItem, opts ...MenuOpt
 			Radius:   menuTriggerRadius,
 			Disabled: disabled,
 		})
+		deg := clampF32(animateEffect(c, trigger, th, animChan0, boolFloat(*open && !disabled), motion.FastEffects), 0, 1) * 180
 		trigger.Children(func() {
 			txt := ui.Text(c, label).NoWrap()
 			applyTypeStyleWithTheme(th, txt, tokens.LabelLarge)
 			txt.TextColor(ink)
-			drawIconBox(c, mdicon.ChevronDown.Draw, 18, chevronInk)
+			ui.Box(c).Size(18, 18).Shrink(0).Draw(func(p *ui.Painter, r ui.Rect) {
+				if absF32(deg) < 0.05 {
+					mdicon.ChevronDown.Draw(p, r, chevronInk)
+					return
+				}
+				p.Transform(ui.Rotation(deg), r.X+r.W/2, r.Y+r.H/2, func() {
+					mdicon.ChevronDown.Draw(p, r, chevronInk)
+				})
+			})
 		})
 		m.Popup(func(panel ui.Element) {
-			styleMenuPanel(th, panel, o)
+			styleMenuPanel(c, th, panel, o)
 			buildMenuItems(c, th, m, items, 0)
 		})
 		return trigger
@@ -130,7 +136,7 @@ func DropdownMenu(c *ui.Context, label string, items []MenuItem, opts ...MenuOpt
 		return buildTrigger(o.Open, false)
 	}
 	wrap := ui.Row(c).Shrink(0).DimDisabled(false)
-	open := ui.Local(wrap, menuOpenKey{}, func() bool { return false })
+	open := localBool(wrap, animChan0)
 	wrap.Children(func() {
 		trigger := buildTrigger(open, true)
 		if wrap.Focused() {
@@ -163,15 +169,33 @@ func MenuButton(c *ui.Context, label string, icon IconDraw, items []MenuItem, op
 		m := ui.MenuBase(c, open)
 		trigger := m.Trigger.DimDisabled(false).
 			Size(menuTriggerHeight, menuTriggerHeight).
-			Radius(menuTriggerHeight / 2).
 			Label(label).Disabled(o.Disabled)
 		disabled := o.Disabled || trigger.IsDisabled()
 		if (disabled || inExitingOverlay(c)) && *open {
 			*open = false
 			c.Invalidate()
 		}
-		bg := cs.SurfaceContainerHighest
-		ink := cs.OnSurfaceVariant
+		openActive := *open && !disabled
+		openT := clampF32(animateEffect(c, trigger, th, animChan0, boolFloat(openActive), motion.FastEffects), 0, 1)
+		pressTarget := float32(0)
+		if !disabled && trigger.Pressed() {
+			pressTarget = 1
+		}
+		pressT := clampF32(animateEffect(c, trigger, th, animChan1, pressTarget, motion.FastEffects), 0, 1)
+		morphT := max(openT, pressT)
+		radius := float32(menuTriggerHeight/2) - (float32(menuTriggerHeight/2)-12)*morphT
+		trigger.Radius(radius)
+
+		restBg := cs.SurfaceContainerHighest
+		restInk := cs.OnSurfaceVariant
+		openBg := cs.SecondaryContainer
+		openInk := cs.OnSecondaryContainer
+		if openBg.A == 0 {
+			openBg = cs.PrimaryContainer
+			openInk = cs.OnPrimaryContainer
+		}
+		bg := restBg.MixOklab(openBg, openT)
+		ink := restInk.MixOklab(openInk, openT)
 		if disabled {
 			bg = cs.OnSurface.Alpha(float32(tokens.DisabledContainerOpacity))
 			ink = cs.OnSurface.Alpha(float32(tokens.DisabledContentOpacity))
@@ -179,14 +203,14 @@ func MenuButton(c *ui.Context, label string, icon IconDraw, items []MenuItem, op
 		trigger.Background(bg).TextColor(ink)
 		attachRippleWithContext(c, th, trigger, StateLayerOptions{
 			Color:    ink,
-			Radius:   menuTriggerHeight / 2,
+			Radius:   radius,
 			Disabled: disabled,
 		})
 		trigger.Children(func() {
 			drawIconBox(c, icon, 24, ink)
 		})
 		m.Popup(func(panel ui.Element) {
-			styleMenuPanel(th, panel, o)
+			styleMenuPanel(c, th, panel, o)
 			buildMenuItems(c, th, m, items, 0)
 		})
 		return trigger
@@ -195,7 +219,7 @@ func MenuButton(c *ui.Context, label string, icon IconDraw, items []MenuItem, op
 		return buildTrigger(o.Open)
 	}
 	wrap := ui.Row(c).Shrink(0).DimDisabled(false)
-	open := ui.Local(wrap, menuOpenKey{}, func() bool { return false })
+	open := localBool(wrap, animChan0)
 	wrap.Children(func() {
 		trigger := buildTrigger(open)
 		if wrap.Focused() {
@@ -224,7 +248,7 @@ func ContextMenu(c *ui.Context, target ui.Element, items []MenuItem, opts ...Men
 	th := CurrentTheme(c)
 	open := o.Open
 	if open == nil {
-		open = ui.Local(target, contextMenuOpenKey{}, func() bool { return false })
+		open = localBool(target, animChan6)
 	}
 	if o.Disabled || target.IsDisabled() || inExitingOverlay(c) {
 		*open = false
@@ -232,24 +256,35 @@ func ContextMenu(c *ui.Context, target ui.Element, items []MenuItem, opts ...Men
 	}
 	m := ui.ContextMenuBase(c, target, open)
 	m.Popup(func(panel ui.Element) {
-		styleMenuPanel(th, panel, o)
+		styleMenuPanel(c, th, panel, o)
 		buildMenuItems(c, th, m, items, 0)
 	})
 	return target
 }
 
 // styleMenuPanel paints the layered, large-cornered menu surface.
-func styleMenuPanel(th *Theme, panel ui.Element, o MenuOptions) {
+func styleMenuPanel(c *ui.Context, th *Theme, panel ui.Element, o MenuOptions) {
 	if isPositiveFiniteF32(o.Width) {
 		panel.Width(o.Width)
 	} else {
 		panel.MinWidth(menuPanelMinWidth)
 	}
 	panel.Padding(menuPanelPadding).
+		Gap(2).
 		Radius(th.Shapes.Radius(tokens.ShapeLarge)).
 		Background(SurfaceColorForElevation(th, tokens.Level2)).
-		TextColor(th.Colors.OnSurface)
+		TextColor(th.Colors.OnSurface).
+		AttachedOrigin()
+	if hl := resolveHairlineColor(th, ui.Color{}); hl.A > 0 {
+		panel.Border(1, hl)
+	}
 	ApplyElevationShadows(th, panel, tokens.Level2)
+	if !(th.ReduceMotion || c.Preferences().ReduceMotion) {
+		panel.Transition(ui.ElementTransition{
+			Duration: 130 * time.Millisecond,
+			Enter:    &ui.Motion{Opacity: 0, Scale: 0.92, Y: -6, Flip: true},
+		})
+	}
 	if o.Label != "" {
 		panel.Label(o.Label)
 	}
@@ -260,7 +295,7 @@ func buildMenuItems(c *ui.Context, th *Theme, m ui.MenuParts, items []MenuItem, 
 	for i := range items {
 		item := &items[i]
 		if item.Separator {
-			Divider(c, DividerOptions{Inset: menuPanelPadding})
+			Divider(c, DividerOptions{Inset: menuPanelPadding}).MarginY(4)
 			continue
 		}
 		c.Key(i)
@@ -270,7 +305,7 @@ func buildMenuItems(c *ui.Context, th *Theme, m ui.MenuParts, items []MenuItem, 
 				row := m.SubmenuItem()
 				styleMenuRow(c, th, row, item, true, false)
 				m.Submenu(row, func(panel ui.Element) {
-					styleMenuPanel(th, panel, MenuOptions{})
+					styleMenuPanel(c, th, panel, MenuOptions{})
 					buildMenuItems(c, th, m, item.Submenu, level+1)
 				})
 				return
@@ -315,15 +350,22 @@ func styleMenuRow(c *ui.Context, th *Theme, row ui.Element, item *MenuItem, chev
 		subInk = ink
 	}
 
+	rowRadius := th.Shapes.Radius(tokens.ShapeMedium)
 	row.DimDisabled(false).
 		Height(menuRowHeight).
 		PaddingY(8).PaddingX(12).
-		Radius(th.Shapes.Radius(tokens.ShapeSmall)).
+		Radius(rowRadius).
 		Gap(12).
 		AlignItems(ui.Center).
 		Disabled(item.Disabled).
 		Background(bg).
 		TextColor(ink)
+	attachRippleWithContext(c, th, row, StateLayerOptions{
+		Color:     ink,
+		Radius:    rowRadius,
+		FocusRing: FocusRingNone,
+		Disabled:  disabled,
+	})
 	marked := radio || item.Checkable
 	row.Children(func() {
 		if marked {
@@ -359,11 +401,10 @@ func drawMenuMark(c *ui.Context, checked, radio bool, size float32, ink ui.Color
 		}
 		if radio {
 			center := ui.Point{X: r.X + r.W/2, Y: r.Y + r.H/2}
-			if checked {
-				p.Fill(ui.Rect{X: center.X - 5, Y: center.Y - 5, W: 10, H: 10}, ink, 5)
-				return
-			}
 			p.Stroke(ui.Rect{X: center.X - 7, Y: center.Y - 7, W: 14, H: 14}, ink, 7, 1.5)
+			if checked {
+				p.Fill(ui.Rect{X: center.X - 3.5, Y: center.Y - 3.5, W: 7, H: 7}, ink, 3.5)
+			}
 			return
 		}
 		if checked {
