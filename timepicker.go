@@ -492,11 +492,12 @@ func buildTimeDial(c *ui.Context, th *Theme, st *timePickerState, value *time.Ti
 		paint.onSelected = cs.OnSurface.Alpha(float32(tokens.DisabledContentOpacity))
 		paint.handInk = cs.OnSurface.Alpha(float32(tokens.DisabledContentOpacity))
 	}
+	hand := localDrawPath(dial)
 	dial.Draw(func(p *ui.Painter, r ui.Rect) {
 		if r.W <= 0 || r.H <= 0 {
 			return
 		}
-		drawTimeDial(p, r, paint)
+		drawTimeDial(p, r, paint, hand)
 	})
 	dial.DrawOver(func(p *ui.Painter, r ui.Rect) {
 		if !dial.Valid() || !dial.FocusVisible() || disabled || r.W <= 0 || r.H <= 0 {
@@ -699,7 +700,7 @@ type dialPaint struct {
 // drawTimeDial paints the dial's plate, hand, tick labels and selected circle
 // in three passes, so the circle covers no digit and every digit it does cover
 // is drawn again in its OnPrimary ink.
-func drawTimeDial(p *ui.Painter, r ui.Rect, d dialPaint) {
+func drawTimeDial(p *ui.Painter, r ui.Rect, d dialPaint, hand *ui.Path) {
 	if r.W <= 0 || r.H <= 0 {
 		return
 	}
@@ -734,11 +735,11 @@ func drawTimeDial(p *ui.Painter, r ui.Rect, d dialPaint) {
 		x, y := dialPoint(cx, cy, label.angle, label.radius)
 		paintCenteredSpan(p, x, y, ui.Span{Text: label.text, Size: 13, Weight: 500, Color: d.ink})
 	}
-	var hand ui.Path
+	hand.Reset()
 	hand.MoveTo(cx, cy)
 	hand.LineTo(tipX, tipY)
 	hand.Cap(ui.RoundCap)
-	p.StrokePath(&hand, 2, d.handInk)
+	p.StrokePath(hand, 2, d.handInk)
 	p.Fill(ui.Rect{X: cx - 4, Y: cy - 4, W: 8, H: 8}, d.handInk, 4)
 
 	// Pass 2: the selection circle over the ticks it lands on.

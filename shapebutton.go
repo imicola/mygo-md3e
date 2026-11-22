@@ -164,6 +164,7 @@ type shapeBtnMorphCache struct {
 	selMorph      *shape.Morph
 	pressMorph    *shape.Morph
 	selPressMorph *shape.Morph
+	fallbackPath  ui.Path
 }
 
 func samePolygon(a, b *shape.RoundedPolygon) bool {
@@ -454,11 +455,13 @@ func renderShapeButton(c *ui.Context, th *Theme, el ui.Element, cfg shapeButtonR
 			return activeMorph.AsPath(activeProgress, rect)
 		}
 		if fallbackPoly != nil {
-			return fallbackPoly.ToPath(rect)
+			return fallbackPoly.WriteTo(&cache.fallbackPath, rect)
 		}
 		return nil
 	}
 
+	// Draw and DrawOver finish flattening the outline before the other
+	// callback can reuse its storage, even when the ripple uses an inset.
 	borderInset := float32(0)
 	if borderCol.A > 0 {
 		borderInset = 0.5
@@ -672,18 +675,17 @@ func IconBadge(c *ui.Context, icon IconDraw, opts ...IconBadgeOptions) ui.Elemen
 
 	poly := validShapePolygon(o.Shape, nil)
 	if poly != nil {
+		scratch := localDrawPath(el)
 		el.Draw(func(p *ui.Painter, r ui.Rect) {
 			if !isPositiveFiniteF32(r.W) || !isPositiveFiniteF32(r.H) {
 				return
 			}
-			path := poly.ToPath(r)
-			if path != nil {
-				if bg.A > 0 {
-					p.FillPath(path, bg)
-				}
-				if border.A > 0 {
-					p.StrokePath(path, 1, border)
-				}
+			path := poly.WriteTo(scratch, r)
+			if bg.A > 0 {
+				p.FillPath(path, bg)
+			}
+			if border.A > 0 {
+				p.StrokePath(path, 1, border)
 			}
 			drawMorphCrossfadeIcon(p, r, iconSize, icon, nil, fg, 0)
 		})

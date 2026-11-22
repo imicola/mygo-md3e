@@ -212,12 +212,22 @@ func resolveHairlineColor(th *Theme, override ui.Color) ui.Color {
 	return base.Alpha(0.45)
 }
 
-func clipSurfaceRadii(p *ui.Painter, r ui.Rect, radii [4]float32, fn func()) {
-	if radii[0] == radii[1] && radii[1] == radii[2] && radii[2] == radii[3] {
+type componentDrawPathKey struct{}
+
+func localDrawPath(el ui.Element) *ui.Path {
+	return ui.Local(el, componentDrawPathKey{}, func() ui.Path { return ui.Path{} })
+}
+
+func equalRadii(radii [4]float32) bool {
+	return radii[0] == radii[1] && radii[1] == radii[2] && radii[2] == radii[3]
+}
+
+func clipSurfaceRadii(p *ui.Painter, scratch *ui.Path, r ui.Rect, radii [4]float32, fn func()) {
+	if equalRadii(radii) {
 		p.Clip(r, radii[0], fn)
 		return
 	}
-	if path := roundedRectPath(r, radii); path != nil {
+	if path := writeRoundedRectPath(scratch, r, radii); path != nil {
 		p.ClipPath(path, fn)
 		return
 	}
@@ -303,17 +313,18 @@ func Surface(c *ui.Context, opts ...SurfaceOptions) ui.Element {
 			// painted above, and this keeps content inside its bounds.
 			el.Clip()
 		}
+		scratch := localDrawPath(el)
+		elevation := opt.Elevation
+		drawShadow := !opt.DisableShadow && elevation > tokens.Level0
+		shadow := th.Colors.Shadow
 		el.Draw(func(p *ui.Painter, r ui.Rect) {
 			if !isPositiveFiniteF32(r.W) || !isPositiveFiniteF32(r.H) {
 				return
 			}
-			path := poly.ToPath(r)
-			if path == nil {
-				return
-			}
-			if !opt.DisableShadow && opt.Elevation > tokens.Level0 {
-				spec := opt.Elevation.Spec()
-				shadowCol := th.Colors.Shadow
+			path := poly.WriteTo(scratch, r)
+			if drawShadow {
+				spec := elevation.Spec()
+				shadowCol := shadow
 				if shadowCol.A == 0 {
 					shadowCol = ui.RGB(0, 0, 0)
 				}
@@ -356,11 +367,15 @@ func Surface(c *ui.Context, opts ...SurfaceOptions) ui.Element {
 		if (linGrad != nil && radGrad != nil) || backdrop != nil {
 			radii := geom.radii
 			overlayRadial := linGrad != nil && radGrad != nil
+			var scratch *ui.Path
+			if !equalRadii(radii) {
+				scratch = localDrawPath(el)
+			}
 			el.Draw(func(p *ui.Painter, r ui.Rect) {
 				if !isPositiveFiniteF32(r.W) || !isPositiveFiniteF32(r.H) {
 					return
 				}
-				clipSurfaceRadii(p, r, radii, func() {
+				clipSurfaceRadii(p, scratch, r, radii, func() {
 					if overlayRadial {
 						p.FillRadialGradient(r, *radGrad, 0)
 					}
@@ -403,10 +418,11 @@ func Surface(c *ui.Context, opts ...SurfaceOptions) ui.Element {
 	return el
 }
 
-// roundedRectPath constructs a closed *ui.Path for rectangle r with independent
+// writeRoundedRectPath resets p and writes a closed rectangle with independent
 // [TL, TR, BR, BL] corner radii clamped according to CSS border-radius proportions.
-func roundedRectPath(r ui.Rect, radii [4]float32) *ui.Path {
-	if r.W <= 0 || r.H <= 0 {
+func writeRoundedRectPath(p *ui.Path, r ui.Rect, radii [4]float32) *ui.Path {
+	p.Reset()
+	if !isPositiveFiniteF32(r.W) || !isPositiveFiniteF32(r.H) {
 		return nil
 	}
 	tl := max(radii[0], 0)
@@ -431,7 +447,6 @@ func roundedRectPath(r ui.Rect, radii [4]float32) *ui.Path {
 	// Standard cubic Bézier circular corner approximation: 1 - 4*(sqrt(2)-1)/3.
 	const c = float32(1.0 - 0.5522847498)
 
-	var p ui.Path
 	p.MoveTo(r.X+tl, r.Y)
 	p.LineTo(r.X+r.W-tr, r.Y)
 	if tr > 0 {
@@ -449,6 +464,5 @@ func roundedRectPath(r ui.Rect, radii [4]float32) *ui.Path {
 	if tl > 0 {
 		p.CubeTo(r.X, r.Y+tl*c, r.X+tl*c, r.Y, r.X+tl, r.Y)
 	}
-	p.Close()
-	return &p
+	return p.Close()
 }

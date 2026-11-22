@@ -329,20 +329,27 @@ func (p *RoundedPolygon) Normalized() *RoundedPolygon {
 // others, call Normalized first. Returns an empty path for nil/empty polygons
 // or non-positive/non-finite rects.
 func (p *RoundedPolygon) ToPath(r ui.Rect) *ui.Path {
-	path := &ui.Path{}
+	return p.WriteTo(&ui.Path{}, r)
+}
+
+// WriteTo resets dst and writes the polygon's normalized outline mapped onto r.
+// Use a caller-owned path to reuse storage between draws. A nil or empty
+// polygon or a non-positive or non-finite rect leaves dst empty.
+func (p *RoundedPolygon) WriteTo(dst *ui.Path, r ui.Rect) *ui.Path {
+	dst.Reset()
 	if p == nil || len(p.cubics) == 0 || !finiteRect(r) || r.W <= 0 || r.H <= 0 {
-		return path
+		return dst
 	}
 	first := p.cubics[0].P0
-	path.MoveTo(r.X+float32(first.X)*r.W, r.Y+float32(first.Y)*r.H)
+	dst.MoveTo(r.X+float32(first.X)*r.W, r.Y+float32(first.Y)*r.H)
 	for _, c := range p.cubics {
-		path.CubeTo(
+		dst.CubeTo(
 			r.X+float32(c.P1.X)*r.W, r.Y+float32(c.P1.Y)*r.H,
 			r.X+float32(c.P2.X)*r.W, r.Y+float32(c.P2.Y)*r.H,
 			r.X+float32(c.P3.X)*r.W, r.Y+float32(c.P3.Y)*r.H,
 		)
 	}
-	return path.Close()
+	return dst.Close()
 }
 
 // NewPolygon builds a rounded polygon from vertices in order and the

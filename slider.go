@@ -410,7 +410,7 @@ func showValueIndicator(c *ui.Context, th *Theme, text string, cx, anchorTop, pr
 	}
 
 	ui.Overlay(c, func() {
-		ui.Box(c).
+		box := ui.Box(c).
 			Absolute().
 			Left(cx-w/2).
 			Top(top).
@@ -418,26 +418,27 @@ func showValueIndicator(c *ui.Context, th *Theme, text string, cx, anchorTop, pr
 			PassThrough().
 			Scale(scale, scale).
 			Opacity(opacity).
-			TransformOrigin(0.5, 1).
-			Draw(func(p *ui.Painter, r ui.Rect) {
-				if r.W <= 0 || r.H <= 0 {
-					return
-				}
-				pill := ui.Rect{X: r.X, Y: r.Y, W: r.W, H: r.H - tail}
-				radius := pill.H / 2
-				p.Shadow(pill, radius, 0, 2, 6, 0, shadow.Alpha(0.18))
-				p.Fill(pill, bg, radius)
-				var tip ui.Path
-				tip.MoveTo(r.X+r.W/2-5, pill.Y+pill.H-0.5)
-				tip.LineTo(r.X+r.W/2+5, pill.Y+pill.H-0.5)
-				tip.LineTo(r.X+r.W/2, r.Y+r.H)
-				tip.Close()
-				p.FillPath(&tip, bg)
+			TransformOrigin(0.5, 1)
+		tip := localDrawPath(box)
+		box.Draw(func(p *ui.Painter, r ui.Rect) {
+			if r.W <= 0 || r.H <= 0 {
+				return
+			}
+			pill := ui.Rect{X: r.X, Y: r.Y, W: r.W, H: r.H - tail}
+			radius := pill.H / 2
+			p.Shadow(pill, radius, 0, 2, 6, 0, shadow.Alpha(0.18))
+			p.Fill(pill, bg, radius)
+			tip.Reset()
+			tip.MoveTo(r.X+r.W/2-5, pill.Y+pill.H-0.5)
+			tip.LineTo(r.X+r.W/2+5, pill.Y+pill.H-0.5)
+			tip.LineTo(r.X+r.W/2, r.Y+r.H)
+			tip.Close()
+			p.FillPath(tip, bg)
 
-				spans := []ui.Span{{Text: text, Size: 12, Weight: 500, Color: fg}}
-				tw, th := p.MeasureText(0, spans...)
-				p.RichText(r.X+(r.W-tw)/2, r.Y+(pill.H-th)/2, 0, spans...)
-			})
+			spans := []ui.Span{{Text: text, Size: 12, Weight: 500, Color: fg}}
+			tw, th := p.MeasureText(0, spans...)
+			p.RichText(r.X+(r.W-tw)/2, r.Y+(pill.H-th)/2, 0, spans...)
+		})
 	})
 }
 
@@ -649,14 +650,14 @@ func RangeSlider(c *ui.Context, low, high *float64, lo, hi float64, opts ...Rang
 
 	if lowEl.Valid() {
 		lf := sliderFraction(*low, lo, hi)
-		lowEl.StartPercent(lf * 100).
-			MarginStart(-sliderHitWidth * lf).
+		lowEl.StartPercent(lf*100).
+			MarginStart(-sliderHitWidth*lf).
 			Range(lo, *high, *low)
 	}
 	if highEl.Valid() {
 		hf := sliderFraction(*high, lo, hi)
-		highEl.StartPercent(hf * 100).
-			MarginStart(-sliderHitWidth * hf).
+		highEl.StartPercent(hf*100).
+			MarginStart(-sliderHitWidth*hf).
 			Range(*low, hi, *high)
 	}
 

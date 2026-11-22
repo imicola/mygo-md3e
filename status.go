@@ -652,21 +652,24 @@ func Avatar(c *ui.Context, opts ...AvatarOptions) ui.Element {
 	}
 
 	poly := validShapePolygon(o.Shape, nil)
+	var scratch *ui.Path
+	if poly != nil {
+		scratch = localDrawPath(el)
+	}
 	imgSrc := o.Image
 	el.Draw(func(p *ui.Painter, r ui.Rect) {
 		if !isPositiveFiniteF32(r.W) || !isPositiveFiniteF32(r.H) {
 			return
 		}
 		if poly != nil {
-			if path := poly.ToPath(r); path != nil {
-				if bg.A > 0 {
-					p.FillPath(path, bg)
-				}
-				if imgSrc != nil {
-					shape.ClipShape(p, poly, r, func() {
-						p.Image(imgSrc, r, ui.Cover)
-					})
-				}
+			path := poly.WriteTo(scratch, r)
+			if bg.A > 0 {
+				p.FillPath(path, bg)
+			}
+			if imgSrc != nil {
+				p.ClipPath(path, func() {
+					p.Image(imgSrc, r, ui.Cover)
+				})
 			}
 			return
 		}

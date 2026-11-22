@@ -86,13 +86,13 @@ type ImageOptions struct {
 }
 
 type (
-	imageFadeKey        struct{}
-	imageFadeAlphaKey   struct{}
-	imagePolyClockKey   struct{}
-	imageChildKey       struct{}
-	imageSkeletonKey    struct{}
-	imageRetryBtnKey    struct{}
-	imageCustomSlotKey  struct{}
+	imageFadeKey       struct{}
+	imageFadeAlphaKey  struct{}
+	imagePolyClockKey  struct{}
+	imageChildKey      struct{}
+	imageSkeletonKey   struct{}
+	imageRetryBtnKey   struct{}
+	imageCustomSlotKey struct{}
 )
 
 type imageFadeState struct {
@@ -278,6 +278,7 @@ func Image(c *ui.Context, src ui.ImageSource, opts ...ImageOptions) ui.Element {
 	fit := o.Fit
 
 	if poly != nil {
+		scratch := localDrawPath(host)
 		polyClock := ui.Local(host, imagePolyClockKey{}, func() imagePolyClock { return imagePolyClock{} })
 		emptyInk := cs.OnSurfaceVariant.Alpha(0.55)
 		errInk := cs.OnErrorContainer
@@ -290,10 +291,7 @@ func Image(c *ui.Context, src ui.ImageSource, opts ...ImageOptions) ui.Element {
 			if !isPositiveFiniteF32(r.W) || !isPositiveFiniteF32(r.H) {
 				return
 			}
-			path := poly.ToPath(r)
-			if path == nil {
-				return
-			}
+			path := poly.WriteTo(scratch, r)
 			if isLoading && o.LoadingContent == nil {
 				live := host.Valid()
 				vis := rectIntersects(r, p.Visible())
@@ -340,7 +338,7 @@ func Image(c *ui.Context, src ui.ImageSource, opts ...ImageOptions) ui.Element {
 					if !isPositiveFiniteF32(r.W) || !isPositiveFiniteF32(r.H) {
 						return
 					}
-					shape.ClipShape(p, poly, r, func() {
+					shape.ClipShapeTo(p, scratch, poly, r, func() {
 						drawImageInRect(p, src, r, fit, objPos, o.HasObjectPosition)
 						if o.Grayscale {
 							p.Fill(r, cs.Surface.Alpha(0.28), 0)
@@ -361,9 +359,7 @@ func Image(c *ui.Context, src ui.ImageSource, opts ...ImageOptions) ui.Element {
 				if !isPositiveFiniteF32(r.W) || !isPositiveFiniteF32(r.H) {
 					return
 				}
-				if path := poly.ToPath(r); path != nil {
-					p.StrokePath(path, borderW, borderCol)
-				}
+				p.StrokePath(poly.WriteTo(scratch, r), borderW, borderCol)
 			})
 		}
 		return host

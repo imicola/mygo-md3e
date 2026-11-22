@@ -370,6 +370,10 @@ func buildTextField(c *ui.Context, value *string, multiline bool, o TextFieldOpt
 	isErr := o.Error
 	restCenterOffset := dm.height * scaleUp / 2
 	floatOffset := dm.floatOffset * scaleUp
+	var outline *ui.Path
+	if outlined && label != "" {
+		outline = localDrawPath(field)
+	}
 	field.Draw(func(p *ui.Painter, r ui.Rect) {
 		if r.W <= 0 || r.H <= 0 {
 			return
@@ -423,7 +427,7 @@ func buildTextField(c *ui.Context, value *string, multiline bool, o TextFieldOpt
 				notchEnd = min(notchEnd, r.X+r.W-textFieldRadius)
 				if notchEnd > notchStart {
 					strokeW := outlinedWidth(isErr, focused)
-					if path := outlinedFieldPath(r, textFieldRadius, strokeW, notchStart, notchEnd); path != nil {
+					if path := outlinedFieldPath(outline, r, textFieldRadius, strokeW, notchStart, notchEnd); path != nil {
 						p.StrokePath(path, strokeW, borderInk)
 					} else {
 						p.Stroke(r, borderInk, textFieldRadius, strokeW)
@@ -617,7 +621,7 @@ func disabledContent(disabled bool, c ui.Color) ui.Color {
 // gap in the top edge from notchStart to notchEnd, or nil when the notch
 // leaves no drawable border. The centerline is inset by half the stroke width
 // so p.StrokePath aligns flush inside r like p.Stroke.
-func outlinedFieldPath(r ui.Rect, radius, strokeW, notchStart, notchEnd float32) *ui.Path {
+func outlinedFieldPath(p *ui.Path, r ui.Rect, radius, strokeW, notchStart, notchEnd float32) *ui.Path {
 	hw := strokeW * 0.5
 	x0, x1 := r.X+hw, r.X+r.W-hw
 	y0, y1 := r.Y+hw, r.Y+r.H-hw
@@ -636,7 +640,7 @@ func outlinedFieldPath(r ui.Rect, radius, strokeW, notchStart, notchEnd float32)
 		return nil
 	}
 	k := innerR * 0.5522847498
-	var p ui.Path
+	p.Reset()
 	p.MoveTo(notchEnd, y0)
 	p.LineTo(x1-innerR, y0)
 	p.CubeTo(x1-innerR+k, y0, x1, y0+innerR-k, x1, y0+innerR)
@@ -647,7 +651,7 @@ func outlinedFieldPath(r ui.Rect, radius, strokeW, notchStart, notchEnd float32)
 	p.LineTo(x0, y0+innerR)
 	p.CubeTo(x0, y0+innerR-k, x0+innerR-k, y0, x0+innerR, y0)
 	p.LineTo(notchStart, y0)
-	return &p
+	return p
 }
 
 type textFieldDensityMetrics struct {

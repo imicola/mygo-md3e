@@ -465,7 +465,7 @@ func attachVirtualListRowFeedback(
 		}
 		if !rowShell.Valid() || r.Context == nil || !r.Context.Valid() {
 			if st.lastAlpha > 0.001 && !st.lastDisabled {
-				paintVirtualListOverlay(p, rect, st.lastRadii, st.lastInk, st.lastAlpha, nil)
+				st.ripple.paintVirtualListOverlay(p, rect, st.lastRadii, st.lastInk, st.lastAlpha, nil)
 			}
 			return
 		}
@@ -532,11 +532,11 @@ func attachVirtualListRowFeedback(
 		if layerAlpha <= 0.001 && len(wavesToDraw) == 0 {
 			return
 		}
-		paintVirtualListOverlay(p, rect, radii, ink, layerAlpha, wavesToDraw)
+		st.ripple.paintVirtualListOverlay(p, rect, radii, ink, layerAlpha, wavesToDraw)
 	})
 }
 
-func paintVirtualListOverlay(
+func (st *rippleState) paintVirtualListOverlay(
 	p *ui.Painter,
 	rect ui.Rect,
 	radii [4]float32,
@@ -544,26 +544,10 @@ func paintVirtualListOverlay(
 	layerAlpha float32,
 	wavesToDraw []evaluatedWave,
 ) {
-	paintInClip(p, rect, radii, nil, func() {
+	paintInClip(p, &st.clipPath, rect, radii, func() {
 		if layerAlpha > 0.001 {
 			p.FillRadii(rect, radii, ink.Alpha(layerAlpha))
 		}
-		for i := range wavesToDraw {
-			w := &wavesToDraw[i]
-			waveInk := ink.Alpha(w.waveAlpha)
-			cx, cy := w.ox/rect.W, w.oy/rect.H
-			if cx == 0 && cy == 0 {
-				cx = 1e-4
-			}
-			p.FillRadialGradient(rect, ui.RadialGradient{
-				Center: ui.Point{X: cx, Y: cy},
-				Radius: w.curR,
-				Stops: []ui.GradientStop{
-					{Color: waveInk, At: 0},
-					{Color: waveInk, At: 0.80},
-					{Color: ui.Transparent, At: 1},
-				},
-			}, 0)
-		}
+		st.paintWaves(p, rect, ink, wavesToDraw)
 	})
 }

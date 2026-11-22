@@ -378,6 +378,8 @@ func buildWavyScrubPath(path *ui.Path, x0, x1, cy float32, phase float64) {
 	}
 }
 
+type timeBubblePathKey struct{}
+
 func showTimeBubble(c *ui.Context, th *md3e.Theme, text string, cx, anchorTop, progress float32, bg, fg ui.Color) {
 	w := clampF32(20+float32(utf8.RuneCountInString(text))*7.5, 48, 120)
 	h := float32(30)
@@ -406,20 +408,21 @@ func showTimeBubble(c *ui.Context, th *md3e.Theme, text string, cx, anchorTop, p
 			PassThrough().
 			Scale(scale, scale).
 			Opacity(opacity)
+		tri := ui.Local(box, timeBubblePathKey{}, func() ui.Path { return ui.Path{} })
 
 		box.Draw(func(p *ui.Painter, r ui.Rect) {
 			pillR := ui.Rect{X: r.X, Y: r.Y, W: r.W, H: r.H - tail}
 			rad := pillR.H * 0.5
 			p.Fill(pillR, bg, rad)
 			if tail > 0 {
-				var tri ui.Path
+				tri.Reset()
 				tx := r.X + tipX
 				by := r.Y + pillR.H
 				tri.MoveTo(tx-tail, by-1)
 				tri.LineTo(tx+tail, by-1)
 				tri.LineTo(tx, by+tail)
 				tri.Close()
-				p.FillPath(&tri, bg)
+				p.FillPath(tri, bg)
 			}
 		})
 

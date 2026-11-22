@@ -156,7 +156,9 @@ type rippleState struct {
 	focusHandle *ui.Handle
 	srv         ui.Services
 
-	halo haloFadeState
+	halo     haloFadeState
+	clipPath ui.Path
+	stops    [3]ui.GradientStop
 }
 
 type windowFocusSlot struct {
@@ -336,15 +338,17 @@ func attachOverlayFeedbackWithTheme(c *ui.Context, th *Theme, el ui.Element, wit
 		radii = [4]float32{opt.Radius, opt.Radius, opt.Radius, opt.Radius}
 	}
 
+	disabled, dragged := opt.Disabled, opt.Dragged
+	clip, customPath, poly, inset := opt.Clip, opt.ClipPath, opt.Shape, opt.BorderInset
 	if withRipple {
-		if c != nil && !opt.Disabled {
+		if c != nil && !disabled {
 			if st.focusHandle == nil {
 				st.focusHandle = new(ui.Handle)
 			}
 			el.Bind(st.focusHandle)
 		}
 		el.ObserveInput(func(ev ui.InputEvent) {
-			if opt.Disabled {
+			if disabled {
 				return
 			}
 			switch ev.Kind {
@@ -389,7 +393,7 @@ func attachOverlayFeedbackWithTheme(c *ui.Context, th *Theme, el ui.Element, wit
 		if !el.Valid() || r.W <= 0 || r.H <= 0 {
 			return
 		}
-		if opt.Disabled || el.IsDisabled() {
+		if disabled || el.IsDisabled() {
 			st.clearTransient()
 			st.halo.reset()
 			if st.hoverHook != nil {
@@ -422,15 +426,15 @@ func attachOverlayFeedbackWithTheme(c *ui.Context, th *Theme, el ui.Element, wit
 		// The ripple itself is the pressed feedback; adding the 10% pressed layer on
 		// top would double it. Keep the pressed layer for keyboard, StateLayer-only,
 		// and ReduceMotion feedback where no wave spreads.
-		targetAlpha := resolveStateLayerTarget(false, opt.Dragged, pressed || st.pointerHeld, !withRipple || reduceMotion, focused, hovered)
+		targetAlpha := resolveStateLayerTarget(false, dragged, pressed || st.pointerHeld, !withRipple || reduceMotion, focused, hovered)
 		layerAlpha, needFrame := st.halo.step(targetAlpha, now, reduceMotion)
 
 		box, boxRadii := r, radii
-		if opt.Clip != nil {
-			box, boxRadii = opt.Clip(r)
+		if clip != nil {
+			box, boxRadii = clip(r)
 		}
-		clipRect := insetRect(box, opt.BorderInset)
-		clipRadii := insetRadii(boxRadii, opt.BorderInset)
+		clipRect := insetRect(box, inset)
+		clipRadii := insetRadii(boxRadii, inset)
 		if clipRect.W <= 0 || clipRect.H <= 0 {
 			return
 		}
@@ -478,44 +482,25 @@ func attachOverlayFeedbackWithTheme(c *ui.Context, th *Theme, el ui.Element, wit
 				}
 			}
 
-			for i := range wavesToDraw {
-				w := &wavesToDraw[i]
-				waveInk := ink.Alpha(w.waveAlpha)
-				cx, cy := w.ox/clipRect.W, w.oy/clipRect.H
-				if cx == 0 && cy == 0 {
-					// ui's RadialGradient reads the zero Point as the box
-					// center; nudge a top-left origin off it.
-					cx = 1e-4
-				}
-				p.FillRadialGradient(clipRect, ui.RadialGradient{
-					Center: ui.Point{X: cx, Y: cy},
-					Radius: w.curR,
-					Stops: []ui.GradientStop{
-						{Color: waveInk, At: 0},
-						{Color: waveInk, At: 0.80},
-						{Color: ui.Transparent, At: 1},
-					},
-				}, 0)
-			}
+			st.paintWaves(p, clipRect, ink, wavesToDraw)
 		}
 
-		if opt.ClipPath != nil {
-			if path := opt.ClipPath(clipRect); path != nil {
+		if customPath != nil {
+			if path := customPath(clipRect); path != nil {
 				p.ClipPath(path, func() {
 					paintBody(path)
 				})
 			}
 			return
 		}
-		if opt.Shape != nil {
-			if path := opt.Shape.ToPath(clipRect); path != nil {
-				p.ClipPath(path, func() {
-					paintBody(path)
-				})
-			}
+		if poly != nil {
+			path := poly.WriteTo(&st.clipPath, clipRect)
+			p.ClipPath(path, func() {
+				paintBody(path)
+			})
 			return
 		}
-		paintInClip(p, clipRect, clipRadii, nil, func() {
+		paintInClip(p, &st.clipPath, clipRect, clipRadii, func() {
 			paintBody(nil)
 		})
 	})
@@ -578,16 +563,33 @@ func farthestCornerDist(ox, oy, w, h float32) float32 {
 	return float32(math.Hypot(float64(dx), float64(dy)))
 }
 
-func paintInClip(p *ui.Painter, box ui.Rect, radii [4]float32, poly *shape.RoundedPolygon, fn func()) {
-	if poly != nil {
-		shape.ClipShape(p, poly, box, fn)
-		return
+func (st *rippleState) paintWaves(p *ui.Painter, box ui.Rect, ink ui.Color, waves []evaluatedWave) {
+	for _, wave := range waves {
+		waveInk := ink.Alpha(wave.waveAlpha)
+		cx, cy := wave.ox/box.W, wave.oy/box.H
+		if cx == 0 && cy == 0 {
+			// The zero Point means the center of the box to RadialGradient.
+			cx = 1e-4
+		}
+		st.stops = [3]ui.GradientStop{
+			{Color: waveInk, At: 0},
+			{Color: waveInk, At: 0.80},
+			{Color: ui.Transparent, At: 1},
+		}
+		p.FillRadialGradient(box, ui.RadialGradient{
+			Center: ui.Point{X: cx, Y: cy},
+			Radius: wave.curR,
+			Stops:  st.stops[:],
+		}, 0)
 	}
-	if radii[0] == radii[1] && radii[1] == radii[2] && radii[2] == radii[3] {
+}
+
+func paintInClip(p *ui.Painter, scratch *ui.Path, box ui.Rect, radii [4]float32, fn func()) {
+	if equalRadii(radii) {
 		p.Clip(box, radii[0], fn)
 		return
 	}
-	if path := roundedRectPath(box, radii); path != nil {
+	if path := writeRoundedRectPath(scratch, box, radii); path != nil {
 		p.ClipPath(path, fn)
 	}
 }

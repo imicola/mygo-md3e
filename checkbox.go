@@ -178,6 +178,7 @@ func buildCheckbox(c *ui.Context, el ui.Element, on, mixed bool, o CheckboxOptio
 	dash := animateValue(el, checkboxMixedKey{}, boolFloat(mixed), spatial, thReduceMotion)
 
 	haloSt := ui.Local(el, checkboxHaloKey{}, func() haloFadeState { return haloFadeState{} })
+	mark := localDrawPath(el)
 	haloInk := cs.OnSurfaceVariant
 	paintSnap := checkboxPaint{
 		fill:    clampF32(fill, 0, 1),
@@ -208,7 +209,7 @@ func buildCheckbox(c *ui.Context, el ui.Element, on, mixed bool, o CheckboxOptio
 			}
 			paintCfg := paintSnap
 			paintCfg.halo = clampF32(halo, 0, 1)
-			drawCheckbox(p, r, paintCfg)
+			drawCheckbox(p, r, paintCfg, mark)
 		})
 		if o.Label != "" {
 			applyTypeStyleWithTheme(th, ui.Text(c, o.Label).NoWrap().TextColor(ink), tokens.LabelLarge)
@@ -219,7 +220,7 @@ func buildCheckbox(c *ui.Context, el ui.Element, on, mixed bool, o CheckboxOptio
 
 // drawCheckbox paints the state layer, box and mark of a check box in its
 // touch-target square r.
-func drawCheckbox(p *ui.Painter, r ui.Rect, s checkboxPaint) {
+func drawCheckbox(p *ui.Painter, r ui.Rect, s checkboxPaint, mark *ui.Path) {
 	if r.W <= 0 || r.H <= 0 {
 		return
 	}
@@ -237,32 +238,32 @@ func drawCheckbox(p *ui.Painter, r ui.Rect, s checkboxPaint) {
 	}
 
 	if s.check > 0.001 {
-		path := checkboxCheckPath(box)
+		path := checkboxCheckPath(mark, box)
 		path.Trim(0, s.check)
 		p.StrokePath(path, 2, s.ink)
 	}
 	if s.dash > 0.001 {
 		d := s.dash
-		path := checkboxDashPath(box)
+		path := checkboxDashPath(mark, box)
 		path.Trim((1-d)/2, (1+d)/2)
 		p.StrokePath(path, 2, s.ink)
 	}
 }
 
 // checkboxCheckPath returns the check mark of a box, in DIPs of box.
-func checkboxCheckPath(box ui.Rect) *ui.Path {
-	var p ui.Path
+func checkboxCheckPath(p *ui.Path, box ui.Rect) *ui.Path {
+	p.Reset()
 	p.MoveTo(box.X+box.W*0.24, box.Y+box.H*0.53)
 	p.LineTo(box.X+box.W*0.42, box.Y+box.H*0.71)
 	p.LineTo(box.X+box.W*0.76, box.Y+box.H*0.31)
-	return &p
+	return p
 }
 
 // checkboxDashPath returns the mixed dash of a box, in DIPs of box.
-func checkboxDashPath(box ui.Rect) *ui.Path {
-	var p ui.Path
+func checkboxDashPath(p *ui.Path, box ui.Rect) *ui.Path {
+	p.Reset()
 	y := box.Y + box.H/2
 	p.MoveTo(box.X+box.W*0.24, y)
 	p.LineTo(box.X+box.W*0.76, y)
-	return &p
+	return p
 }
