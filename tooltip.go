@@ -55,9 +55,18 @@ func PlainTooltip(c *ui.Context, anchor ui.Element, text string, opts ...PlainTo
 	if strings.TrimSpace(text) == "" {
 		return anchor
 	}
+	reduce := th.ReduceMotion || c.Preferences().ReduceMotion
 	ui.TooltipBase(c, anchor, func(tip ui.Element) {
-		tip.Padding(4, 8).Radius(4).MaxWidth(240).
+		tip.MinHeight(24).Padding(4, 8).MarginY(6).AttachEdgeMargin(8).
+			Radius(4).MaxWidth(240).AlignItems(ui.Center).
 			Background(bg).TextColor(ink)
+		ApplyElevationShadows(th, tip, tokens.Level1)
+		if !reduce {
+			tip.Transition(ui.ElementTransition{
+				Duration: 90 * time.Millisecond,
+				Enter:    &ui.Motion{Opacity: 0, Scale: 0.94},
+			})
+		}
 		applyTypeStyleWithTheme(th, tip, tokens.LabelMedium)
 		tip.Children(func() {
 			ui.Text(c, text)
@@ -208,7 +217,7 @@ func RichTooltip(c *ui.Context, anchor ui.Element, opts ...RichTooltipOptions) u
 		anchor.Description(o.Description)
 	}
 
-	st := ui.Local(anchor, richTooltipKey{}, func() richTooltipState { return richTooltipState{} })
+	st := localPtr(anchor, richTooltipKey{}, func() *richTooltipState { return &richTooltipState{} })
 	st.srv = c.Services()
 	st.delay = delay
 	st.anchorFocus = anchor.FocusVisible()
@@ -236,7 +245,7 @@ func RichTooltip(c *ui.Context, anchor ui.Element, opts ...RichTooltipOptions) u
 		}
 	}
 
-	rs := ui.Local(anchor, rippleLocalKey{}, func() rippleState { return rippleState{} })
+	rs := localRippleState(anchor)
 	if rs.hasDrawOver {
 		rs.hoverHook = func(p *ui.Painter, now time.Time, hovered bool) {
 			st.anchorHover = hovered
@@ -266,7 +275,14 @@ func RichTooltip(c *ui.Context, anchor ui.Element, opts ...RichTooltipOptions) u
 		})
 		if panel.Valid() {
 			panel.AttachTo(anchor, ui.AnchorTopStart, ui.AnchorBottomStart).
-				Margin(0, 0, 8, 0).AttachEdgeMargin(8)
+				AttachedOrigin().
+				MarginY(8).AttachEdgeMargin(8)
+			if !(th.ReduceMotion || c.Preferences().ReduceMotion) {
+				panel.Transition(ui.ElementTransition{
+					Duration: 90 * time.Millisecond,
+					Enter:    &ui.Motion{Opacity: 0, Scale: 0.95, Y: 4, Flip: true},
+				})
+			}
 			st.panelFocused = panel.FocusWithin()
 			panel.DrawOver(func(p *ui.Painter, r ui.Rect) {
 				if !panel.Valid() || !rectIntersects(r, p.Visible()) {
@@ -301,15 +317,26 @@ func RichTooltip(c *ui.Context, anchor ui.Element, opts ...RichTooltipOptions) u
 // buildRichTooltipPanel styles a rich tooltip's popover panel and builds its
 // text and action.
 func buildRichTooltipPanel(c *ui.Context, th *Theme, panel ui.Element, o RichTooltipOptions, onAction func()) {
-	width := sanitizePositiveF32(o.Width, richTooltipDefaultWidth)
 	bg := th.Colors.SurfaceContainer
 	if bg.A == 0 {
 		bg = SurfaceColorForElevation(th, tokens.Level2)
 	}
-	panel.Width(width).MaxWidthPercent(92).MaxHeightPercent(85).
-		Padding(16).Gap(6).Radius(th.Shapes.Radius(tokens.ShapeMedium)).
+	if o.Width > 0 && isPositiveFiniteF32(o.Width) {
+		panel.Width(o.Width)
+	} else {
+		panel.MinWidth(180).MaxWidth(richTooltipDefaultWidth)
+	}
+	padBottom := float32(16)
+	if o.Action != nil && o.Action.Label != "" {
+		padBottom = 10
+	}
+	panel.MaxWidthPercent(92).MaxHeightPercent(85).
+		Padding(14, 16, padBottom, 16).Gap(6).Radius(th.Shapes.Radius(tokens.ShapeMedium)).
 		Background(bg).TextColor(th.Colors.OnSurface).
 		Role(ui.RoleGroup)
+	if hl := resolveHairlineColor(th, ui.Color{}); hl.A > 0 {
+		panel.Border(1, hl)
+	}
 	label := o.Label
 	if label == "" {
 		label = o.Title

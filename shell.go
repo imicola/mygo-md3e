@@ -1,9 +1,12 @@
 package md3e
 
 import (
+	"time"
+
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 
+	"github.com/imicola/mygo-md3e/motion"
 	"github.com/imicola/mygo-md3e/tokens"
 )
 
@@ -103,9 +106,12 @@ type (
 	titleBarPinLocalKey     struct{}
 	titleBarButtonsThemeKey struct{}
 	titleBarPinKey          struct{}
+	titleBarPinAngleKey     struct{}
+	titleBarPinMixKey       struct{}
 	titleBarMinKey          struct{}
 	titleBarMaxKey          struct{}
 	titleBarCloseKey        struct{}
+	titleBarCloseHoverKey   struct{}
 )
 
 type titleBarButtonsThemeState struct {
@@ -205,10 +211,7 @@ func WindowTitleBar(c *ui.Context, opts ...WindowTitleBarOptions) ui.Element {
 	}
 
 	if o.Divider {
-		divCol := cs.OutlineVariant
-		if th.Contrast >= tokens.ContrastHigh && cs.Outline.A > 0 {
-			divCol = cs.Outline
-		}
+		divCol := resolveHairlineColor(th, ui.Color{})
 		if divCol.A > 0 {
 			root.DrawOver(func(p *ui.Painter, r ui.Rect) {
 				if !isPositiveFiniteF32(r.W) || !isPositiveFiniteF32(r.H) {
@@ -301,10 +304,6 @@ func WindowTitleBar(c *ui.Context, opts ...WindowTitleBarOptions) ui.Element {
 
 				if showPin {
 					pinned := *pinState
-					pinInk := cs.OnSurfaceVariant
-					if pinned {
-						pinInk = cs.Primary
-					}
 					btn := ui.ButtonBase(c.Key(titleBarPinKey{})).
 						DimDisabled(false).
 						FocusRing(false).
@@ -315,17 +314,32 @@ func WindowTitleBar(c *ui.Context, opts ...WindowTitleBarOptions) ui.Element {
 						Justify(ui.Center).
 						Label("Pin window").
 						AccessSelected(pinned)
+					reduce := th.ReduceMotion || c.Preferences().ReduceMotion
+					pinTarget := float32(0)
+					angleTarget := float32(45)
 					if pinned {
-						btn.Background(cs.PrimaryContainer)
-						pinInk = cs.OnPrimaryContainer
+						pinTarget = 1
+						angleTarget = 0
+					}
+					pinMix := clampF32(animateValue(btn, titleBarPinMixKey{}, pinTarget, th.Animation(motion.FastEffects), reduce), 0, 1)
+					pinAngle := animateValue(btn, titleBarPinAngleKey{}, angleTarget, th.Animation(motion.FastSpatial), reduce)
+					pinInk := cs.OnSurfaceVariant.MixOklab(cs.OnPrimaryContainer, pinMix)
+					if pinMix > 0.01 {
+						btn.Background(cs.PrimaryContainer.Alpha(pinMix))
 					}
 					attachStateLayerWithTheme(th, btn, StateLayerOptions{
-						Color:  pinInk,
-						Radius: 8,
+						Color:     pinInk,
+						Radius:    8,
+						FocusRing: FocusRingInset,
 					})
 					btn.Children(func() {
 						ui.Box(c).Size(16, 16).Draw(func(p *ui.Painter, r ui.Rect) {
-							drawTitleBarPinIcon(p, r, pinInk, pinned)
+							if !isPositiveFiniteF32(r.W) || !isPositiveFiniteF32(r.H) {
+								return
+							}
+							p.Transform(ui.Rotation(pinAngle), r.X+r.W*0.5, r.Y+r.H*0.5, func() {
+								drawTitleBarPinIcon(p, r, pinInk, pinned)
+							})
 						})
 					})
 					if btn.Clicked() {
@@ -338,6 +352,11 @@ func WindowTitleBar(c *ui.Context, opts ...WindowTitleBarOptions) ui.Element {
 							o.OnPin(next)
 						}
 					}
+				}
+
+				if hasWinControls && (o.Trailing != nil || showPin) {
+					ui.Box(c).Size(1, min(14, max(8, barH-16))).Shrink(0).
+						Radius(0.5).Background(resolveHairlineColor(th, ui.Color{}))
 				}
 
 				if hasWinControls {
@@ -376,9 +395,7 @@ func WindowTitleBar(c *ui.Context, opts ...WindowTitleBarOptions) ui.Element {
 							}
 						}
 						if showClose {
-							btn := titleBarControlButton(c, th, titleBarCloseKey{}, btnW, barH, "Close", fg, cs.Error, func(p *ui.Painter, r ui.Rect, ink ui.Color) {
-								drawTitleBarCloseIcon(p, r, ink)
-							})
+							btn := titleBarCloseButton(c, th, btnW, barH, fg)
 							if btn.Clicked() {
 								if o.OnClose != nil {
 									o.OnClose()
@@ -424,7 +441,8 @@ func titleBarControlButton(c *ui.Context, th *Theme, key any, w, h float32, labe
 		Justify(ui.Center).
 		Label(label)
 	attachStateLayerWithTheme(th, btn, StateLayerOptions{
-		Color: stateColor,
+		Color:     stateColor,
+		FocusRing: FocusRingInset,
 		Clip: func(r ui.Rect) (ui.Rect, [4]float32) {
 			box := ui.Rect{
 				X: r.X + xInset,
@@ -446,31 +464,139 @@ func titleBarControlButton(c *ui.Context, th *Theme, key any, w, h float32, labe
 	return btn
 }
 
+func titleBarCloseButton(c *ui.Context, th *Theme, w, h float32, fg ui.Color) ui.Element {
+	pillH := min(float32(30), max(float32(20), h-8))
+	if h < 28 {
+		pillH = max(h-4, 1)
+	}
+	xInset := min(float32(3), max(float32(0), (w-16)*0.25))
+	yInset := max(float32(0), (h-pillH)*0.5)
+	rad := min(float32(8), min(max(w-2*xInset, 0), pillH)*0.5)
+
+	cs := th.Colors
+	errBg := cs.Error
+	onErr := cs.OnError
+	if onErr.A == 0 {
+		onErr = ui.RGB(255, 255, 255)
+	}
+	thReduce := th.ReduceMotion
+
+	btn := ui.ButtonBase(c.Key(titleBarCloseKey{})).
+		DimDisabled(false).
+		FocusRing(false).
+		Size(w, h).
+		Shrink(0).
+		Radius(rad).
+		AlignItems(ui.Center).
+		Justify(ui.Center).
+		Label("Close")
+
+	hoverSt := ui.Local(btn, titleBarCloseHoverKey{}, func() haloFadeState { return haloFadeState{} })
+	focusCol := cs.Secondary
+	if focusCol.A == 0 {
+		focusCol = cs.Primary
+	}
+	focusW := float32(2)
+	if th.Contrast >= tokens.ContrastHigh {
+		focusW = 3
+	}
+
+	// Render the red pill hover fill, smooth glyph inversion, and inset keyboard
+	// focus ring strictly inside Draw so pointer hover never rebuilds the tree.
+	btn.Draw(func(p *ui.Painter, r ui.Rect) {
+		if !isPositiveFiniteF32(r.W) || !isPositiveFiniteF32(r.H) {
+			return
+		}
+		box := ui.Rect{
+			X: r.X + xInset,
+			Y: r.Y + yInset,
+			W: max(0, r.W-2*xInset),
+			H: max(0, r.H-2*yInset),
+		}
+		var t float32
+		var focused bool
+		if btn.Valid() {
+			target := float32(0)
+			if !btn.IsDisabled() {
+				if btn.Pressed() {
+					target = 1
+				} else if btn.Hovered() {
+					target = 0.92
+				}
+				focused = btn.FocusVisible()
+			}
+			var needFrame bool
+			t, needFrame = hoverSt.step(target, p.Now(), thReduce || p.Preferences().ReduceMotion)
+			if needFrame && rectIntersects(r, p.Visible()) {
+				p.After(16 * time.Millisecond)
+			}
+		} else {
+			t = hoverSt.alpha
+		}
+		if t > 0.005 && box.W > 0 && box.H > 0 {
+			p.Fill(box, errBg.Alpha(clampF32(t, 0, 1)), rad)
+		}
+		iconRect := ui.Rect{
+			X: r.X + (r.W-12)*0.5,
+			Y: r.Y + (r.H-12)*0.5,
+			W: 12,
+			H: 12,
+		}
+		glyphInk := fg.MixOklab(onErr, clampF32(t, 0, 1))
+		drawTitleBarCloseIcon(p, iconRect, glyphInk)
+		if focused && box.W > 0 && box.H > 0 {
+			inBox := insetRect(box, focusW*0.5+0.5)
+			if inBox.W > 0 && inBox.H > 0 {
+				p.Stroke(inBox, focusCol, max(0, rad-(focusW*0.5+0.5)), focusW)
+			}
+		}
+	})
+	return btn
+}
+
 func drawTitleBarMinimizeIcon(p *ui.Painter, r ui.Rect, ink ui.Color) {
 	y := r.Y + r.H*0.5
-	p.Line(r.X+1, y, r.X+r.W-1, y, 1.25, ink)
+	p.Line(r.X+1.5, y, r.X+r.W-1.5, y, 1.25, ink)
 }
 
 func drawTitleBarMaximizeIcon(p *ui.Painter, r ui.Rect, ink ui.Color, maximized bool) {
 	if !maximized {
-		p.Stroke(ui.Rect{X: r.X + 1.5, Y: r.Y + 1.5, W: r.W - 3, H: r.H - 3}, ink, 1, 1.25)
+		p.Stroke(ui.Rect{X: r.X + 1.5, Y: r.Y + 1.5, W: r.W - 3, H: r.H - 3}, ink, 1.5, 1.25)
 		return
 	}
-	// Restore glyph: front square + offset top-right back edge.
+	// Restore glyph: front square + continuous rounded top-right back window edge.
 	s := r.W - 4.5
 	front := ui.Rect{X: r.X + 1, Y: r.Y + 3.5, W: s, H: s}
-	p.Stroke(front, ink, 1, 1.2)
+	p.Stroke(front, ink, 1.25, 1.2)
 	backX0 := front.X + 2.5
 	backY0 := front.Y - 2.5
 	backX1 := backX0 + s
 	backY1 := backY0 + s
-	p.Line(backX0, backY0, backX1, backY0, 1.2, ink)
-	p.Line(backX1, backY0, backX1, backY1, 1.2, ink)
+	cr := float32(1.5)
+	var back ui.Path
+	back.MoveTo(backX0, front.Y).
+		LineTo(backX0, backY0+cr).
+		QuadTo(backX0, backY0, backX0+cr, backY0).
+		LineTo(backX1-cr, backY0).
+		QuadTo(backX1, backY0, backX1, backY0+cr).
+		LineTo(backX1, backY1-cr).
+		QuadTo(backX1, backY1, backX1-cr, backY1).
+		LineTo(front.X+s, backY1).
+		Cap(ui.RoundCap).
+		Join(ui.RoundJoin)
+	p.StrokePath(&back, 1.2, ink)
 }
 
 func drawTitleBarCloseIcon(p *ui.Painter, r ui.Rect, ink ui.Color) {
-	p.Line(r.X+1.5, r.Y+1.5, r.X+r.W-1.5, r.Y+r.H-1.5, 1.35, ink)
-	p.Line(r.X+r.W-1.5, r.Y+1.5, r.X+1.5, r.Y+r.H-1.5, 1.35, ink)
+	// Painter.Line only draws axis-aligned horizontal/vertical segments; stroke
+	// both diagonals as vector paths with rounded caps so the × renders cleanly.
+	var xPath ui.Path
+	xPath.MoveTo(r.X+1.75, r.Y+1.75).
+		LineTo(r.X+r.W-1.75, r.Y+r.H-1.75).
+		MoveTo(r.X+r.W-1.75, r.Y+1.75).
+		LineTo(r.X+1.75, r.Y+r.H-1.75).
+		Cap(ui.RoundCap)
+	p.StrokePath(&xPath, 1.35, ink)
 }
 
 func drawTitleBarPinIcon(p *ui.Painter, r ui.Rect, ink ui.Color, pinned bool) {

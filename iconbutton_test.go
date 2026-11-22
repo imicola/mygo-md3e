@@ -277,6 +277,11 @@ func TestToggleIconButtonMorphAndState(t *testing.T) {
 	if info.Checked {
 		t.Fatal("assistive technology still reads the toggle checked")
 	}
+	// Clear keyboard focus before measuring the button's own rounded corner area
+	// so the concentric outer focus ring passing through the bounding-box corner
+	// is not counted as square button fill.
+	tt.ClickAt(2, 2)
+	tt.Advance(250 * time.Millisecond)
 	if got := cornerFill(tt.Image(), info.Bounds, span); got >= squareFill-span*span/10 {
 		t.Fatalf("deselected corner fill %d did not return toward the round %d", got, roundFill)
 	}
@@ -357,6 +362,8 @@ func TestToggleIconButtonDisabledAndReduceMotion(t *testing.T) {
 	if rm.FramePending() {
 		t.Fatal("ReduceMotion toggle release should not ask for animation frames")
 	}
+	// Clear keyboard focus so cornerFill measures only the deselected button geometry.
+	rm.ClickAt(2, 2)
 	if got := cornerFill(rm.Image(), info.Bounds, probeSpan); got >= onFill-probeSpan*probeSpan/10 {
 		t.Fatalf("ReduceMotion deselected corner fill %d did not return toward the round %d", got, idleFill)
 	}

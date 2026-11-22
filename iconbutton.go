@@ -74,13 +74,6 @@ type ToggleIconButtonOptions struct {
 	Disabled bool
 }
 
-// iconButtonCornerKey is the AnimateTo channel of an icon button's corner.
-type iconButtonCornerKey struct{}
-
-// toggleIconCornerKey is the AnimateTo channel of a toggle icon button's
-// corner.
-type toggleIconCornerKey struct{}
-
 // IconButton builds a Material Design 3 Expressive icon button: a
 // ui.ButtonBase of an exact tier height and Narrow/Default/Wide width with a
 // single centered icon, MD3E variant colors, a StateLayer with Expressive
@@ -110,8 +103,8 @@ func IconButton(c *ui.Context, label string, icon IconDraw, opts ...IconButtonOp
 
 	th := CurrentTheme(c)
 	o.Size = normalizeSizeTier(o.Size)
-	spec := tierSpec(o.Size)
-	w := iconWidthOf(o.Size, o.Width)
+	spec := tierSpecForDensity(th.Density, o.Size)
+	w := iconWidthForSpec(spec, o.Width)
 	rest := actionRadius(w, spec, o.Shape, false)
 
 	el := ui.ButtonBase(c).
@@ -130,12 +123,17 @@ func IconButton(c *ui.Context, label string, icon IconDraw, opts ...IconButtonOp
 		el.Border(1, pal.border)
 	}
 
+	pressed := el.Pressed()
 	target := rest
-	if el.Pressed() {
+	if pressed {
 		target = float32(spec.PressedRadius)
 	}
-	radius := animateWithTheme(el, th, iconButtonCornerKey{}, target, motion.FastSpatial)
+	radius := max(animateWithTheme(el, th, animChan0, target, motion.FastSpatial), 0)
 	el.Radius(radius)
+
+	if !disabled && !pressed && (o.Variant == IconButtonFilled || o.Variant == IconButtonTonal) {
+		attachHoverElevation(el, th, tokens.Level0, tokens.Level1, radius, false)
+	}
 
 	borderInset := float32(0)
 	if pal.border.A > 0 {
@@ -148,8 +146,12 @@ func IconButton(c *ui.Context, label string, icon IconDraw, opts ...IconButtonOp
 		Disabled:    disabled,
 	})
 
+	iconSz := float32(spec.IconSize)
+	if o.Width == IconButtonWidthNarrow {
+		iconSz = min(iconSz, max(w-8, 12))
+	}
 	el.Children(func() {
-		drawIconBox(c, icon, float32(spec.IconSize), pal.content)
+		drawIconBox(c, icon, iconSz, pal.content)
 	})
 	return el
 }
@@ -186,8 +188,8 @@ func ToggleIconButton(c *ui.Context, on *bool, label string, icon IconDraw, opts
 
 	th := CurrentTheme(c)
 	o.Size = normalizeSizeTier(o.Size)
-	spec := tierSpec(o.Size)
-	w := iconWidthOf(o.Size, o.Width)
+	spec := tierSpecForDensity(th.Density, o.Size)
+	w := iconWidthForSpec(spec, o.Width)
 	// The base is the element that takes the key: build it first.
 	el := ui.ToggleBase(c, on).
 		DimDisabled(false).
@@ -195,48 +197,86 @@ func ToggleIconButton(c *ui.Context, on *bool, label string, icon IconDraw, opts
 		Size(w, float32(spec.Height)).
 		Label(label)
 	disabled := o.Disabled || el.IsDisabled()
-	pal := toggleIconButtonPaletteOf(th, o.Variant, *on, disabled)
-	el.Disabled(o.Disabled).TextColor(pal.content)
-	if pal.container.A > 0 {
-		el.Background(pal.container)
+	selT := clampF32(animateEffect(c, el, th, animChan0, boolFloat(*on), motion.FastEffects), 0, 1)
+
+	offPal := toggleIconButtonPaletteOf(th, o.Variant, false, disabled)
+	onPal := toggleIconButtonPaletteOf(th, o.Variant, true, disabled)
+	container := mixOptionalColor(offPal.container, onPal.container, selT)
+	content := offPal.content.MixOklab(onPal.content, selT)
+	border := mixOptionalColor(offPal.border, onPal.border, selT)
+
+	el.Disabled(o.Disabled).TextColor(content)
+	if container.A > 0 {
+		el.Background(container)
 	}
-	if pal.border.A > 0 {
-		el.Border(1, pal.border)
+	if border.A > 0 {
+		el.Border(1, border)
 	}
 
+	pressed := el.Pressed()
 	rest := actionRadius(w, spec, ButtonShapeRound, *on)
 	target := rest
-	if el.Pressed() {
+	if pressed {
 		target = float32(spec.PressedRadius)
 	}
-	radius := animateWithTheme(el, th, toggleIconCornerKey{}, target, motion.FastSpatial)
+	radius := max(animateWithTheme(el, th, animChan1, target, motion.FastSpatial), 0)
 	el.Radius(radius)
 
+	if !disabled && !pressed && (o.Variant == IconButtonFilled || o.Variant == IconButtonTonal) {
+		attachHoverElevation(el, th, tokens.Level0, tokens.Level1, radius, false)
+	}
+
 	borderInset := float32(0)
-	if pal.border.A > 0 {
+	if border.A > 0 {
 		borderInset = 1
 	}
 	attachRippleWithContext(c, th, el, StateLayerOptions{
-		Color:       pal.content,
+		Color:       content,
 		Radius:      radius,
 		BorderInset: borderInset,
 		Disabled:    disabled,
 	})
 
-	draw := icon
-	if *on && o.SelectedIcon != nil {
-		draw = o.SelectedIcon
+	iconSz := float32(spec.IconSize)
+	if o.Width == IconButtonWidthNarrow {
+		iconSz = min(iconSz, max(w-8, 12))
 	}
 	el.Children(func() {
-		drawIconBox(c, draw, float32(spec.IconSize), pal.content)
+		if o.SelectedIcon != nil {
+			ui.Box(c).Size(iconSz, iconSz).Shrink(0).Draw(func(p *ui.Painter, r ui.Rect) {
+				drawMorphCrossfadeIcon(p, r, iconSz, icon, o.SelectedIcon, content, selT)
+			})
+		} else {
+			drawIconBox(c, icon, iconSz, content)
+		}
 	})
 	return el
+}
+
+// mixOptionalColor interpolates two colors cleanly when one side may be
+// transparent (A == 0), avoiding black-alpha darkening during transitions.
+func mixOptionalColor(a, b ui.Color, t float32) ui.Color {
+	t = clampF32(t, 0, 1)
+	if a.A == 0 && b.A == 0 {
+		return ui.Transparent
+	}
+	if a.A == 0 {
+		return b.Alpha(t)
+	}
+	if b.A == 0 {
+		return a.Alpha(1 - t)
+	}
+	return a.MixOklab(b, t)
 }
 
 // iconWidthOf returns the container width of an icon button: the tier height
 // scaled by 0.75, 1 or 1.25 for the narrow, default and wide modes.
 func iconWidthOf(t tokens.SizeTier, w IconButtonWidth) float32 {
-	h := float32(tierSpec(t).Height)
+	return iconWidthForSpec(tierSpec(t), w)
+}
+
+func iconWidthForSpec(spec tokens.SizeSpec, w IconButtonWidth) float32 {
+	h := float32(spec.Height)
 	switch w {
 	case IconButtonWidthNarrow:
 		return h * 0.75
@@ -282,7 +322,11 @@ func iconButtonPaletteOf(th *Theme, v IconButtonVariant, disabled bool) buttonCo
 	case IconButtonTonal:
 		return buttonColors{container: cs.SecondaryContainer, content: cs.OnSecondaryContainer}
 	case IconButtonOutlined:
-		return buttonColors{content: cs.OnSurfaceVariant, border: cs.Outline}
+		border := cs.OutlineVariant
+		if th.Contrast >= tokens.ContrastHigh || border.A == 0 {
+			border = cs.Outline
+		}
+		return buttonColors{content: cs.OnSurfaceVariant, border: border}
 	default:
 		return buttonColors{content: cs.OnSurfaceVariant}
 	}
@@ -317,7 +361,11 @@ func toggleIconButtonPaletteOf(th *Theme, v IconButtonVariant, on, disabled bool
 			content:   cs.OnSurfaceVariant,
 		}
 	case IconButtonOutlined:
-		return buttonColors{content: cs.OnSurfaceVariant, border: cs.Outline}
+		border := cs.OutlineVariant
+		if th.Contrast >= tokens.ContrastHigh || border.A == 0 {
+			border = cs.Outline
+		}
+		return buttonColors{content: cs.OnSurfaceVariant, border: border}
 	default:
 		return buttonColors{content: cs.OnSurfaceVariant}
 	}

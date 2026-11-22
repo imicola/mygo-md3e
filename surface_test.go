@@ -811,3 +811,72 @@ func TestSurfaceHairlineGradientsBackdropAndExitSafety(t *testing.T) {
 		t.Fatal("exiting Surface with Backdrop/Hairline left pending frames")
 	}
 }
+
+func TestFocusRingAutoAndInsetAndHoverElevation(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor)
+	focusColor := th.ToUITheme().Focus
+
+	// 1. FocusRingAuto paints outer ring on keyboard Tab; FocusRingInset stays inside box.
+	tt := ui.NewTester(func(c *ui.Context) {
+		ThemeScope(c, th, func() {
+			ui.Row(c).Fill().Background(ui.RGB(255, 255, 255)).Padding(24).Gap(32).Children(func() {
+				b1 := ui.ButtonBase(c.Key("auto")).FocusRing(false).Size(80, 40).Radius(12).
+					Background(th.Colors.Primary).Label("Auto ring")
+				AttachRipple(c, b1, StateLayerOptions{Color: th.Colors.OnPrimary, Radius: 12})
+
+				b2 := ui.ButtonBase(c.Key("inset")).FocusRing(false).Size(80, 40).Radius(12).
+					Background(th.Colors.SurfaceContainerHigh).Label("Inset ring")
+				AttachRipple(c, b2, StateLayerOptions{Color: th.Colors.OnSurface, Radius: 12, FocusRing: FocusRingInset})
+			})
+		}).Fill()
+	}, 260, 100)
+
+	tt.Key(0, ui.KeyTab)
+	tt.Advance(250 * time.Millisecond)
+	b1 := buttonInfo(t, tt, ui.RoleButton, "Auto ring").Bounds
+	img := tt.Image()
+	if px := img.RGBAAt(int(b1.X+b1.W/2), int(b1.Y-3)); absColorDiff(px, rgbOf(focusColor)) > 20 {
+		t.Fatalf("FocusRingAuto did not paint outer ring at top edge: got %+v want %+v", px, rgbOf(focusColor))
+	}
+
+	tt.Key(0, ui.KeyTab)
+	tt.Advance(250 * time.Millisecond)
+	b2 := buttonInfo(t, tt, ui.RoleButton, "Inset ring").Bounds
+	img = tt.Image()
+	if px := img.RGBAAt(int(b2.X+b2.W/2), int(b2.Y-3)); px != (color.RGBA{R: 255, G: 255, B: 255, A: 255}) {
+		t.Fatalf("FocusRingInset leaked outside top edge: got %+v", px)
+	}
+	if px := img.RGBAAt(int(b2.X+b2.W/2), int(b2.Y+2)); absColorDiff(px, rgbOf(focusColor)) > 24 {
+		t.Fatalf("FocusRingInset did not paint inside top edge: got %+v want %+v", px, rgbOf(focusColor))
+	}
+
+	// 2. Zero-rebuild attachHoverElevation lifts drop shadow on hover and settles cleanly.
+	builds := 0
+	ttElev := ui.NewTester(func(c *ui.Context) {
+		builds++
+		ThemeScope(c, th, func() {
+			ui.Box(c).Fill().Background(ui.RGB(255, 255, 255)).Padding(24).Children(func() {
+				el := ui.Box(c).Size(100, 44).Radius(12).Background(th.Colors.SurfaceContainerLow)
+				ApplyElevationShadows(th, el, tokens.Level1)
+				attachHoverElevation(el, th, tokens.Level1, tokens.Level2, 12, false)
+			})
+		}).Fill()
+	}, 180, 120)
+
+	restBelow := ttElev.Image().RGBAAt(74, 72)
+	buildsBefore := builds
+	ttElev.Move(74, 46)
+	ttElev.Advance(300 * time.Millisecond)
+	hoverBelow := ttElev.Image().RGBAAt(74, 72)
+	if builds > buildsBefore+1 {
+		t.Fatalf("hover elevation rebuilt view tree: before=%d after=%d", buildsBefore, builds)
+	}
+	if hoverBelow.R >= restBelow.R {
+		t.Fatalf("hover elevation did not darken shadow below box: rest=%+v hover=%+v", restBelow, hoverBelow)
+	}
+	ttElev.Move(2, 2)
+	ttElev.Advance(350 * time.Millisecond)
+	if ttElev.FramePending() {
+		t.Fatal("hover elevation left pending frames after pointer leave")
+	}
+}

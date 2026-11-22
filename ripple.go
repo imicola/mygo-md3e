@@ -13,6 +13,22 @@ import (
 	"github.com/imicola/mygo-md3e/tokens"
 )
 
+// FocusRingStyle selects how AttachStateLayer and AttachRipple draw the
+// keyboard focus outline when el.FocusVisible() is true.
+type FocusRingStyle int
+
+const (
+	// FocusRingAuto draws a shape-conforming MD3E outer keyboard focus ring
+	// matching the element's live corner radii or custom polygon contour.
+	FocusRingAuto FocusRingStyle = iota
+	// FocusRingInset draws the keyboard focus ring inside the element's clip
+	// bounds (used by compact edge-aligned chrome such as WindowTitleBar).
+	FocusRingInset
+	// FocusRingNone suppresses the outline ring, retaining only the internal
+	// Focus StateLayer tint.
+	FocusRingNone
+)
+
 // StateLayerOptions configures MD3E StateLayer and ExpressiveRipple rendering.
 type StateLayerOptions struct {
 	// Color is the overlay tint color (typically the component's ContentColor or
@@ -36,6 +52,12 @@ type StateLayerOptions struct {
 	ClipPath func(r ui.Rect) *ui.Path
 	// BorderInset shrinks the clip box inward by BorderInset DIPs (e.g., stroke width).
 	BorderInset float32
+	// FocusRing selects how the keyboard focus outline is rendered when
+	// el.FocusVisible() is true (defaults to FocusRingAuto).
+	FocusRing FocusRingStyle
+	// FocusHaloColor optionally paints a backing contrast halo beneath the outer
+	// focus ring (for example cs.Surface around photo-backed interactive surfaces).
+	FocusHaloColor ui.Color
 	// Dragged activates the MD3E Dragged state layer opacity (0.16).
 	Dragged bool
 	// DisableRipple disables expanding circular ripple waves while retaining StateLayer.
@@ -60,6 +82,76 @@ type evaluatedWave struct {
 }
 
 type rippleLocalKey struct{}
+
+// animChanKey provides shared per-element animation/local slot keys so
+// components avoid emitting unique empty-struct type descriptors per channel
+// (keeping Zero-Bloat binary size tight).
+type animChanKey uint8
+
+const (
+	animChan0 animChanKey = iota
+	animChan1
+	animChan2
+	animChan3
+	animChan4
+	animChan5
+	animChan6
+	animChan7 // reserved for attachHoverElevation
+)
+
+// localPtr stores a heap-allocated state pointer in ui.Local using a single
+// pointer gcshape (*uint8) across all component state types, preventing
+// per-type ui.Local/coreLocal/keepLocal generic code bloat while keeping
+// steady-state lookups allocation-free.
+func localPtr[P any](el ui.Element, key any, init func() P) P {
+	p := ui.Local(el, key, init)
+	if p == nil {
+		var zero P
+		return zero
+	}
+	return *p
+}
+
+func newHaloFadeState() *haloFadeState { return &haloFadeState{} }
+func newRippleState() *rippleState     { return &rippleState{} }
+func newFalse() *bool                  { return new(bool) }
+func newZeroInt() *int                 { return new(int) }
+func newNegOneInt() *int               { v := -1; return &v }
+func newZeroFloat32() *float32         { return new(float32) }
+func newScrollState() *ui.ScrollState  { return &ui.ScrollState{} }
+func newUIHandle() *ui.Handle          { return &ui.Handle{} }
+
+func localHaloFade(el ui.Element, key any) *haloFadeState {
+	return localPtr(el, key, newHaloFadeState)
+}
+
+func localRippleState(el ui.Element) *rippleState {
+	return localPtr(el, rippleLocalKey{}, newRippleState)
+}
+
+func localBool(el ui.Element, key any) *bool {
+	return localPtr(el, key, newFalse)
+}
+
+func localInt(el ui.Element, key any) *int {
+	return localPtr(el, key, newZeroInt)
+}
+
+func localNegInt(el ui.Element, key any) *int {
+	return localPtr(el, key, newNegOneInt)
+}
+
+func localFloat32(el ui.Element, key any) *float32 {
+	return localPtr(el, key, newZeroFloat32)
+}
+
+func localScrollState(el ui.Element, key any) *ui.ScrollState {
+	return localPtr(el, key, newScrollState)
+}
+
+func localHandle(el ui.Element, key any) *ui.Handle {
+	return localPtr(el, key, newUIHandle)
+}
 
 // haloFadeState tracks exponential StateLayer / Halo alpha transitions inside Draw
 // so hover changes never trigger view rebuilds.
@@ -143,6 +235,20 @@ func animateWithTheme(el ui.Element, th *Theme, key any, target float32, token m
 		return el.Jump(key, target)
 	}
 	return el.AnimateTo(key, target, anim)
+}
+
+// animateEffect drives an effects-channel transition (color/opacity/scrim) that
+// snaps immediately with zero pending frames when ReduceMotion is active on
+// either the Theme or desktop Preferences.
+func animateEffect(c *ui.Context, el ui.Element, th *Theme, key any, target float32, token motion.Token) float32 {
+	if th == nil {
+		th = DefaultTheme(nil)
+	}
+	reduce := th.ReduceMotion || (c != nil && c.Preferences().ReduceMotion)
+	if reduce {
+		return el.Jump(key, target)
+	}
+	return el.AnimateTo(key, target, th.Animation(token))
 }
 
 type rippleState struct {
@@ -313,7 +419,7 @@ func attachRippleWithContext(c *ui.Context, th *Theme, el ui.Element, opt StateL
 }
 
 func attachOverlayFeedbackWithTheme(c *ui.Context, th *Theme, el ui.Element, withRipple bool, opt StateLayerOptions) ui.Element {
-	st := ui.Local(el, rippleLocalKey{}, func() rippleState { return rippleState{} })
+	st := localRippleState(el)
 	if st == nil {
 		return el
 	}
@@ -340,6 +446,16 @@ func attachOverlayFeedbackWithTheme(c *ui.Context, th *Theme, el ui.Element, wit
 
 	disabled, dragged := opt.Disabled, opt.Dragged
 	clip, customPath, poly, inset := opt.Clip, opt.ClipPath, opt.Shape, opt.BorderInset
+	focusStyle, focusHalo := opt.FocusRing, opt.FocusHaloColor
+	focusRingCol := th.Colors.Secondary
+	if focusRingCol.A == 0 {
+		focusRingCol = th.Colors.Primary
+	}
+	focusRingW := float32(2)
+	if th.Contrast >= tokens.ContrastHigh {
+		focusRingW = 3
+	}
+	const focusRingOff = float32(2)
 	if withRipple {
 		if c != nil && !disabled {
 			if st.focusHandle == nil {
@@ -469,41 +585,46 @@ func attachOverlayFeedbackWithTheme(c *ui.Context, th *Theme, el ui.Element, wit
 		if needFrame {
 			p.After(16 * time.Millisecond)
 		}
-		if layerAlpha <= 0.001 && len(wavesToDraw) == 0 {
+		drawFocusRing := focused && focusStyle != FocusRingNone && focusRingCol.A > 0
+		if layerAlpha <= 0.001 && len(wavesToDraw) == 0 && !drawFocusRing {
 			return
 		}
 
-		paintBody := func(polyPath *ui.Path) {
-			if layerAlpha > 0.001 {
-				layerInk := ink.Alpha(layerAlpha)
-				if polyPath != nil {
-					p.FillPath(polyPath, layerInk)
-				} else {
-					p.FillRadii(clipRect, clipRadii, layerInk)
+		if layerAlpha > 0.001 || len(wavesToDraw) > 0 {
+			paintBody := func(polyPath *ui.Path) {
+				if layerAlpha > 0.001 {
+					layerInk := ink.Alpha(layerAlpha)
+					if polyPath != nil {
+						p.FillPath(polyPath, layerInk)
+					} else {
+						p.FillRadii(clipRect, clipRadii, layerInk)
+					}
 				}
+
+				st.paintWaves(p, clipRect, ink, wavesToDraw)
 			}
 
-			st.paintWaves(p, clipRect, ink, wavesToDraw)
-		}
-
-		if customPath != nil {
-			if path := customPath(clipRect); path != nil {
+			if customPath != nil {
+				if path := customPath(clipRect); path != nil {
+					p.ClipPath(path, func() {
+						paintBody(path)
+					})
+				}
+			} else if poly != nil {
+				path := poly.WriteTo(&st.clipPath, clipRect)
 				p.ClipPath(path, func() {
 					paintBody(path)
 				})
+			} else {
+				paintInClip(p, &st.clipPath, clipRect, clipRadii, func() {
+					paintBody(nil)
+				})
 			}
-			return
 		}
-		if poly != nil {
-			path := poly.WriteTo(&st.clipPath, clipRect)
-			p.ClipPath(path, func() {
-				paintBody(path)
-			})
-			return
+
+		if drawFocusRing && box.W > 0 && box.H > 0 {
+			paintShapeFocusRing(p, &st.clipPath, box, boxRadii, customPath, poly, focusStyle, focusRingCol, focusHalo, focusRingOff, focusRingW)
 		}
-		paintInClip(p, &st.clipPath, clipRect, clipRadii, func() {
-			paintBody(nil)
-		})
 	})
 
 	return el
@@ -593,6 +714,97 @@ func paintInClip(p *ui.Painter, scratch *ui.Path, box ui.Rect, radii [4]float32,
 	if path := writeRoundedRectPath(scratch, box, radii); path != nil {
 		p.ClipPath(path, fn)
 	}
+}
+
+func outsetRect(r ui.Rect, outset float32) ui.Rect {
+	if outset <= 0 {
+		return r
+	}
+	return ui.Rect{
+		X: r.X - outset,
+		Y: r.Y - outset,
+		W: r.W + 2*outset,
+		H: r.H + 2*outset,
+	}
+}
+
+func outsetRadii(radii [4]float32, outset float32) [4]float32 {
+	if outset <= 0 {
+		return radii
+	}
+	return [4]float32{
+		radii[0] + outset,
+		radii[1] + outset,
+		radii[2] + outset,
+		radii[3] + outset,
+	}
+}
+
+func paintShapeFocusRing(
+	p *ui.Painter,
+	scratch *ui.Path,
+	box ui.Rect,
+	radii [4]float32,
+	customPath func(ui.Rect) *ui.Path,
+	poly *shape.RoundedPolygon,
+	style FocusRingStyle,
+	ringCol, haloCol ui.Color,
+	off, width float32,
+) {
+	if style == FocusRingInset {
+		inBox := insetRect(box, width*0.5+0.5)
+		inRad := insetRadii(radii, width*0.5+0.5)
+		if inBox.W <= 0 || inBox.H <= 0 {
+			return
+		}
+		if customPath != nil {
+			if path := customPath(inBox); path != nil {
+				p.StrokePath(path, width, ringCol)
+			}
+			return
+		}
+		if poly != nil {
+			p.StrokePath(poly.WriteTo(scratch, inBox), width, ringCol)
+			return
+		}
+		if equalRadii(inRad) {
+			p.Stroke(inBox, ringCol, inRad[0], width)
+			return
+		}
+		if path := writeRoundedRectPath(scratch, inBox, inRad); path != nil {
+			p.StrokePath(path, width, ringCol)
+		}
+		return
+	}
+
+	if customPath != nil {
+		if haloCol.A > 0 {
+			if hPath := customPath(outsetRect(box, off*0.5+width*0.5)); hPath != nil {
+				p.StrokePath(hPath, width+2, haloCol)
+			}
+		}
+		if path := customPath(outsetRect(box, off+width*0.5)); path != nil {
+			p.StrokePath(path, width, ringCol)
+		}
+		return
+	}
+	if poly != nil {
+		if haloCol.A > 0 {
+			p.StrokePath(poly.WriteTo(scratch, outsetRect(box, off*0.5+width*0.5)), width+2, haloCol)
+		}
+		p.StrokePath(poly.WriteTo(scratch, outsetRect(box, off+width*0.5)), width, ringCol)
+		return
+	}
+	if haloCol.A > 0 {
+		hBox := outsetRect(box, off*0.5+width*0.5)
+		hRad := outsetRadii(radii, off*0.5+width*0.5)
+		if equalRadii(hRad) {
+			p.Stroke(hBox, haloCol, hRad[0], width+2)
+		} else if path := writeRoundedRectPath(scratch, hBox, hRad); path != nil {
+			p.StrokePath(path, width+2, haloCol)
+		}
+	}
+	p.FocusRing(box, radii)
 }
 
 func insetRect(r ui.Rect, inset float32) ui.Rect {

@@ -1,6 +1,8 @@
 package md3e
 
 import (
+	"time"
+
 	"github.com/egoist/mygo/ui"
 
 	"github.com/imicola/mygo-md3e/shape"
@@ -85,6 +87,83 @@ func ApplyElevationShadows(t *Theme, el ui.Element, level tokens.ElevationLevel)
 			shadowCol.Alpha(float32(spec.Ambient.Opacity)))
 	}
 	return el
+}
+
+func attachHoverElevation(el ui.Element, th *Theme, baseLevel, hoverLevel tokens.ElevationLevel, radius float32, disabled bool) {
+	if hoverLevel <= baseLevel {
+		return
+	}
+	if th == nil {
+		th = DefaultTheme(nil)
+	}
+	st := localHaloFade(el, animChan7)
+	if st == nil {
+		return
+	}
+	baseSpec := baseLevel.Spec()
+	hoverSpec := hoverLevel.Spec()
+	shadowCol := th.Colors.Shadow
+	if shadowCol.A == 0 {
+		shadowCol = ui.RGB(0, 0, 0)
+	}
+	thReduce := th.ReduceMotion
+	rad := sanitizeNonNegF32(radius)
+
+	el.Draw(func(p *ui.Painter, r ui.Rect) {
+		if !isPositiveFiniteF32(r.W) || !isPositiveFiniteF32(r.H) {
+			return
+		}
+		if !el.Valid() {
+			return
+		}
+		if disabled || el.IsDisabled() {
+			st.reset()
+			return
+		}
+		if !rectIntersects(r, p.Visible()) {
+			return
+		}
+		target := float32(0)
+		if el.Hovered() && !el.Pressed() {
+			target = 1
+		}
+		t, needFrame := st.step(target, p.Now(), thReduce || p.Preferences().ReduceMotion)
+		if needFrame {
+			p.After(16 * time.Millisecond)
+		}
+		if t <= 0.005 {
+			return
+		}
+		paintHoverElevationDelta(p, r, rad, shadowCol, baseSpec, hoverSpec, t)
+	})
+}
+
+func paintHoverElevationDelta(p *ui.Painter, r ui.Rect, radius float32, shadowCol ui.Color, baseSpec, hoverSpec tokens.ElevationSpec, t float32) {
+	keyDelta := float32(hoverSpec.Key.Opacity-baseSpec.Key.Opacity) * t
+	if baseSpec.Key.Opacity == 0 {
+		keyDelta = float32(hoverSpec.Key.Opacity) * t
+	} else {
+		// Add a gentle incremental lift shadow matched to the higher tier's reach.
+		keyDelta = float32(hoverSpec.Key.Opacity) * 0.42 * t
+	}
+	if keyDelta > 0.004 {
+		p.Shadow(r, radius, 0,
+			float32(hoverSpec.Key.OffsetY),
+			float32(hoverSpec.Key.Blur),
+			float32(hoverSpec.Key.Spread),
+			shadowCol.Alpha(keyDelta))
+	}
+	ambDelta := float32(hoverSpec.Ambient.Opacity) * t
+	if baseSpec.Ambient.Opacity > 0 {
+		ambDelta = float32(hoverSpec.Ambient.Opacity) * 0.55 * t
+	}
+	if ambDelta > 0.004 {
+		p.Shadow(r, radius, 0,
+			float32(hoverSpec.Ambient.OffsetY),
+			float32(hoverSpec.Ambient.Blur),
+			float32(hoverSpec.Ambient.Spread),
+			shadowCol.Alpha(ambDelta))
+	}
 }
 
 // SurfaceOptions configures a Material Design 3 Expressive Surface container.
@@ -215,7 +294,7 @@ func resolveHairlineColor(th *Theme, override ui.Color) ui.Color {
 type componentDrawPathKey struct{}
 
 func localDrawPath(el ui.Element) *ui.Path {
-	return ui.Local(el, componentDrawPathKey{}, func() ui.Path { return ui.Path{} })
+	return localPtr(el, componentDrawPathKey{}, func() *ui.Path { return &ui.Path{} })
 }
 
 func equalRadii(radii [4]float32) bool {
@@ -329,8 +408,22 @@ func Surface(c *ui.Context, opts ...SurfaceOptions) ui.Element {
 					shadowCol = ui.RGB(0, 0, 0)
 				}
 				if spec.Ambient.Opacity > 0 {
-					p.Transform(ui.Translation(0, float32(spec.Ambient.OffsetY)), 0, 0, func() {
-						p.FillPath(path, shadowCol.Alpha(float32(spec.Ambient.Opacity*0.45)))
+					// Soft two-pass diffuse polygon shadow: a slightly expanded
+					// ambient layer underneath a tighter key-offset silhouette.
+					ambSpread := min(float32(spec.Ambient.Blur)*0.28, 3.5)
+					ambRect := ui.Rect{
+						X: r.X - ambSpread,
+						Y: r.Y + float32(spec.Ambient.OffsetY) - ambSpread*0.5,
+						W: r.W + ambSpread*2,
+						H: r.H + ambSpread*2,
+					}
+					ambPath := poly.WriteTo(scratch, ambRect)
+					p.FillPath(ambPath, shadowCol.Alpha(float32(spec.Ambient.Opacity*0.26)))
+					path = poly.WriteTo(scratch, r)
+				}
+				if spec.Key.Opacity > 0 {
+					p.Transform(ui.Translation(0, float32(spec.Key.OffsetY)), 0, 0, func() {
+						p.FillPath(path, shadowCol.Alpha(float32(spec.Key.Opacity*0.24)))
 					})
 				}
 			}

@@ -363,3 +363,40 @@ func TestWindowTitleBarNarrowScreenTitleCollapseAndFocusRing(t *testing.T) {
 		t.Fatal("WindowTitleBar left pending frames after hover leave settled")
 	}
 }
+
+func TestWindowTitleBarCloseDiagonalAndRedHoverPill(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor)
+	tt := ui.NewTester(func(c *ui.Context) {
+		ThemeScope(c, th, func() {
+			WindowTitleBar(c, WindowTitleBarOptions{
+				Title:              "App",
+				ShowWindowControls: true,
+			})
+		})
+	}, 480, 80)
+
+	closeBtn := buttonInfo(t, tt, ui.RoleButton, "Close")
+	cx, cy := int(closeBtn.Bounds.X+closeBtn.Bounds.W/2), int(closeBtn.Bounds.Y+closeBtn.Bounds.H/2)
+	bg := rgbOf(th.Colors.SurfaceContainerLowest)
+
+	// Center of the × must be inked, whereas top-center of the 12x12 glyph box
+	// must remain background (proving it renders diagonals rather than a horizontal bar).
+	img := tt.Image()
+	if absColorDiff(img.RGBAAt(cx, cy), bg) < 25 {
+		t.Fatalf("close icon center (%d,%d) was not inked: got %+v bg %+v", cx, cy, img.RGBAAt(cx, cy), bg)
+	}
+	if absColorDiff(img.RGBAAt(cx, cy-5), bg) > 12 {
+		t.Fatalf("close icon top-center (%d,%d) unexpectedly inked (horizontal bar regression): got %+v bg %+v",
+			cx, cy-5, img.RGBAAt(cx, cy-5), bg)
+	}
+
+	// Hovering Close fills a solid red Error pill and inverts the glyph toward OnError.
+	tt.Move(center(closeBtn.Bounds))
+	tt.Advance(260 * time.Millisecond)
+	hoverImg := tt.Image()
+	pillPx := hoverImg.RGBAAt(int(closeBtn.Bounds.X)+8, cy)
+	wantPill := rgbOf(th.Colors.Error.Alpha(0.92).Over(th.Colors.SurfaceContainerLowest))
+	if absColorDiff(pillPx, wantPill) > 8 {
+		t.Fatalf("close hover pill = %+v, want Error hover %+v", pillPx, wantPill)
+	}
+}

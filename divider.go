@@ -73,6 +73,9 @@ func Divider(c *ui.Context, opts ...DividerOptions) ui.Element {
 			el := ui.Box(c).Width(thickness).Shrink(0).FillHeight().Padding(top, 0, bottom, 0)
 			el.Children(func() {
 				inner := ui.Box(c).Width(thickness).FillHeight().Background(col).Role(ui.RoleSeparator)
+				if thickness >= 2 {
+					inner.Radius(thickness / 2)
+				}
 				if o.Label != "" {
 					inner.Label(o.Label)
 				}
@@ -94,6 +97,9 @@ func Divider(c *ui.Context, opts ...DividerOptions) ui.Element {
 		el := ui.Box(c).Height(thickness).Shrink(0).FillWidth().PaddingStart(start).PaddingEnd(end)
 		el.Children(func() {
 			inner := ui.Box(c).Height(thickness).FillWidth().Background(col).Role(ui.RoleSeparator)
+			if thickness >= 2 {
+				inner.Radius(thickness / 2)
+			}
 			if o.Label != "" {
 				inner.Label(o.Label)
 			}
