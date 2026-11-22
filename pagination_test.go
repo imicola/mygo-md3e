@@ -188,6 +188,45 @@ func TestPaginationWindowEllipsisAndOptions(t *testing.T) {
 	}
 }
 
+func TestPaginationSmallBudgetsAndMaxInt(t *testing.T) {
+	for _, tc := range []struct {
+		current, budget int
+		want            []int
+	}{
+		{1, 1, []int{1}},
+		{1, 2, []int{1, math.MaxInt}},
+		{50, 1, []int{50}},
+		{50, 2, []int{1, 50}},
+		{math.MaxInt, 1, []int{math.MaxInt}},
+		{math.MaxInt, 2, []int{1, math.MaxInt}},
+		{math.MaxInt, 0, []int{1, 0, math.MaxInt - 4, math.MaxInt - 3, math.MaxInt - 2, math.MaxInt - 1, math.MaxInt}},
+	} {
+		slots := computePaginationSlots(tc.current, math.MaxInt, 1, tc.budget)
+		got := make([]int, 0, len(slots))
+		for _, slot := range slots {
+			got = append(got, slot.page)
+		}
+		if !slices.Equal(got, tc.want) {
+			t.Errorf("current %d, max buttons %d: slots %v, want %v", tc.current, tc.budget, got, tc.want)
+		}
+	}
+	page := math.MaxInt - 1
+	th := ThemeFromSeed(DefaultSeedColor, ThemeOptions{ReduceMotion: true})
+	tt := ui.NewTester(func(c *ui.Context) {
+		ThemeScope(c, th, func() {
+			Pagination(c, &page, math.MaxInt, PaginationOptions{MaxButtons: 1})
+		})
+	}, 500, 90)
+	tt.SetDirection(ui.RightToLeft)
+	if err := tt.Click("Next page"); err != nil || page != math.MaxInt {
+		t.Fatalf("next at the final boundary: page %d, click error %v", page, err)
+	}
+	current := buttonInfo(t, tt, ui.RoleButton, fmt.Sprintf("Page %d", math.MaxInt))
+	if current.Current != ui.CurrentPage || !buttonInfo(t, tt, ui.RoleButton, "Next page").Disabled || tt.FramePending() {
+		t.Error("final page must be current, with Next disabled and no motion pending")
+	}
+}
+
 func TestPaginationKeyboardRTLReduceMotionDensityAndDisabled(t *testing.T) {
 	// 1. Keyboard FocusGroup navigation + focus preservation when window shifts + RTL mirror.
 	th := ThemeFromSeed(DefaultSeedColor)

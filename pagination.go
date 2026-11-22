@@ -1,6 +1,7 @@
 package md3e
 
 import (
+	"math"
 	"strconv"
 
 	"github.com/egoist/mygo/ui"
@@ -22,7 +23,8 @@ type PaginationOptions struct {
 	SiblingCount int
 	// MaxButtons caps the total number of page and ellipsis slots between
 	// Previous and Next when > 0. Values <= 0 use SiblingCount (7 slots when
-	// SiblingCount defaults to 1).
+	// SiblingCount defaults to 1). One slot shows the current page. Two slots
+	// show the first and current pages, or the first and last on page 1.
 	MaxButtons int
 	// Variant selects the MD3E look of the active page button (ButtonFilled by
 	// default, or ButtonTonal for SecondaryContainer). Inactive page buttons
@@ -206,6 +208,7 @@ func Pagination(c *ui.Context, page *int, totalPages int, opts ...PaginationOpti
 
 	buildPageButton := func(p int) {
 		active := p == cur
+		pageText := strconv.Itoa(p)
 		el := ui.ButtonBase(c.Key(paginationPageKey{page: p})).
 			DimDisabled(false).
 			FocusRing(false).
@@ -215,7 +218,7 @@ func Pagination(c *ui.Context, page *int, totalPages int, opts ...PaginationOpti
 			Shrink(0).
 			AlignItems(ui.Center).
 			Justify(ui.Center).
-			Label("Page " + strconv.Itoa(p)).
+			Label("Page " + pageText).
 			Disabled(disabledAll).
 			AccessSelected(active)
 		if active {
@@ -250,7 +253,7 @@ func Pagination(c *ui.Context, page *int, totalPages int, opts ...PaginationOpti
 		})
 
 		el.Children(func() {
-			txt := ui.Text(c, strconv.Itoa(p)).NoWrap()
+			txt := ui.Text(c, pageText).NoWrap()
 			applyTypeStyleWithTheme(th, txt, pm.typeRole, active)
 			TabularNums(txt)
 			txt.TextColor(pal.content)
@@ -296,7 +299,7 @@ func Pagination(c *ui.Context, page *int, totalPages int, opts ...PaginationOpti
 			}
 		}
 
-		buildNavButton(paginationNextKey{}, "Next page", nextIcon, atEnd, min(totalPages, cur+1))
+		buildNavButton(paginationNextKey{}, "Next page", nextIcon, atEnd, cur+min(1, totalPages-cur))
 		if o.ShowEdges {
 			buildNavButton(paginationLastKey{}, "Last page", lastIcon, atEnd, totalPages)
 		}
@@ -410,8 +413,18 @@ func computePaginationSlots(cur, total, siblingCount, maxButtons int) []paginati
 		sib = 1
 	}
 	if maxButtons > 0 {
-		if maxButtons < 3 {
-			maxButtons = 3
+		if maxButtons == 1 {
+			return []paginationSlot{{kind: paginationSlotPage, page: cur}}
+		}
+		if maxButtons == 2 {
+			second := cur
+			if cur == 1 {
+				second = total
+			}
+			return []paginationSlot{
+				{kind: paginationSlotPage, page: 1},
+				{kind: paginationSlotPage, page: second},
+			}
 		}
 		if maxButtons == 3 {
 			if cur <= 1 {
@@ -462,6 +475,7 @@ func computePaginationSlots(cur, total, siblingCount, maxButtons int) []paginati
 	}
 
 	const boundary = 1
+	sib = min(sib, (math.MaxInt-5)/2)
 	totalSlots := boundary*2 + sib*2 + 3
 	if total <= totalSlots {
 		out := make([]paginationSlot, total)
@@ -472,7 +486,7 @@ func computePaginationSlots(cur, total, siblingCount, maxButtons int) []paginati
 	}
 
 	leftSibling := max(cur-sib, 1)
-	rightSibling := min(cur+sib, total)
+	rightSibling := cur + min(sib, total-cur)
 	showLeftDots := leftSibling > boundary+2
 	showRightDots := rightSibling < total-boundary-1
 
@@ -495,8 +509,9 @@ func computePaginationSlots(cur, total, siblingCount, maxButtons int) []paginati
 			paginationSlot{kind: paginationSlotPage, page: 1},
 			paginationSlot{kind: paginationSlotEllipsisStart},
 		)
-		for p := total - rightCount + 1; p <= total; p++ {
-			out = append(out, paginationSlot{kind: paginationSlotPage, page: p})
+		first := total - rightCount + 1
+		for i := range rightCount {
+			out = append(out, paginationSlot{kind: paginationSlotPage, page: first + i})
 		}
 	case showLeftDots && showRightDots:
 		out = make([]paginationSlot, 0, totalSlots)
