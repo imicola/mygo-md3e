@@ -3,6 +3,7 @@ package charts
 import (
 	"fmt"
 	"math"
+	"strconv"
 	"strings"
 
 	"github.com/egoist/mygo/ui"
@@ -131,15 +132,6 @@ func LineChart(c *ui.Context, series []LineSeries, opts ...LineChartOptions) ui.
 		colors[i] = col
 	}
 
-	xLabels := make([]string, maxN)
-	for i := range maxN {
-		if i < len(o.Labels) && o.Labels[i] != "" {
-			xLabels[i] = o.Labels[i]
-		} else {
-			xLabels[i] = fmt.Sprintf("%d", i+1)
-		}
-	}
-
 	// Compute Y scale domain safely across all finite values.
 	yScale := resolveLineYScale(series, o.YMin, o.YMax, o.HasYDomain, o.BaselineZero, yTickCount, fmtVal)
 	yTicks := yScale.Ticks(yTickCount)
@@ -156,7 +148,7 @@ func LineChart(c *ui.Context, series []LineSeries, opts ...LineChartOptions) ui.
 	}
 
 	// Build X-axis ticks (with optional thinning for dense categories).
-	xTicks := buildLineXTicks(xs, xLabels, o.MaxXLabels)
+	xTicks := buildLineXTicks(xs, o.Labels, o.MaxXLabels)
 
 	label := o.Label
 	if label == "" {
@@ -246,9 +238,9 @@ func LineChart(c *ui.Context, series []LineSeries, opts ...LineChartOptions) ui.
 					parts = append(parts, fmt.Sprintf("%s %s", name, fmtVal(s.Values[idx])))
 				}
 				if len(parts) == 0 {
-					return xLabels[idx]
+					return lineXLabel(o.Labels, idx)
 				}
-				return xLabels[idx] + ": " + strings.Join(parts, ", ")
+				return lineXLabel(o.Labels, idx) + ": " + strings.Join(parts, ", ")
 			}
 
 			if maxN > 0 {
@@ -407,7 +399,7 @@ func LineChart(c *ui.Context, series []LineSeries, opts ...LineChartOptions) ui.
 				}
 
 				if showTooltip {
-					tipTitle := xLabels[idx]
+					tipTitle := lineXLabel(o.Labels, idx)
 					if o.TooltipBuilder != nil {
 						tipTitle, tipRows = o.TooltipBuilder(idx)
 					}
@@ -489,6 +481,13 @@ func resolveLineYScale(series []LineSeries, yMin, yMax float64, hasDomain, basel
 	return sc
 }
 
+func lineXLabel(labels []string, index int) string {
+	if index < len(labels) && labels[index] != "" {
+		return labels[index]
+	}
+	return strconv.Itoa(index + 1)
+}
+
 func buildLineXTicks(xs []float32, labels []string, maxLabels int) []chart.Tick {
 	n := len(xs)
 	if n == 0 {
@@ -498,12 +497,12 @@ func buildLineXTicks(xs []float32, labels []string, maxLabels int) []chart.Tick 
 	if maxLabels > 0 && n > maxLabels {
 		step = int(math.Ceil(float64(n-1) / float64(max(1, maxLabels-1))))
 	}
-	ticks := make([]chart.Tick, 0, min(n, max(2, maxLabels)))
+	ticks := make([]chart.Tick, 0, min(n, 2+(n-2)/step))
 	for i := 0; i < n; i += step {
-		ticks = append(ticks, chart.Tick{At: xs[i], Value: float64(i), Label: labels[i]})
+		ticks = append(ticks, chart.Tick{At: xs[i], Value: float64(i), Label: lineXLabel(labels, i)})
 	}
 	if last := n - 1; last > 0 && ticks[len(ticks)-1].Value != float64(last) {
-		ticks = append(ticks, chart.Tick{At: xs[last], Value: float64(last), Label: labels[last]})
+		ticks = append(ticks, chart.Tick{At: xs[last], Value: float64(last), Label: lineXLabel(labels, last)})
 	}
 	return ticks
 }

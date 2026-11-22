@@ -2,6 +2,7 @@ package charts
 
 import (
 	"math"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -11,6 +12,28 @@ import (
 	md3e "github.com/imicola/mygo-md3e"
 	"github.com/imicola/mygo-md3e/tokens"
 )
+
+func TestLineTicksResolveOnlyVisibleLabels(t *testing.T) {
+	xs := make([]float32, 10000)
+	for i := range xs {
+		xs[i] = float32(i) / float32(len(xs)-1)
+	}
+	labels := make([]string, len(xs))
+	labels[2000] = "Milestone"
+	labels[2001] = "Between ticks"
+	ticks := buildLineXTicks(xs, labels, 6)
+	got := make([]string, 0, len(ticks))
+	for _, tick := range ticks {
+		got = append(got, tick.Label)
+	}
+	want := []string{"1", "Milestone", "4001", "6001", "8001", "10000"}
+	if !slices.Equal(got, want) {
+		t.Errorf("visible labels = %q, want %q", got, want)
+	}
+	if got := lineXLabel(labels, 2001); got != "Between ticks" {
+		t.Errorf("intermediate point label = %q", got)
+	}
+}
 
 func TestLineChartInteractionKeyboardSettlingAndEdges(t *testing.T) {
 	sel := -1

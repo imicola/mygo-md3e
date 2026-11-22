@@ -12,6 +12,20 @@ import (
 	"github.com/imicola/mygo-md3e/tokens"
 )
 
+func TestStackedLayoutReusesGeometry(t *testing.T) {
+	fractions := []float32{0.5, 0, 0.25}
+	colors := make([]ui.Color, len(fractions))
+	geometry := make([]stackedGeomSeg, 0, len(fractions))
+	if allocs := testing.AllocsPerRun(50, func() {
+		geometry = computeStackedLayout(geometry, 100, fractions, .25, colors, ui.Transparent, 3, 6, 3, true)
+	}); allocs != 0 {
+		t.Errorf("warm layout allocated %v times per run", allocs)
+	}
+	if len(geometry) != 3 || geometry[0].segIndex != 0 || geometry[1].segIndex != 2 || geometry[2].segIndex != -1 {
+		t.Errorf("unexpected segment layout: %+v", geometry)
+	}
+}
+
 func TestStackedProgressSegmentsRTLHoverAndSettling(t *testing.T) {
 	red := ui.RGB(0xE5, 0x39, 0x35)
 	blue := ui.RGB(0x1E, 0x88, 0xE5)

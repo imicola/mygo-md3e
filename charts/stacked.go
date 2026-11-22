@@ -2,6 +2,7 @@ package charts
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/egoist/mygo/ui"
@@ -65,11 +66,7 @@ type StackedProgressOptions struct {
 }
 
 type stackedSegAnimKey int
-type stackedHoverKey struct{}
-
-type stackedHoverState struct {
-	hovered int
-}
+type stackedGeometryKey struct{}
 
 type stackedGeomSeg struct {
 	segIndex int // -1 for unfilled remainder track
@@ -174,11 +171,6 @@ func StackedProgress(c *ui.Context, segments []StackedSegment, opts ...StackedPr
 		root.Description(o.Description)
 	}
 
-	hoverSt := ui.Local(root, stackedHoverKey{}, func() stackedHoverState { return stackedHoverState{hovered: -1} })
-	if hoverSt.hovered >= n {
-		hoverSt.hovered = -1
-	}
-
 	// Animate normalized fractions with MD3E DefaultSpatial.
 	anim := motion.Resolve(th.Motion, motion.DefaultSpatial, reduce)
 	fracs := make([]float32, n)
@@ -200,14 +192,15 @@ func StackedProgress(c *ui.Context, segments []StackedSegment, opts ...StackedPr
 
 	root.Children(func() {
 		trackWrap := ui.Box(c.Key("track-wrap")).FillWidth().Height(height)
+		geometry := ui.Local(trackWrap, stackedGeometryKey{}, func() []stackedGeomSeg { return nil })
 
 		// Detect pointer hover over individual segments using trackWrap's own bounds.
 		activeSeg := -1
 		activeAnchorX := float32(0.5)
 		if px, _, over := trackWrap.PointerPosition(); over {
 			if w := trackWrap.Bounds().W; w > 0 {
-				geoms := computeStackedLayout(w, fracs, remFrac, colors, trackCol, segGap, outerR, innerR, rtl)
-				for _, g := range geoms {
+				*geometry = computeStackedLayout(*geometry, w, fracs, remFrac, colors, trackCol, segGap, outerR, innerR, rtl)
+				for _, g := range *geometry {
 					if g.segIndex >= 0 && px >= g.x0-segGap*0.5 && px <= g.x1+segGap*0.5 {
 						activeSeg = g.segIndex
 						activeAnchorX = clampF32(((g.x0+g.x1)*0.5)/w, 0.08, 0.92)
@@ -216,11 +209,8 @@ func StackedProgress(c *ui.Context, segments []StackedSegment, opts ...StackedPr
 				}
 			}
 		}
-		hoverSt.hovered = activeSeg
-
-		// Capture immutable snapshot for ghost-draw safe painting.
-		drawFracs := append([]float32(nil), fracs...)
-		drawColors := append([]ui.Color(nil), colors...)
+		// fracs and colors are owned by this build and stay unchanged when
+		// a leaving element paints its captured frame.
 		drawActive := activeSeg
 		drawDark := th.Dark
 		trackWrap.Draw(func(p *ui.Painter, r ui.Rect) {
@@ -231,13 +221,13 @@ func StackedProgress(c *ui.Context, segments []StackedSegment, opts ...StackedPr
 				return
 			}
 
-			geoms := computeStackedLayout(r.W, drawFracs, remFrac, drawColors, trackCol, segGap, outerR, innerR, rtl)
-			if len(geoms) == 0 {
+			*geometry = computeStackedLayout(*geometry, r.W, fracs, remFrac, colors, trackCol, segGap, outerR, innerR, rtl)
+			if len(*geometry) == 0 {
 				p.Fill(r, trackCol, min(outerR, r.H/2))
 				return
 			}
 
-			for _, g := range geoms {
+			for _, g := range *geometry {
 				w := g.x1 - g.x0
 				if w <= 0.25 {
 					continue
@@ -380,6 +370,7 @@ func renderCompactSegmentTip(c *ui.Context, th *md3e.Theme, name, val string, sw
 }
 
 func computeStackedLayout(
+	dst []stackedGeomSeg,
 	totalW float32,
 	fracs []float32,
 	remFrac float32,
@@ -388,45 +379,41 @@ func computeStackedLayout(
 	gap, outerR, innerR float32,
 	rtl bool,
 ) []stackedGeomSeg {
-	type entry struct {
-		idx  int
-		frac float32
-		col  ui.Color
-	}
-	entries := make([]entry, 0, len(fracs)+1)
+	const minFraction = 0.0005
+	count := 0
 	fracSum := float32(0)
-	for i, f := range fracs {
-		if f > 0.0005 {
-			entries = append(entries, entry{idx: i, frac: f, col: colors[i]})
+	for _, f := range fracs {
+		if f > minFraction {
+			count++
 			fracSum += f
 		}
 	}
-	if remFrac > 0.0005 {
-		entries = append(entries, entry{idx: -1, frac: remFrac, col: trackCol})
+	if remFrac > minFraction {
+		count++
 		fracSum += remFrac
 	}
-	if len(entries) == 0 || fracSum <= 0 {
-		return nil
+	if count == 0 {
+		return dst[:0]
 	}
 
 	effGap := gap
-	if len(entries) > 1 {
-		maxGap := (totalW * 0.4) / float32(len(entries)-1)
+	if count > 1 {
+		maxGap := (totalW * 0.4) / float32(count-1)
 		if effGap > maxGap {
 			effGap = max(0, maxGap)
 		}
 	}
-	availW := max(0, totalW-effGap*float32(len(entries)-1))
-	out := make([]stackedGeomSeg, len(entries))
+	availW := max(0, totalW-effGap*float32(count-1))
+	out := slices.Grow(dst[:0], count)
 
 	cursor := float32(0)
 	if rtl {
 		cursor = totalW
 	}
-	for i, e := range entries {
-		w := availW * (e.frac / fracSum)
-		isFirst := i == 0
-		isLast := i == len(entries)-1
+	appendSegment := func(index int, fraction float32, color ui.Color) {
+		w := availW * (fraction / fracSum)
+		isFirst := len(out) == 0
+		isLast := len(out) == count-1
 
 		var x0, x1 float32
 		var radii [4]float32
@@ -455,13 +442,21 @@ func computeStackedLayout(
 			}
 			radii = [4]float32{leftR, rightR, rightR, leftR}
 		}
-		out[i] = stackedGeomSeg{
-			segIndex: e.idx,
+		out = append(out, stackedGeomSeg{
+			segIndex: index,
 			x0:       x0,
 			x1:       x1,
 			radii:    radii,
-			color:    e.col,
+			color:    color,
+		})
+	}
+	for i, f := range fracs {
+		if f > minFraction {
+			appendSegment(i, f, colors[i])
 		}
+	}
+	if remFrac > minFraction {
+		appendSegment(-1, remFrac, trackCol)
 	}
 	return out
 }
