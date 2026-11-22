@@ -3,6 +3,7 @@ package media
 import (
 	"fmt"
 	"image"
+	"reflect"
 	"time"
 
 	"github.com/egoist/mygo/ui"
@@ -88,18 +89,18 @@ type MiniPlayerOptions struct {
 }
 
 type (
-	audioCardHostKey    struct{}
-	audioCoverMemoKey   struct{}
-	audioLocalPlayKey   struct{}
-	audioPlayMorphKey   struct{}
-	audioScrubberKey    struct{}
-	audioShuffleBtnKey  struct{}
-	audioRepeatBtnKey   struct{}
-	miniPlayerHostKey   struct{}
-	miniLocalPlayKey    struct{}
+	audioCardHostKey   struct{}
+	audioCoverMemoKey  struct{}
+	audioLocalPlayKey  struct{}
+	audioPlayMorphKey  struct{}
+	audioScrubberKey   struct{}
+	audioShuffleBtnKey struct{}
+	audioRepeatBtnKey  struct{}
+	miniPlayerHostKey  struct{}
+	miniLocalPlayKey   struct{}
 
 	audioCoverMemo struct {
-		lastImg       image.Image
+		artworkImage  image.Image
 		lastBitmap    *ui.Bitmap
 		hasSeed       bool
 		extractedSeed ui.Color
@@ -472,18 +473,28 @@ func resolveTrackCoverAndTheme(
 	hasVariant bool,
 ) (cover ui.ImageSource, dynTheme *md3e.Theme, useDynamic bool) {
 	memo := ui.Local(host, audioCoverMemoKey{}, func() audioCoverMemo { return audioCoverMemo{} })
+	img := track.ArtworkImage
+	// Only retain images that can be compared safely on the next build.
+	comparable := img == nil || reflect.ValueOf(img).Comparable()
+	if !comparable || memo.artworkImage != img {
+		memo.artworkImage = nil
+		memo.lastBitmap = nil
+		memo.hasSeed = false
+		if comparable {
+			memo.artworkImage = img
+		}
+	}
 
 	if track.Artwork != nil {
 		cover = track.Artwork
-	} else if track.ArtworkImage != nil {
-		if memo.lastImg != track.ArtworkImage || memo.lastBitmap == nil {
-			memo.lastBitmap = ui.NewBitmap(track.ArtworkImage)
+	} else if img != nil {
+		if memo.lastBitmap == nil {
+			memo.lastBitmap = ui.NewBitmap(img)
 		}
 		cover = memo.lastBitmap
 	}
 
-	if seedOverride.A == 0 && !(dynamicColor && track.ArtworkImage != nil) {
-		memo.lastImg = track.ArtworkImage
+	if seedOverride.A == 0 && !(dynamicColor && img != nil) {
 		return cover, nil, false
 	}
 
@@ -497,11 +508,10 @@ func resolveTrackCoverAndTheme(
 	switch {
 	case seedOverride.A > 0:
 		seed = seedOverride
-	case memo.lastImg == track.ArtworkImage && memo.hasSeed:
+	case memo.hasSeed:
 		seed = memo.extractedSeed
 	default:
-		seed = tokens.SeedFromImage(track.ArtworkImage)
-		memo.lastImg = track.ArtworkImage
+		seed = tokens.SeedFromImage(img)
 		memo.extractedSeed = seed
 		memo.hasSeed = true
 	}
@@ -511,7 +521,9 @@ func resolveTrackCoverAndTheme(
 		memo.lastVariant != variant ||
 		memo.lastDark != base.Dark ||
 		memo.lastContrast != base.Contrast ||
-		memo.lastDensity != base.Density {
+		memo.lastDensity != base.Density ||
+		memo.cachedTheme.ReduceMotion != base.ReduceMotion ||
+		memo.cachedTheme.Shapes != base.Shapes {
 		memo.cachedTheme = md3e.ThemeFromSeed(seed, md3e.ThemeOptions{
 			Dark:     base.Dark,
 			Variant:  variant,

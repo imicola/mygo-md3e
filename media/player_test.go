@@ -43,6 +43,76 @@ func makeTestGIFBytes(t *testing.T, w, h, frames, delayCs int) []byte {
 	return buf.Bytes()
 }
 
+type uncomparableArtwork struct {
+	image.Image
+	metadata []byte
+}
+
+func TestAudioCoverMemoAcrossOptionAndArtworkChanges(t *testing.T) {
+	warm := image.NewNRGBA(image.Rect(0, 0, 4, 4))
+	cool := image.NewNRGBA(warm.Bounds())
+	for i := range 16 {
+		warm.Set(i%4, i/4, color.NRGBA{R: 230, G: 80, B: 40, A: 255})
+		cool.Set(i%4, i/4, color.NRGBA{R: 20, G: 100, B: 230, A: 255})
+	}
+	track := TrackInfo{ArtworkImage: warm}
+	dynamic := true
+	var seed ui.Color
+	var artwork ui.ImageSource
+	var theme *md3e.Theme
+	var active bool
+	tt := ui.NewTester(func(c *ui.Context) {
+		artwork, theme, active = resolveTrackCoverAndTheme(c, ui.Box(c), track, dynamic, seed, tokens.Expressive, true)
+	}, 100, 100)
+	if !active || artwork == nil || theme == nil {
+		t.Fatal("initial dynamic artwork is missing")
+	}
+	warmTheme := theme.Colors.Primary
+
+	dynamic = false
+	track.ArtworkImage = cool
+	tt.Frame()
+	if active {
+		t.Fatal("dynamic theme enabled with no seed or opt-in")
+	}
+	coolBitmap := artwork
+	track.Artwork = coolBitmap
+	track.ArtworkImage = warm
+	tt.Frame()
+	track.Artwork = nil
+	tt.Frame()
+	if artwork == coolBitmap {
+		t.Error("retained old bitmap after hiding and changing raw artwork")
+	}
+	track.ArtworkImage = cool
+	tt.Frame()
+	dynamic = true
+	tt.Frame()
+	if !active || theme.Colors.Primary == warmTheme {
+		t.Error("reused old artwork seed after re-enabling dynamic color")
+	}
+
+	seed = ui.RGB(200, 30, 170)
+	track.ArtworkImage = warm
+	tt.Frame()
+	wantOverride := md3e.ThemeFromSeed(seed, md3e.ThemeOptions{Variant: tokens.Expressive}).Colors.Primary
+	if !active || theme.Colors.Primary != wantOverride {
+		t.Error("explicit seed did not override the artwork seed")
+	}
+	bitmapWithOverride := artwork
+	tt.Frame()
+	if artwork != bitmapWithOverride {
+		t.Error("explicit seed caused the bitmap to be rebuilt")
+	}
+	seed = ui.Color{}
+	track.ArtworkImage = uncomparableArtwork{Image: warm, metadata: []byte{1}}
+	tt.Frame()
+	tt.Frame()
+	if !active || artwork == nil || theme.Colors.Primary != warmTheme {
+		t.Fatal("uncomparable artwork failed to produce a bitmap and matching theme")
+	}
+}
+
 func makeRawColorImage(w, h int, c color.NRGBA) image.Image {
 	img := image.NewNRGBA(image.Rect(0, 0, w, h))
 	for y := range h {
