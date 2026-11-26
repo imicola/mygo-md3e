@@ -127,6 +127,9 @@ func AudioPlayerCard(c *ui.Context, track TrackInfo, opts ...AudioPlayerOptions)
 	}
 
 	host := ui.Box(c)
+	if !isPositiveFiniteF32(o.Width) {
+		host.FillWidth()
+	}
 	coverSrc, dynTheme, useDynamic := resolveTrackCoverAndTheme(
 		c, host, track, o.DynamicColor, o.SeedColor, o.ColorVariant, o.HasColorVariant,
 	)
@@ -334,7 +337,12 @@ func AudioPlayerCard(c *ui.Context, track TrackInfo, opts ...AudioPlayerOptions)
 
 	host.Children(func() {
 		if useDynamic && dynTheme != nil {
-			md3e.AnimatedThemeScope(c, dynTheme, renderCard)
+			scope := md3e.AnimatedThemeScope(c, dynTheme, renderCard)
+			if isPositiveFiniteF32(o.Width) {
+				scope.Width(o.Width)
+			} else {
+				scope.FillWidth()
+			}
 		} else {
 			renderCard()
 		}
@@ -493,7 +501,7 @@ func MiniPlayer(c *ui.Context, track TrackInfo, opts ...MiniPlayerOptions) ui.El
 
 	host.Children(func() {
 		if useDynamic && dynTheme != nil {
-			md3e.AnimatedThemeScope(c, dynTheme, renderBar)
+			md3e.AnimatedThemeScope(c, dynTheme, renderBar).FillWidth()
 		} else {
 			renderBar()
 		}

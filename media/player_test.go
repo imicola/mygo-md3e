@@ -484,4 +484,27 @@ func TestAudioPlayerCardMiniPlayerDynamicColorAndReduceMotion(t *testing.T) {
 			t.Fatalf("MiniPlayer height for density %v = %v, want %v", tc.density, reg.Bounds.H, tc.wantH)
 		}
 	}
+
+	// DynamicColor FillWidth check inside an AlignItems(ui.Start) column.
+	ftt := ui.NewTester(func(c *ui.Context) {
+		md3e.ThemeScope(c, th, func() {
+			ui.Column(c).Size(520, 420).AlignItems(ui.Start).Gap(12).Children(func() {
+				AudioPlayerCard(c, track, AudioPlayerOptions{
+					DynamicColor: true,
+					Label:        "Wide audio card",
+				})
+				MiniPlayer(c, track, MiniPlayerOptions{
+					DynamicColor: true,
+					Label:        "Wide mini player",
+				})
+			})
+		})
+	}, 520, 420)
+	ftt.Frame()
+	if reg, ok := ftt.AccessByRole(ui.RoleRegion, "Wide audio card"); !ok || reg.Bounds.W < 510 {
+		t.Fatalf("AudioPlayerCard with DynamicColor did not fill parent width: ok=%v bounds=%+v", ok, reg.Bounds)
+	}
+	if reg, ok := ftt.AccessByRole(ui.RoleRegion, "Wide mini player"); !ok || reg.Bounds.W < 510 {
+		t.Fatalf("MiniPlayer with DynamicColor did not fill parent width: ok=%v bounds=%+v", ok, reg.Bounds)
+	}
 }
