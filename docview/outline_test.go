@@ -379,3 +379,89 @@ func TestOutlineStandaloneItemsAndEmpty(t *testing.T) {
 		t.Fatal("expected EmptyText placeholder when outline is empty")
 	}
 }
+
+func TestOutlineCrossDocumentSwitchClearsStaleJump(t *testing.T) {
+	docA := "# Alpha One\n\n" + strings.Repeat("Intro A paragraph.\n\n", 10) +
+		"## Alpha Two\n\n" + strings.Repeat("Body A2 paragraph.\n\n", 10) +
+		"## Alpha Three\n\n" + strings.Repeat("Body A3 paragraph.\n\n", 10)
+	docB := "# Beta One\n\n" + strings.Repeat("Intro B paragraph.\n\n", 10) +
+		"## Beta Two\n\n" + strings.Repeat("Body B2 paragraph.\n\n", 10) +
+		"## Beta Three\n\n" + strings.Repeat("Body B3 paragraph.\n\n", 10)
+
+	// 1. With ScrollState attached: jumping to Alpha Three then switching to Doc B resets active heading to Beta One.
+	th := md3e.ThemeFromSeed(md3e.DefaultSeedColor, md3e.ThemeOptions{ReduceMotion: true})
+	var docState docview.State
+	var scroll ui.ScrollState
+	activeDoc := docA
+
+	tt := ui.NewTester(func(c *ui.Context) {
+		md3e.ThemeScope(c, th, func() {
+			ui.Row(c).Fill().Children(func() {
+				ui.Scroll(c.Key("scroll")).Grow(1).FillHeight().TrackScroll(&scroll).Children(func() {
+					docview.Markdown(c.Key("doc"), activeDoc, docview.MarkdownOptions{
+						State:  &docState,
+						Scroll: &scroll,
+					})
+				})
+				ui.Box(c).Width(220).FillHeight().Children(func() {
+					docview.Outline(c.Key("toc"), &docState, docview.OutlineOptions{
+						Scroll: &scroll,
+					})
+				})
+			})
+		}).Fill()
+	}, 720, 320)
+
+	tt.Advance(200 * time.Millisecond)
+	if err := tt.Click("Alpha Three"); err != nil {
+		t.Fatalf("click Alpha Three: %v", err)
+	}
+	tt.Advance(100 * time.Millisecond)
+	if got := docState.ActiveSlug(); got != "alpha-three" {
+		t.Fatalf("ActiveSlug after jump in Doc A = %q, want alpha-three", got)
+	}
+
+	// Switch to Doc B (which also has 3 headings) and reset scroll to top.
+	activeDoc = docB
+	scroll = ui.ScrollState{}
+	tt.Frame()
+	if got := docState.ActiveIndex(); got != 0 {
+		t.Fatalf("first frame after switching to Doc B had stale ActiveIndex=%d (%q), want 0", got, docState.ActiveSlug())
+	}
+	tt.Advance(200 * time.Millisecond)
+	if got := docState.ActiveSlug(); got != "beta-one" {
+		t.Fatalf("ActiveSlug in Doc B = %q, want beta-one", got)
+	}
+
+	// 2. Without ScrollState (anchor fallback): jumping to Alpha Three then switching to Doc B clears pending jump.
+	var noScrollState docview.State
+	activeDoc2 := docA
+	tt2 := ui.NewTester(func(c *ui.Context) {
+		md3e.ThemeScope(c, th, func() {
+			ui.Row(c).Fill().Children(func() {
+				ui.Scroll(c.Key("scroll2")).Grow(1).FillHeight().Children(func() {
+					docview.Markdown(c.Key("doc2"), activeDoc2, docview.MarkdownOptions{
+						State: &noScrollState,
+					})
+				})
+				ui.Box(c.Key("toc2")).Width(220).FillHeight().Children(func() {
+					docview.Outline(c.Key("toc2"), &noScrollState)
+				})
+			})
+		}).Fill()
+	}, 720, 320)
+
+	tt2.Advance(100 * time.Millisecond)
+	if err := tt2.Click("Alpha Three"); err != nil {
+		t.Fatalf("click Alpha Three (anchor mode): %v", err)
+	}
+	tt2.Frame()
+	if got := noScrollState.ActiveSlug(); got != "alpha-three" {
+		t.Fatalf("anchor-mode ActiveSlug after jump = %q, want alpha-three", got)
+	}
+	activeDoc2 = docB
+	tt2.Frame()
+	if got := noScrollState.ActiveSlug(); got != "beta-one" {
+		t.Fatalf("anchor-mode ActiveSlug after switching to Doc B = %q, want beta-one", got)
+	}
+}

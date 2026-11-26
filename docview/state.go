@@ -272,13 +272,34 @@ func (s *State) syncDocument(src string, ext parser.Extensions) bool {
 		s.doc = parser.New(ext)
 		s.ext = ext
 	}
+	prevSrc := s.src
+	var prevSlugs []OutlineItem
+	if (s.hasPendingJump || s.anchor != "") && len(s.items) > 0 {
+		prevSlugs = make([]OutlineItem, len(s.items))
+		copy(prevSlugs, s.items)
+	}
 	s.doc.Set(src)
 	s.src = src
 	s.hasOffsets = false
 	s.items = extractOutlineFromDoc(s.doc, s.items)
-	if s.pendingJumpIdx >= len(s.items) {
+	if s.pendingJumpIdx >= len(s.items) ||
+		(len(prevSlugs) > 0 && !outlineHeadingsPrefix(prevSlugs, s.items)) ||
+		(prevSrc != "" && !strings.HasPrefix(src, prevSrc) && len(prevSlugs) == 0) {
 		s.hasPendingJump = false
 		s.pendingJumpIdx = -1
+		s.anchor = ""
+	}
+	return true
+}
+
+func outlineHeadingsPrefix(prev, next []OutlineItem) bool {
+	if len(prev) > len(next) {
+		return false
+	}
+	for i := range prev {
+		if prev[i].Slug != next[i].Slug || prev[i].Level != next[i].Level {
+			return false
+		}
 	}
 	return true
 }
