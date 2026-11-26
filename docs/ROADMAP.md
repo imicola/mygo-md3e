@@ -176,11 +176,11 @@ tokens  ──►  motion  ──►  shape  ──►  md3e (根包：核心美
   - 自动化按需裁剪体积检查脚本/测试（确认 `Button` 最小二进制不链接 `symbols/`、`charts/`、`media/`、`docview/`、`codeview/`、上游扩展与未引用形状）。
   - 在 Linux/amd64、Go 1.27.4、`CGO_ENABLED=0 GOMAXPROCS=1` 下，以 `-benchmem -count=3 -benchtime=200ms` 对比 `e7d0698`。中位数每帧分配从 93 降到 89（仪表盘）、181 降到 175（10 万行 DataTable 稳态）、8 降到 0（预热后的形状稳态绘制）。常驻 Go 堆中位数为 467,696 B，低于 5 MB 门限。
   - 同一环境的普通构建中，最小 Button 体积为 13,847,648 B（原 13,842,388 B），Gallery 为 18,385,867 B（原 18,364,770 B）。DCE 测试同时检查链接符号和 Linux/amd64 Go 1.27 的字节上限（13,900,000 B 与 18,500,000 B）。
-- [ ] **M15.3 多场景标杆参考应用（实战反哺组件库）**
-  - `examples/workbench`（或拆分轻量示例）：在同一个 `AdaptiveScaffold` + `WindowTitleBar` 中内置 **3 个真实级业务页面**，覆盖 80% 场景验证：
-    1. **实时监控仪表盘**（类 FlClash 风格：暖橙深色 Bento 网格、异形曲奇启停键、实时上传/下载曲线、内存分段条、万级虚拟连接/DNS 数据表、实时进程内存自显）；
-    2. **媒体与图库中心**（封面动态取色 `SeedFromImage`、异形图片网格、灯箱预览、Expressive 音视频播放器 + 侧栏播放队列）；
-    3. **文档与知识工作台**（左侧 `TreeView` 目录树 + 中间 `docview.Markdown` 流式文档/代码块/Callout + 右侧大纲 `Outline`）。
+- [x] **M15.3 多场景标杆参考应用（实战反哺组件库）**
+  - `examples/workbench`：在同一个 `AdaptiveScaffold` + `WindowTitleBar` + `AnimatedThemeScope` 中分阶段交付 **3 个真实级业务页面**，覆盖 80% 场景验证：
+    - [x] **M15.3.a 外壳与「实时监控仪表盘」**（`examples/workbench`：`WindowTitleBar` + `AdaptiveScaffold` + 偏好 `AlertDialog`；默认暖橙深色 Desktop Bento 网格、曲奇 `MorphIconButton` 启停、72 点 `RingBuffer` + `AreaSparkline` 上传/下载曲线、基于 `runtime.ReadMemStats` 的 `StackedProgress` 进程内存自显与手动 GC、10K/100K 虚拟连接与 DNS `DataTable` 排序/过滤/右键菜单与无头测试）；
+    - [x] **M15.3.b 「媒体与图库中心」**（封面动态取色 `tokens.SeedFromImage` / `PaletteFromImage` + `AnimatedThemeScope` 全局跟色、6 张纯 Go 合成艺术封面异形图片网格（`Expressive`/`Rounded`/`Mono` 遮罩切换与 `Skeleton`/`Error` 占位恢复演示）、共享 `MatchKey` 的 `media.ImageLightbox` 灯箱预览、`media.AudioPlayerCard` / `MiniPlayer` / `VideoPlayer` 全屏影院联动，以及基于 `SupportingPane` + 分段 `List` 的可过滤/可排序侧栏播放队列，并反哺修复 `md3e.Image` `AspectRatio` 优先级、`media.AudioPlayerCard` / `MiniPlayer` `FillWidth` 填充与 `md3e.List` `ReduceMotion` 选中态收敛）；
+    - [x] **M15.3.c 「文档与知识工作台」**（`ListDetailPane` + `SupportingPane` 响应式三栏布局：左侧可检索与全展开/折叠 `md3e.TreeView` 多级目录树 + 中间 `md3e.Breadcrumb`、`docview.Markdown` / `docview.MarkdownStream` 虚拟时钟增量流式文档、GFM `Callout` 五色语义提示块、`docview.CodeBlock` 语法高亮与一键复制/源码视图切换、交互式 `OnTask` 复选框与 `doc://` 内链跳转 + 右侧深度过滤 `docview.Outline` 滚动联动目录，并反哺修复 `docview.State` 跨文档切换残留跳转索引与 `docview.Markdown` 主题级 `ReduceMotion` 立即收敛）。
 
 ---
 

@@ -46,6 +46,12 @@ CGO_ENABLED=0 go run ./examples/gallery
 CGO_ENABLED=0 go run ./examples/desktop-demo
 ```
 
+`examples/workbench` 是第二阶段多场景旗舰工作台示例，集成 `WindowTitleBar`、`AdaptiveScaffold`、`AnimatedThemeScope`、`charts`、`media`、`docview` 与虚拟化 `DataTable`——涵盖 M15.3.a「实时监控仪表盘」（暖橙深色 Bento 网格、曲奇启停键、实时上传/下载曲线、`runtime.MemStats` 进程内存分段条与 10K–100K 连接/DNS 虚拟表）、M15.3.b「媒体与图库中心」（`tokens.SeedFromImage` / `PaletteFromImage` 封面动态取色、异形图片网格、`ImageLightbox` 灯箱、`AudioPlayerCard` / `MiniPlayer` / `VideoPlayer` 播放器与 `SupportingPane` 侧栏播放队列）与 M15.3.c「文档与知识工作台」（`TreeView` 目录树、`Breadcrumb`、`docview.Markdown` / `docview.MarkdownStream` 流式渲染、五色语义 `Callout`、语法高亮 `CodeBlock`、交互式任务清单与 `docview.Outline` 滚动联动大纲）：
+
+```sh
+CGO_ENABLED=0 go run ./examples/workbench
+```
+
 此外，`examples/m2-demo` 保留了针对 `tokens` / `motion` / `shape` 的独立预览模块：
 
 ```sh
@@ -159,6 +165,7 @@ func main() {
 └── examples/
     ├── gallery/       # 全量交互式展示画廊（属于根模块）
     ├── desktop-demo/  # PulseDesk 桌面工作站示例
+    ├── workbench/     # 第二阶段多场景旗舰工作台（M15.3.a 监控仪表盘 + M15.3.b 媒体与图库中心 + M15.3.c 文档与知识工作台）
     └── m2-demo/       # M1–M2 令牌/动效/形状独立演示模块
 ```
 

@@ -142,6 +142,8 @@ Go 模块路径：`github.com/imicola/mygo-md3e`（直接依赖上游 `github.co
 ├── golden_test.go          # 纯几何 Golden 视觉基线测试（testdata/）
 └── examples/
     ├── m2-demo/            # M2: 独立可运行的令牌/动效/形状预览模块
+    ├── desktop-demo/       # M9–M10: PulseDesk 紧凑桌面工作站示例
+    ├── workbench/          # M15.3: 多场景旗舰工作台（M15.3.a 实时监控仪表盘 + M15.3.b 媒体与图库中心 + M15.3.c 文档与知识工作台）
     └── gallery/            # M8: 交互式 MD3E 全量演示与主题/动效/形状游乐场
 ```
 

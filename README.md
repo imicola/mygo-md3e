@@ -46,6 +46,12 @@ CGO_ENABLED=0 go run ./examples/gallery
 CGO_ENABLED=0 go run ./examples/desktop-demo
 ```
 
+`examples/workbench` is the Phase 2 multi-scenario workbench pairing `WindowTitleBar`, `AdaptiveScaffold`, `AnimatedThemeScope`, `charts`, `media`, `docview`, and virtualized `DataTable`—including the M15.3.a live traffic & Go process memory monitor dashboard (10K–100K virtualized Connection and DNS rows), the M15.3.b Media & Gallery Studio (`tokens.SeedFromImage` / `PaletteFromImage` cover theming, polygon-masked `md3e.Image` gallery, `ImageLightbox`, `AudioPlayerCard`, `MiniPlayer`, `VideoPlayer`, and `SupportingPane` play queue), and the M15.3.c Docs & Knowledge Workbench (`TreeView` directory explorer, `Breadcrumb`, `docview.Markdown` / `docview.MarkdownStream`, semantic GFM `Callout`s, syntax-highlighted `CodeBlock`s, interactive task checklists, and scroll-linked `docview.Outline`):
+
+```sh
+CGO_ENABLED=0 go run ./examples/workbench
+```
+
 The earlier M1–M2 interactive preview (`tokens`, `motion`, `shape`) is also available as a standalone module under `examples/m2-demo`:
 
 ```sh
@@ -159,6 +165,7 @@ Key conventions:
 └── examples/
     ├── gallery/       # Full interactive showcase application (part of root module)
     ├── desktop-demo/  # PulseDesk compact desktop workstation example
+    ├── workbench/     # Phase 2 multi-scenario workbench (M15.3.a Monitor + M15.3.b Media & Gallery Studio + M15.3.c Docs Workbench)
     └── m2-demo/       # Standalone M1–M2 tokens/motion/shape preview module
 ```
 
