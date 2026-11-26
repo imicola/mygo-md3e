@@ -137,7 +137,8 @@ func Image(c *ui.Context, src ui.ImageSource, opts ...ImageOptions) ui.Element {
 
 	iw, ih := ui.ImageSize(src)
 	hasIntrinsic := isPositiveFiniteF32(iw) && isPositiveFiniteF32(ih)
-	aspect := sanitizeNonNegF32(o.AspectRatio)
+	explicitAspect := sanitizeNonNegF32(o.AspectRatio)
+	aspect := explicitAspect
 	if aspect == 0 && hasIntrinsic {
 		aspect = iw / ih
 	}
@@ -156,6 +157,8 @@ func Image(c *ui.Context, src ui.ImageSource, opts ...ImageOptions) ui.Element {
 		if aspect > 0 {
 			host.AspectRatio(aspect)
 		}
+	case explicitAspect > 0:
+		host.AspectRatio(explicitAspect)
 	case aspect > 0 && hasIntrinsic:
 		host.Size(iw, ih)
 	case aspect > 0:

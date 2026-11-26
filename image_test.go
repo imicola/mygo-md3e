@@ -256,6 +256,33 @@ func TestImageReduceMotionAndNaNSafety(t *testing.T) {
 	}
 }
 
+func TestImageExplicitAspectRatioWithFillWidth(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor, ThemeOptions{ReduceMotion: true})
+	bmp := makeTestBitmap(256, 256, color.NRGBA{R: 80, G: 140, B: 220, A: 255})
+
+	tt := ui.NewTester(func(c *ui.Context) {
+		ThemeScope(c, th, func() {
+			ui.Column(c).Size(200, 320).Padding(16).Children(func() {
+				Image(c.Key("square"), bmp, ImageOptions{
+					Fit:         ui.Cover,
+					AspectRatio: 1,
+					Label:       "Responsive square",
+				}).FillWidth()
+			})
+		})
+	}, 200, 320)
+
+	tt.Frame()
+	info, ok := tt.AccessByRole(ui.RoleImage, "Responsive square")
+	if !ok {
+		t.Fatal("Responsive square image missing")
+	}
+	// Available width inside 200px column with 16px padding on both sides is 168px.
+	if math.Abs(float64(info.Bounds.W-168)) > 1 || math.Abs(float64(info.Bounds.H-168)) > 1 {
+		t.Fatalf("explicit AspectRatio=1 image bounds = %+v, want ~168x168 (not 256px intrinsic height)", info.Bounds)
+	}
+}
+
 func TestImagePanicsOnMultipleOptions(t *testing.T) {
 	defer func() {
 		if recover() == nil {
