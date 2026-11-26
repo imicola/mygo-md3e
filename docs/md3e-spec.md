@@ -161,7 +161,7 @@ MD3E 将动效分为 **Spatial（空间：位移、缩放、尺寸、圆角、�
 2. **Connected / Standard ButtonGroup**：
    - `Standard` 模式下，被按压或选中的按钮沿主轴微微变宽并压缩相邻按钮宽度（弹性权重挤压），同时动态收缩自身圆角。
    - `Connected` 模式下，首项外侧大圆角、末项外侧大圆角、相邻接缝处使用小内圆角（如 `8` 或 `4`），选中项切为全圆角（Full）。
-3. **SplitButton**：由主动作段与菜单触发段组成（`SplitButton` 返回 `(group, action, arrow, panel ui.Element)`，与 `ui.SplitButtonParts` 语义对齐）；展开菜单时，触发段图标（Chevron）旋转 180° 且该段四圆角从非对称连接圆角形变为对称圆角/全圆角，关闭时弹簧回位。
+3. **SplitButton**：由主动作段与菜单触发段组成（`SplitButton` 返回 `(group, action, arrow ui.Element, open *bool)`，避免在 struct 中持有短生命周期 `ui.Element`）；展开菜单时，触发段图标（Chevron）旋转 180° 且该段四圆角从非对称连接圆角形变为对称圆角/全圆角，关闭时弹簧回位。
 4. **FABMenu（取代旧版 Speed Dial）**：必须从标准 FAB（不能从 ExtendedFAB）原地展开 **2–6 个** 大圆角胶囊菜单项（带 `Scrim` 遮罩），原 FAB 变形并切换为高对比关闭按钮（`×` 旋转入场）。
 5. **FloatingToolbar**：独立悬浮容器（`56`/`64` 高或垂直列），支持 `Standard` 与 `Vibrant`（`PrimaryContainer` 高亮底色）两种色系，支持紧邻耦合一颗标准 FAB，支持随内容滚动收起/展开选项。
 6. **LoadingIndicator（Shape-Morphing）**：
@@ -301,5 +301,57 @@ MD3E 将动效分为 **Spatial（空间：位移、缩放、尺寸、圆角、�
 - **`docview.Callout`**：`CalloutNote`、`CalloutTip`、`CalloutImportant`、`CalloutWarning`、`CalloutCaution` 五类语义块（配合 `CalloutKindFromAlert`），分别映射至 `PrimaryContainer`/`SuccessContainer`/`TertiaryContainer`/`WarningContainer`/`ErrorContainer`（暗色模式融合 `SurfaceContainerLow` 降噪、标题对比度底线 `>= 4.5:1`），提供 Start 侧内缩圆头胶囊强调竖条（支持 `ui.RightToLeft` 右缘镜像）、`RoleRegion`/`RoleAlert` 无障碍语义、Markdown 原生子内容或纯文本降级渲染。
 - **`docview.State` / `ExtractOutline` / `Outline`**：`ExtractOutline` 解析文档标题生成去重小写 `Slug`、`Level` 与块索引；`Markdown` 构建期通过 `LayoutBounds()` 测量标题相对垂直偏移且不干扰 `ui.Scroll` 视口裁剪；`Outline` 在 `RoleNavigation` 内提供层级缩进、无暗灰混色失真的 `SecondaryContainer` 透明渐变胶囊背景 + `FastEffects` 过渡 + `listCol.DrawOver` 单条平滑滑动的 Primary Start 侧 3 DIP 指示条（不覆盖行内 Ripple，RTL 自动镜像且退场幽灵安全）、点击平滑滚动（无 `ui.ScrollState` 时平滑回退至 `ui/markdown` 锚点）、`FocusGroup(ui.Vertical)` 方向键导航、单独传入 `Items`/`Active`/`OnSelect` 与 `md3e.SupportingPane` 协同布局。
 - **DCE 硬边界验证**：通过离线 `codeview/dce_test.go` 与 `docview/dce_test.go` 验证仅引用 `md3e.Button` 时零链接 `codeview/`、`docview/` 与 `ui/markdown`/`ui/editor`；仅调用 `codeview.ThemeFromMD3E` 时零链接 `editor.View`/`editor.DiffView`；仅引用 `docview.Outline` + `docview.State` 时零链接 `editor.View`/`editor.DiffView`、`charts/` 与 `media/`。
+
+---
+
+## 12. Phase 3 桌面优先视觉语言与全组件动效编排基线（M16 – M22）
+
+> 本节确立 Phase 3 的设计基线（在保持公开 Go API 签名向后兼容前提下演进默认视觉质感与动效编排；完整架构裁决 ADR-01..10 与上游核验细节见 [phase3-architecture-review.md](phase3-architecture-review.md)），面向桌面端解决「状态所有权、无框色阶分层、统一动效编排与桌面缺陷清零」四大核心问题。
+
+### 12.1 桌面无框色阶层次与中性表面规范（Borderless Tonal Hierarchy）
+忠于 Material Design 3（`m3.material.io`）暗/亮色 Surface Container 五级色阶理论，**沿用现有 Tone 曲线**（暗模式标准 `Surface=6`，`Lowest/Low/Container/High/Highest = 4/10/12/17/22`，中对比 `2/11/16/21/26`，高对比 `0/12/20/25/30`；亮模式标准 `Surface=98`，`100/96/94/92/90`），放弃“万物 1px 描边”，优先以**无框色阶差 + 舒展圆角（直接复用 `ShapeSmall/Medium/Large/LargeIncreased/ExtraLarge = 8/12/16/20/28`）+ 柔和阴影**建立层次：
+
+| 表面层级 | 暗色 Tone (Std) | 亮色 Tone (Std) | 桌面标准职责 | 边框与反射纪律 |
+| :--- | :---: | :---: | :--- | :--- |
+| **`SurfaceContainerLowest` / `Surface`** | `4` / `6` | `100` / `98` | 窗口底画布、无割裂融合标题栏、暗色内凹控件底槽（如 `PillTabs`/`SegmentedTabs` 暗槽） | **无框** |
+| **`SurfaceContainerLow`** | `10` | `96` | 常规 `Card`（Elevated/Filled）、`MetricCard`、`NavigationRail`/`NavigationSidebar`、`DataTable` 底、`ActionToolbar` | **默认无框**（仅 HighContrast 或显式 Outlined/Hairline 显线） |
+| **`SurfaceContainer`** | `12` | `94` | 旗舰 Hero 主卡、亮色控件底槽、`DataTable` 表头、`CodeBlock`、内联 `SideSheetStandard` | **默认无框** |
+| **`SurfaceContainerHigh`** | `17` | `92` | 悬浮 `Dialog` / `Menu` / `Popover` / `Modal SideSheet` / `CommandPalette`、暗色中性活跃分段滑块 | **静态海拔 E2/E3 阴影；仅暗色标准/中对比可在顶部内侧 2 DIP 绘制裁切微反射 `α(y)=0.035·max(0,1−y/2)²`，亮色与高对比置零** |
+| **`SurfaceContainerHighest`** | `22` | `90` | `Filled TextField`、`SearchField` 填充底、高强调徽标底 | **无框**（聚焦时以 `Primary` 焦点环或底线提示） |
+
+### 12.2 桌面色彩求解、对比度闭环与默认外观重校准（M17 基线）
+- **中性低色度表面选项（`tokens.SurfaceStyle`）**：
+  - `SurfaceTonal`（零值默认）保持既有 `variantPalettes` 的中性 N/NV 色度与色相不变；
+  - `SurfaceNeutral` 在 `NewDynamicScheme` 进入 `resolve` 之前选定表面色板：沿 `N` 自身色相取目标色度 `C = min(Cn, 2)`，沿 `NV` 自身色相（`OutlineVariant` 与表面辅文）取 `C = min(Cnv, 3)`，`Monochrome` 走既有零色度灰阶分支；`Primary`/`Secondary`/`Tertiary`/`Error` 及其 `On*` 保留原 `Variant` 特征；
+  - `SurfaceStyle` 必须贯通 `ThemeOptions`、`DynamicSchemeOptions`、主题 provenance、`schemeCacheKey`、高对比重建、`AnimatedThemeScope` 目标与示例 `themeSignature`。
+- **最终不透明 sRGB 对比度验收闭环**：
+  - 对每个前景色与实际合成背景（含 hover/press/selected 及渐变最亮/最暗点），**先按渲染混合顺序合成为不透明 sRGB**，再以 `tokens.ContrastRatio` 校验（因其忽略 alpha）：标准模式正文（含 placeholder）`>= 4.5:1`、大字与必要图标/状态标识 `>= 3:1`；高对比目标正文 `>= 7:1`、标识 `>= 4.5:1`，必要边界 `1.5 DIP`，焦点环 `2 DIP` 且内外留距 `2 DIP`；
+  - 验收矩阵覆盖 4 组 Workbench 种子色（`#E06D1B`/`#6750A4`/`#0061A4`/`#2E6B3E`）+ `#808080` + 纯黑白 + `Monochrome` × 全 `Variant` × 双 `SurfaceStyle` × 明暗 × 三档对比 × 换肤插值 `0/0.25/0.5/0.75/1`。
+- **默认去框与控件色阶重校准**：
+  - `Card Elevated / Filled / Outlined` 桌面默认分别映射到 `Low (20, E1)` / `Low (20, E0)` / `Surface (16, E0, 1 DIP 描边)`；`MetricCard` 默认 `Low (20, E0)` 且 `Hairline` nil 默认为 `false`；`CodeBlock` 默认 `Container (12, E0)` 且 `Hairline` nil 默认为 `false`；`FAB`、`Dialog`、`Menu`、`Sheet`、`SplitButton`、`FloatingToolbar`、`NavigationRail`、`DataTable`、`Pagination` 移除非必要默认 1px 描边；
+  - `PillTabs` / `SegmentedTabs` 统一色槽解析：暗槽 `SurfaceContainerLowest`、亮槽 `SurfaceContainer`；色彩胶囊用 `Primary` 或 `PrimaryContainer` 配达标 `On*`（`>= 4.5:1` 文本、`>= 3:1` 图形），中性胶囊暗 `High` / 亮 `Lowest`，移除槽与胶囊双重描边；
+  - `WindowTitleBar` 默认无底分割线融入画布，并与全高侧栏（`SidebarToTop`）共享物理安全区与窗口缩放契约。
+
+### 12.3 全组件动效编排规范（Motion Choreography Matrix，M18 基线）
+遵循 **「每个自由度仅受一个时钟控制」**（ADR-07）原则，保留 `motion` 包 12 档物理弹簧数学内核（单位质量 `c = 2ζ√k`），并引入三次贝塞尔曲线 `O = CubicBezier(0.20, 0, 0, 1)`、`I = CubicBezier(0.40, 0, 1, 1)`、`S = CubicBezier(0.20, 0, 0.20, 1)`，按 L1–L5 分层治理：
+
+| 动效层级 | 代表组件 | Enter / 反向策略 | Exit（退场） | 单一时钟与工程约束 |
+| :--- | :--- | :--- | :--- | :--- |
+| **L1 状态层与微交互** | `StateLayer` Hover、`Button` 按压角、`Switch`、`Checkbox`、`Slider` | Hover `0 → 0.08` 用 `140ms O`；按压角/拇指用 `FastSpatial`；Ripple 半径 `220ms O` | Hover 离开 `180ms O`（**以 `paintRamp` 替代硬指数 `exp(-28t)`**，中途反转按剩余幅度比例缩放时长）；Ripple 释放 alpha `120ms I` | `DrawOver` 局部驱动、纯 Hover 零树重建；离屏不约帧、`!el.Valid()` 静态快照绘制 |
+| **L2 锚定轻浮层** | `PlainTooltip`、`RichTooltip`、`Menu`、`SplitButton`、`Popover`、`Select`/`Combobox` 下拉 | `AttachedOrigin()` + `180ms O`，`Scale(0.95→1)` + `Y(-6→0, Flip)` + `Opacity(0→1)` | **`130ms I`**，`Scale(1→0.97)` + `Y(-3, Flip)` + `Opacity(→0)`（**严禁 0ms 瞬断**） | `ui.ElementTransition`；逻辑关闭即刻释放输入与焦点 |
+| **L3 重模态与侧滑层** | `AlertDialog`、`FullScreenDialog`、`Modal SideSheet`、`Modal BottomSheet`、`CommandPalette`、`ImageLightbox` | 面板 `DefaultSpatial`（`Scale 0.94→1` 或尾侧滑入）；遮罩 `0 → 0.32` 用 `DefaultEffects` | 面板与遮罩统一 **`160ms I`** 单调退场（**严禁退场用欠阻尼过冲弹簧**） | 单一 host `presence` 状态机 + `epoch` 防重开错杀；逻辑关闭同帧撤 `Modal`、隔离 A11y 并通知子层退出 |
+| **L4 结构展开与导航** | `NavigationRail` 56↔192、`NavigationSidebar`、`Collapsible`、`Accordion`、`TreeView`、`Banner` | 常驻 Rail 用 `DefaultSpatial`（宽度钳住可用区）；可移除分支 `200ms S` 展开；`Collapsible`/`Accordion` 直接消费上游 `CollapsibleBase` 单一 `200ms` 通道 | 分支 `180ms I` + `ui.Motion.Collapse` 平滑收拢（**严禁在 `CollapsibleBase` 外叠加第二条高度弹簧**） | 折叠后隐藏子节点退出 Tab 序；收起前焦点先回 header |
+| **L5 页面与路由流转** | `RouterView`、`PageTransition`、`TabStrip`、卡片→详情 | 独立 `FadeThrough`：旧页 `90ms I → 0` 后新页 `180ms O` 从 `Scale 0.98 → 1`（`AfterExits: true`）；`SharedAxis` 移 `24 DIP` 用 `DefaultSpatial`；跨详情 Hero 用 `TransitionMatch`（`300ms S`）；首次可见卡片 `Delay = min(20ms×ordinal, 120ms)` | `SharedAxis` 退场 `120ms I`；错峰退出须显式设 `ExitDelay < 0`（防止继承入场 `Delay`） | **`RouterView` 独占上游路由过场，严禁外包第二次 `PageTransition`**；滚动回收行禁止施加入场 `Delay` |
+
+### 12.4 桌面缺陷防线、状态所有权与关键帧测试契约
+- **持久状态卫生与身份稳定性**：
+  - `TextField` 当 `Label != ""` 且 `!floated` 时每帧显式调用 `input.Placeholder("")` 清空上游持久化 `editor.placeholder`，浮动期按 `labelT` 调制 `PlaceholderColor` 透明度；无 `Label` 的 `TextFieldOutlined` 不附加顶部 `10 DIP` 偏移；单行 `Filled` 切换 `Label` 显隐须保持编辑输入在固定父链内（不丢失焦点、选区与撤销栈）；无错误时 `ErrorMessage` 不得渲染空白占位行。
+  - 外部 `*ui.ListState` 传入 `DataTable`/`VirtualList` 时须区分调用方基底与组件临时覆盖（菜单/选区样式/键函数移除或换肤时正确撤回或刷新，且不捕获短生命周期 `*ui.Context`）。
+  - `TreeView` 键比较须用 `reflect.Value.Comparable()` 防接口含切片 panic；`FullScreenDialog` 须守 `inExitingOverlay` 避免父弹窗退场时残留子模态；`Slider` 离散停靠点按 `i*step < span` 防末点遗漏，气泡与 `media.scrubber` 须在窄窗与高缩放下双侧钳位；隐藏 `BottomSheet` 避免每帧重复切片排序分配；`ImageLightbox` 空列表时复位会话状态。
+  - `AdaptiveScaffold` / `AppShell` 与 `NavigationRail` 必须共享同一瞬时布局宽度驱动 `ContentSizeClassOf`，消除弹簧展开期内容区提前换档。
+- **关键帧自动化测试契约**：
+  - 使用 `ui.NewTester` 在无文字纯色实心面板上按绝对时刻 `t = 0, D/4, D/2, 3D/4, D` 步进差值采样，反推合成 alpha（容差 ±2 码值）与像素包围盒（容差 ±1px），校验曲线四分点（`O: 0.607/0.878/0.975`、`I: 0.099/0.325/0.630`、`S: 0.448/0.814/0.962`）、弹簧上界（`ζ=0.8` 约 1.52%、`ζ=0.6` 约 9.48%）、逻辑关闭瞬间控件/Tab/A11y 不可激活、纯 Hover 零树重建、以及 `ReduceMotion`（主题级/系统级/中途切换）零残留定时器。
+
+
 
 

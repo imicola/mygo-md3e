@@ -44,7 +44,7 @@ MyGo `ui` 采用受检的值句柄与单帧多 Pass 竞技场分配器（见 `vi
   - 同一父节点下兄弟元素严禁出现重复 key。
 - **`ThemeScope` 与 `SplitButton` 契约**：
   - `md3e.ThemeScope` 默认按内容高度布局（作为整窗根容器包装 `.Fill()` / `.Grow(1)` 内容时须链式调用 `.Fill()`），内部桥接 `ui.Themed` 以确保 `ui.Overlay` 弹出层自动继承同一主题，且 `CurrentTheme(c)` 会感知嵌套 `ui.Themed` 覆盖。
-  - 绝大多数组件返回 root `ui.Element`；`SplitButton` 返回 `(group, action, menuBtn, panel ui.Element)`。
+  - 绝大多数组件返回 root `ui.Element`；`SplitButton` 返回 `(group, action, arrow ui.Element, open *bool)`。
 
 ### 2.3 输入模型、重绘性能、退场幽灵绘制与浮层隔离
 - **构建即应用输入**：MyGo 控件在构造函数返回时即完成用户输入写入并触发同帧二遍重建；`Changed()`/`Submitted()` 读取该变更。不要在 view 中缓存派生局部副本覆盖用户输入而不回写；事务性 Modal 选择器（如 `DatePickerModal`）应使用隔离草稿状态，仅确认提交时写回外部指针并触发 `OnChanged`。

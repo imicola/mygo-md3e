@@ -16,7 +16,8 @@ Go 模块路径：`github.com/imicola/mygo-md3e`（直接依赖上游 `github.co
 ├── docs/
 │   ├── architecture.md     # 本文件：架构与 API 设计范式
 │   ├── md3e-spec.md        # MD3E 精确设计令牌与组件行为规格
-│   └── ROADMAP.md          # Phase 2 演进路线图与里程碑进度
+│   ├── ROADMAP.md          # Phase 3 演进路线图（M16–M22）与 Phase 2（M9–M15）已完成归档
+│   └── phase3-architecture-review.md # Phase 3 深度架构审阅、ADR-01..10、数值精校与五大骨架 API 蓝图
 ├── go.mod / go.sum
 ├── tokens/                 # M1/M9/M12: 纯 Go MD3E 设计令牌、HCT 色彩与封面取色引擎（无 UI 状态依赖）
 │   ├── hct.go              # sRGB/XYZ/Lab/CAM16/HCT 转换、对比度计算
@@ -184,7 +185,7 @@ MyGo 的 `ui.Context` 本身携带有 `*ui.Theme`（通过 `c.Theme()` 读取、
 1. **函数签名规范**：
    - 首参数恒为 `c *ui.Context`。
    - 数据绑定采用指针传递（如 `checked *bool`、`selected *int`、`value *float64`、`text *string`、`open *bool`、`value *time.Time`），遵循 MyGo“构造即写入输入、立即读出变更或通过 `.Changed()` / `OnChanged` 回调观测”的契约。
-   - 绝大多数组件返回 root `ui.Element`（`SplitButton` 返回 `(group, action, menuBtn, panel ui.Element)`），以便调用方继续链式调用 `.Width(...)`、`.Disabled(...)`、`.Label(...)`、`.Bind(&handle)` 等。
+   - 绝大多数组件返回 root `ui.Element`（`SplitButton` 返回 `(group, action, arrow ui.Element, open *bool)`），以便调用方继续链式调用 `.Width(...)`、`.Disabled(...)`、`.Label(...)`、`.Bind(&handle)` 等。
 2. **可变配置（Options Pattern）**：
    - 高频简洁组件提供清晰参数或可选尾参 `opts ...ButtonOptions`（多于 1 个 Options 时显式 `panic`，如 `mygo/plugins/loading` 规范），零值结构体即规范默认。
    - **禁止使用布尔参数堆砌**：用枚举类型（如 `ButtonVariant`、`SizeTier`、`ButtonShape`、`TextFieldVariant`）替代多个 `bool` 标志。
