@@ -285,7 +285,7 @@ func listRow(c *ui.Context, th *Theme, st listStyle, item *ListItem, i, n int, o
 		if selected {
 			selectedT = 1
 		}
-		selectedT = clampF32(animateWithTheme(row, th, animChan2, selectedT, motion.DefaultEffects), 0, 1)
+		selectedT = clampF32(animateEffect(c, row, th, animChan2, selectedT, motion.DefaultEffects), 0, 1)
 	}
 	bg := st.base
 	if st.selectedBg.A > 0 && selectedT > 0.001 {

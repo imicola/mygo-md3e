@@ -752,6 +752,15 @@ func TestListDensityMetricsRTLAndReduceMotion(t *testing.T) {
 		if tt.FramePending() {
 			t.Fatalf("density %v: ReduceMotion list left pending frames", d)
 		}
+		if err := tt.Click("TwoLine"); err != nil {
+			t.Fatalf("density %v: click TwoLine under ReduceMotion: %v", d, err)
+		}
+		if sel != 1 {
+			t.Fatalf("density %v: sel=%d after clicking TwoLine, want 1", d, sel)
+		}
+		if tt.FramePending() {
+			t.Fatalf("density %v: ReduceMotion list selection change left pending frames", d)
+		}
 		w1, w2, w3 := d.ListHeights()
 		r1 := listItemInfo(t, tt, "OneLine")
 		r2 := listItemInfo(t, tt, "TwoLine")
