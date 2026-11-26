@@ -295,7 +295,7 @@ func buildMarkdown(c *ui.Context, src string, o MarkdownOptions, streaming bool)
 
 	reduce := th.ReduceMotion || c.Preferences().ReduceMotion
 	reveal := o.Reveal
-	if streaming && reduce {
+	if reduce {
 		reveal = &markdown.Reveal{Unit: markdown.AtOnce, Fade: -1}
 	}
 

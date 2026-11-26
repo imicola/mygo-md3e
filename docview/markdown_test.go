@@ -247,3 +247,34 @@ func TestMarkdownCopyAsMarkdownAcrossCallout(t *testing.T) {
 		t.Fatalf("Copy as Markdown across Callout lost content: %q", got)
 	}
 }
+
+func TestMarkdownThemeReduceMotionEndsStreamFadeImmediately(t *testing.T) {
+	normal := md3e.ThemeFromSeed(md3e.DefaultSeedColor)
+	reduced := md3e.ThemeFromSeed(md3e.DefaultSeedColor, md3e.ThemeOptions{ReduceMotion: true})
+	th := normal
+	streaming := true
+	src := "# Title\n\nWord1 Word2 Word3 Word4 Word5."
+	var elRevealed bool
+
+	tt := ui.NewTester(func(c *ui.Context) {
+		md3e.ThemeScope(c, th, func() {
+			var el ui.Element
+			if streaming {
+				el = docview.MarkdownStream(c.Key("stream"), src, docview.MarkdownOptions{
+					Reveal: &markdown.Reveal{Unit: markdown.ByWord, CatchUp: 200 * time.Millisecond, Fade: 300 * time.Millisecond},
+				})
+			} else {
+				el = docview.Markdown(c.Key("stream"), src)
+			}
+			elRevealed = docview.Revealed(el)
+		})
+	}, 480, 320)
+
+	tt.Advance(30 * time.Millisecond)
+	th = reduced
+	streaming = false
+	tt.Frame()
+	if !elRevealed || tt.FramePending() {
+		t.Fatalf("theme ReduceMotion transition did not settle immediately: revealed=%v pending=%v", elRevealed, tt.FramePending())
+	}
+}
