@@ -36,6 +36,31 @@ const (
 	ContrastHigh                     // 1
 )
 
+// SurfaceStyle selects how a dynamic scheme tints its neutral surface and
+// neutral-variant palettes. The zero value (SurfaceTonal) preserves the
+// Variant's standard neutral chroma; SurfaceNeutral clamps neutral chroma for
+// clean desktop surfaces while keeping Primary/Secondary/Tertiary/Error
+// faithful to the Variant.
+type SurfaceStyle int
+
+const (
+	// SurfaceTonal preserves the Variant's standard Neutral and NeutralVariant
+	// palettes (default zero value).
+	SurfaceTonal SurfaceStyle = iota
+	// SurfaceNeutral clamps Neutral chroma to min(Cn, 2) and NeutralVariant
+	// chroma to min(Cnv, 3) along each palette's own hue. Monochrome continues
+	// to use its zero-chroma grayscale palettes.
+	SurfaceNeutral
+)
+
+// Normalize maps unknown SurfaceStyle values back to SurfaceTonal.
+func (s SurfaceStyle) Normalize() SurfaceStyle {
+	if s == SurfaceNeutral {
+		return SurfaceNeutral
+	}
+	return SurfaceTonal
+}
+
 // level returns the contrast level as Material's -1..1 scale.
 func (c Contrast) level() float64 {
 	switch c {
@@ -74,6 +99,9 @@ type DynamicSchemeOptions struct {
 	Variant Variant
 	// Contrast is the contrast level; the zero value is ContrastStandard.
 	Contrast Contrast
+	// SurfaceStyle selects tonal vs low-chroma neutral surface palettes; the
+	// zero value is SurfaceTonal.
+	SurfaceStyle SurfaceStyle
 }
 
 // ColorScheme is the set of MD3 color roles a dynamic scheme resolves to.
@@ -132,10 +160,15 @@ type DynamicScheme struct {
 
 // NewDynamicScheme resolves opts into a scheme.
 func NewDynamicScheme(opts DynamicSchemeOptions) *DynamicScheme {
+	opts.SurfaceStyle = opts.SurfaceStyle.Normalize()
 	source := HCTFromColor(opts.Seed)
 	s := &DynamicScheme{Options: opts, SourceHCT: source}
 	s.PrimaryPalette, s.SecondaryPalette, s.TertiaryPalette, s.NeutralPalette, s.NeutralVariantPalette =
 		variantPalettes(opts.Variant, source)
+	if opts.SurfaceStyle == SurfaceNeutral && opts.Variant != Monochrome {
+		s.NeutralPalette = NewTonalPalette(s.NeutralPalette.Hue(), min(s.NeutralPalette.Chroma(), 2))
+		s.NeutralVariantPalette = NewTonalPalette(s.NeutralVariantPalette.Hue(), min(s.NeutralVariantPalette.Chroma(), 3))
+	}
 	s.ErrorPalette = NewTonalPalette(25, 84)
 	s.Colors = s.resolve()
 	return s
@@ -511,7 +544,220 @@ func (s *DynamicScheme) resolve() ColorScheme {
 	c.Scrim = s.NeutralPalette.Tone(0)
 	c.Shadow = s.NeutralPalette.Tone(0)
 
+	// Quantized sRGB contrast closure: verify opaque sRGB foreground/background
+	// pairs (including 8% hover and 10% pressed state-layer overlays) and refine
+	// any failing role along its palette's tone axis in 0.5-tone steps without
+	// polluting TonalPalette's cache.
+	s.enforceQuantizedContrast(&c)
+
 	return c
+}
+
+// enforceQuantizedContrast ensures resolved 8-bit sRGB role pairs meet WCAG
+// text contrast thresholds (4.5:1 standard/medium, 7.0:1 high contrast) on
+// their paired opaque backgrounds, including hover (8%) and pressed (10%)
+// state-layer composites. Roles that already pass remain bit-for-bit untouched.
+func (s *DynamicScheme) enforceQuantizedContrast(c *ColorScheme) {
+	textMin := 4.5
+	fixedVarMin := 3.0
+	outlineMin := 3.0
+	highContrast := s.Options.Contrast >= ContrastHigh
+	if highContrast {
+		textMin = 7.0
+		fixedVarMin = 7.0
+		outlineMin = 4.5
+	} else if s.Options.Contrast >= ContrastMedium {
+		fixedVarMin = 4.5
+	}
+	allStates := [3]float32{0, StateHoverOpacity, StatePressedOpacity}
+	restOnly := [1]float32{0}
+	surfaces := [6]ui.Color{
+		c.Surface,
+		c.SurfaceContainerLowest,
+		c.SurfaceContainerLow,
+		c.SurfaceContainer,
+		c.SurfaceContainerHigh,
+		c.SurfaceContainerHighest,
+	}
+	// Accent foreground roles (Primary/Secondary/Tertiary/Error) appear as
+	// interactive text/icons on Surface..High (check rest+hover+press) and as
+	// static accents/labels on Highest (check rest) so canonical MD3 Primary T40
+	// stays faithful instead of darkening unnecessarily for a hypothetical 10%
+	// Primary-on-Highest press composite.
+	refineAccentSurfaceRole := func(p *TonalPalette, cur ui.Color) ui.Color {
+		cur = refineRoleForSRGB(p, cur, textMin, surfaces[:5], allStates[:])
+		cur = refineRoleForSRGB(p, cur, textMin, surfaces[5:], restOnly[:])
+		return cur
+	}
+	// OnSurface/OnSurfaceVariant cover all 6 surface containers across
+	// rest+hover+press (except dark HighContrast Highest T30 where 10% white
+	// press has an sRGB physical ceiling of ~6.95:1).
+	onSurfaceStateBgs := surfaces[:]
+	if highContrast && s.Options.Dark {
+		onSurfaceStateBgs = surfaces[:5]
+	}
+	refineOnSurfaceRole := func(p *TonalPalette, cur ui.Color) ui.Color {
+		cur = refineRoleForSRGB(p, cur, textMin, onSurfaceStateBgs, allStates[:])
+		if len(onSurfaceStateBgs) < len(surfaces) {
+			cur = refineRoleForSRGB(p, cur, textMin, surfaces[5:], restOnly[:])
+		}
+		return cur
+	}
+
+	c.Primary = refineAccentSurfaceRole(s.PrimaryPalette, c.Primary)
+	c.SurfaceTint = c.Primary
+	c.OnPrimary = refineRoleForSRGB(s.PrimaryPalette, c.OnPrimary, textMin, []ui.Color{c.Primary}, allStates[:])
+	c.OnPrimaryContainer = refineRoleForSRGB(s.PrimaryPalette, c.OnPrimaryContainer, textMin, []ui.Color{c.PrimaryContainer}, allStates[:])
+	if minCompositedContrast(c.OnPrimaryContainer, []ui.Color{c.PrimaryContainer}, allStates[:]) < textMin {
+		c.PrimaryContainer, c.OnPrimaryContainer = refineContainerAndOnForSRGB(s.PrimaryPalette, c.PrimaryContainer, c.OnPrimaryContainer, textMin, allStates[:])
+	}
+	c.InversePrimary = refineRoleForSRGB(s.PrimaryPalette, c.InversePrimary, textMin, []ui.Color{c.InverseSurface}, allStates[:])
+
+	c.Secondary = refineAccentSurfaceRole(s.SecondaryPalette, c.Secondary)
+	c.OnSecondary = refineRoleForSRGB(s.SecondaryPalette, c.OnSecondary, textMin, []ui.Color{c.Secondary}, allStates[:])
+	c.OnSecondaryContainer = refineRoleForSRGB(s.SecondaryPalette, c.OnSecondaryContainer, textMin, []ui.Color{c.SecondaryContainer}, allStates[:])
+	if minCompositedContrast(c.OnSecondaryContainer, []ui.Color{c.SecondaryContainer}, allStates[:]) < textMin {
+		c.SecondaryContainer, c.OnSecondaryContainer = refineContainerAndOnForSRGB(s.SecondaryPalette, c.SecondaryContainer, c.OnSecondaryContainer, textMin, allStates[:])
+	}
+
+	c.Tertiary = refineAccentSurfaceRole(s.TertiaryPalette, c.Tertiary)
+	c.OnTertiary = refineRoleForSRGB(s.TertiaryPalette, c.OnTertiary, textMin, []ui.Color{c.Tertiary}, allStates[:])
+	c.OnTertiaryContainer = refineRoleForSRGB(s.TertiaryPalette, c.OnTertiaryContainer, textMin, []ui.Color{c.TertiaryContainer}, allStates[:])
+	if minCompositedContrast(c.OnTertiaryContainer, []ui.Color{c.TertiaryContainer}, allStates[:]) < textMin {
+		c.TertiaryContainer, c.OnTertiaryContainer = refineContainerAndOnForSRGB(s.TertiaryPalette, c.TertiaryContainer, c.OnTertiaryContainer, textMin, allStates[:])
+	}
+
+	c.Error = refineAccentSurfaceRole(s.ErrorPalette, c.Error)
+	c.OnError = refineRoleForSRGB(s.ErrorPalette, c.OnError, textMin, []ui.Color{c.Error}, allStates[:])
+	c.OnErrorContainer = refineRoleForSRGB(s.ErrorPalette, c.OnErrorContainer, textMin, []ui.Color{c.ErrorContainer}, allStates[:])
+	if minCompositedContrast(c.OnErrorContainer, []ui.Color{c.ErrorContainer}, allStates[:]) < textMin {
+		c.ErrorContainer, c.OnErrorContainer = refineContainerAndOnForSRGB(s.ErrorPalette, c.ErrorContainer, c.OnErrorContainer, textMin, allStates[:])
+	}
+
+	// Fixed roles remain light/dark constant while guaranteeing sRGB contrast on both Fixed and FixedDim.
+	c.OnPrimaryFixed = refineRoleForSRGB(s.PrimaryPalette, c.OnPrimaryFixed, textMin, []ui.Color{c.PrimaryFixed, c.PrimaryFixedDim}, restOnly[:])
+	c.OnPrimaryFixedVariant = refineRoleForSRGB(s.PrimaryPalette, c.OnPrimaryFixedVariant, fixedVarMin, []ui.Color{c.PrimaryFixed, c.PrimaryFixedDim}, restOnly[:])
+	c.OnSecondaryFixed = refineRoleForSRGB(s.SecondaryPalette, c.OnSecondaryFixed, textMin, []ui.Color{c.SecondaryFixed, c.SecondaryFixedDim}, restOnly[:])
+	c.OnSecondaryFixedVariant = refineRoleForSRGB(s.SecondaryPalette, c.OnSecondaryFixedVariant, fixedVarMin, []ui.Color{c.SecondaryFixed, c.SecondaryFixedDim}, restOnly[:])
+	c.OnTertiaryFixed = refineRoleForSRGB(s.TertiaryPalette, c.OnTertiaryFixed, textMin, []ui.Color{c.TertiaryFixed, c.TertiaryFixedDim}, restOnly[:])
+	c.OnTertiaryFixedVariant = refineRoleForSRGB(s.TertiaryPalette, c.OnTertiaryFixedVariant, fixedVarMin, []ui.Color{c.TertiaryFixed, c.TertiaryFixedDim}, restOnly[:])
+
+	c.OnBackground = refineRoleForSRGB(s.NeutralPalette, c.OnBackground, textMin, []ui.Color{c.Background}, allStates[:])
+	c.OnSurface = refineOnSurfaceRole(s.NeutralPalette, c.OnSurface)
+	c.OnSurfaceVariant = refineOnSurfaceRole(s.NeutralVariantPalette, c.OnSurfaceVariant)
+	c.InverseOnSurface = refineRoleForSRGB(s.NeutralPalette, c.InverseOnSurface, textMin, []ui.Color{c.InverseSurface}, allStates[:])
+
+	// Outline must meet >= 3:1 (standard/medium) or >= 4.5:1 (high contrast)
+	// non-text contrast against resting surface containers.
+	c.Outline = refineRoleForSRGB(s.NeutralVariantPalette, c.Outline, outlineMin, surfaces[:], restOnly[:])
+}
+
+func minCompositedContrast(fg ui.Color, bgs []ui.Color, overlays []float32) float64 {
+	best := math.Inf(1)
+	for _, bg := range bgs {
+		if bg.A == 0 {
+			continue
+		}
+		for _, alpha := range overlays {
+			effBg := bg
+			if alpha > 0 {
+				effBg = fg.Alpha(alpha).Over(bg)
+			}
+			if r := ContrastRatio(fg, effBg); r < best {
+				best = r
+			}
+		}
+	}
+	if math.IsInf(best, 1) {
+		return 21
+	}
+	return best
+}
+
+// refineRoleForSRGB keeps cur unchanged when it already satisfies minRatio
+// across all (bg, overlay) composites; otherwise it checks the T=0/100 bounds
+// and searches outward from cur's tone in 0.5 steps on palette (without
+// mutating palette.tones), returning the nearest tone that meets minRatio (or
+// the best endpoint if unreachable).
+func refineRoleForSRGB(palette *TonalPalette, cur ui.Color, minRatio float64, bgs []ui.Color, overlays []float32) ui.Color {
+	curRatio := minCompositedContrast(cur, bgs, overlays)
+	if curRatio >= minRatio {
+		return cur
+	}
+	c0 := palette.HCT(0).ToColor()
+	c100 := palette.HCT(100).ToColor()
+	r0 := minCompositedContrast(c0, bgs, overlays)
+	r100 := minCompositedContrast(c100, bgs, overlays)
+	if r0 < minRatio && r100 < minRatio {
+		// Neither black nor white reaches minRatio; pick whichever maximizes contrast.
+		best, bestR := cur, curRatio
+		if r0 > bestR {
+			best, bestR = c0, r0
+		}
+		if r100 > bestR {
+			best = c100
+		}
+		return best
+	}
+
+	origTone := HCTFromColor(cur).Tone
+	baseStep := int(math.Round(origTone * 2))
+	for d := 0; d <= 200; d++ {
+		if down := baseStep - d; down >= 0 && r0 >= minRatio {
+			cand := palette.HCT(float64(down) * 0.5).ToColor()
+			if minCompositedContrast(cand, bgs, overlays) >= minRatio {
+				return cand
+			}
+		}
+		if up := baseStep + d; up <= 200 && r100 >= minRatio {
+			cand := palette.HCT(float64(up) * 0.5).ToColor()
+			if minCompositedContrast(cand, bgs, overlays) >= minRatio {
+				return cand
+			}
+		}
+	}
+	if r100 >= r0 {
+		return c100
+	}
+	return c0
+}
+
+// refineContainerAndOnForSRGB handles mid-gray container tones (such as
+// Fidelity/Content seeds near L* 49..58) where even black or white cannot reach
+// minRatio under state-layer overlays, searching outward from bg's tone in 0.5
+// steps to find the nearest container tone whose paired On* role meets minRatio.
+func refineContainerAndOnForSRGB(palette *TonalPalette, bg, fg ui.Color, minRatio float64, overlays []float32) (ui.Color, ui.Color) {
+	c0 := palette.HCT(0).ToColor()
+	c100 := palette.HCT(100).ToColor()
+	origBgTone := HCTFromColor(bg).Tone
+	baseStep := int(math.Round(origBgTone * 2))
+
+	tryBg := func(step int) (ui.Color, ui.Color, bool) {
+		candBg := palette.HCT(float64(step) * 0.5).ToColor()
+		if minCompositedContrast(c0, []ui.Color{candBg}, overlays) < minRatio &&
+			minCompositedContrast(c100, []ui.Color{candBg}, overlays) < minRatio {
+			return ui.Color{}, ui.Color{}, false
+		}
+		candFg := refineRoleForSRGB(palette, fg, minRatio, []ui.Color{candBg}, overlays)
+		if minCompositedContrast(candFg, []ui.Color{candBg}, overlays) < minRatio {
+			return ui.Color{}, ui.Color{}, false
+		}
+		return candBg, candFg, true
+	}
+
+	for d := 1; d <= 200; d++ {
+		if down := baseStep - d; down >= 0 {
+			if cb, cf, ok := tryBg(down); ok {
+				return cb, cf
+			}
+		}
+		if up := baseStep + d; up <= 200 {
+			if cb, cf, ok := tryBg(up); ok {
+				return cb, cf
+			}
+		}
+	}
+	return bg, fg
 }
 
 // tone resolves a role's tone: the initial tone when it already reaches the

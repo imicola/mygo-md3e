@@ -93,6 +93,7 @@ type ThemeOptions struct {
 	Dark         bool
 	Variant      tokens.Variant
 	Contrast     tokens.Contrast
+	SurfaceStyle tokens.SurfaceStyle
 	Motion       motion.Scheme
 	Density      tokens.Density
 	Font         string
@@ -108,6 +109,7 @@ type ThemeOptions struct {
 type Theme struct {
 	Dark         bool
 	Colors       tokens.ColorScheme
+	SurfaceStyle tokens.SurfaceStyle
 	Motion       motion.Scheme
 	Density      tokens.Density
 	Typography   tokens.TypographyScale
@@ -168,7 +170,8 @@ func ThemeFromSeed(seed ui.Color, opts ...ThemeOptions) *Theme {
 	}
 
 	contrast := sanitizeContrast(o.Contrast)
-	colors := cachedColorScheme(seed, o.Dark, o.Variant, contrast)
+	surfaceStyle := o.SurfaceStyle.Normalize()
+	colors := cachedColorScheme(seed, o.Dark, o.Variant, contrast, surfaceStyle)
 
 	shapes := DefaultShapeScale()
 	if o.Shapes != nil {
@@ -184,6 +187,7 @@ func ThemeFromSeed(seed ui.Color, opts ...ThemeOptions) *Theme {
 	t := &Theme{
 		Dark:         o.Dark,
 		Colors:       colors,
+		SurfaceStyle: surfaceStyle,
 		Motion:       o.Motion,
 		Density:      o.Density.Normalize(),
 		Typography:   typo,
@@ -214,8 +218,12 @@ func applySemanticRoles(t *Theme) {
 		if t.Contrast >= tokens.ContrastHigh {
 			t.Warning = ui.Hex("#ffddb3")
 			t.OnWarning = ui.Hex("#261400")
+			t.WarningContainer = ui.Hex("#583500")
+			t.OnWarningContainer = ui.Hex("#fff1df")
 			t.Success = ui.Hex("#b8ffb0")
 			t.OnSuccess = ui.Hex("#002204")
+			t.SuccessContainer = ui.Hex("#004b10")
+			t.OnSuccessContainer = ui.Hex("#d4ffd0")
 		}
 		return
 	}
@@ -458,6 +466,7 @@ func sanitizeTypographyScale(ts tokens.TypographyScale) tokens.TypographyScale {
 // with followed cleared so it can safely serve as a map key.
 func sanitizeTheme(t Theme) Theme {
 	t.followed = nil
+	t.SurfaceStyle = t.SurfaceStyle.Normalize()
 	t.Density = t.Density.Normalize()
 	t.Typography = sanitizeTypographyScale(t.Typography)
 	t.Shapes = sanitizeShapeScale(t.Shapes)
@@ -487,6 +496,9 @@ func (t *Theme) rebaseFromFollowed() Theme {
 	if cur.Colors != to.Colors {
 		base.Colors = cur.Colors
 		base.hasSeed = false
+	}
+	if cur.SurfaceStyle != to.SurfaceStyle {
+		base.SurfaceStyle = cur.SurfaceStyle
 	}
 	if cur.Motion != to.Motion {
 		base.Motion = cur.Motion
@@ -561,7 +573,7 @@ func (t *Theme) resolvedValue(p ui.Preferences) Theme {
 	if np.highContrast && cp.Contrast < tokens.ContrastHigh {
 		cp.Contrast = tokens.ContrastHigh
 		if cp.hasSeed {
-			cp.Colors = cachedColorScheme(cp.seed, cp.Dark, cp.variant, tokens.ContrastHigh)
+			cp.Colors = cachedColorScheme(cp.seed, cp.Dark, cp.variant, tokens.ContrastHigh, cp.SurfaceStyle)
 			applySemanticRoles(&cp)
 		} else {
 			// Manual theme without a seed: raise outline legibility while keeping custom palette intact.
@@ -712,10 +724,11 @@ var (
 )
 
 type schemeCacheKey struct {
-	seed     ui.Color
-	dark     bool
-	variant  tokens.Variant
-	contrast tokens.Contrast
+	seed         ui.Color
+	dark         bool
+	variant      tokens.Variant
+	contrast     tokens.Contrast
+	surfaceStyle tokens.SurfaceStyle
 }
 
 type defaultThemeKey struct {
@@ -723,6 +736,7 @@ type defaultThemeKey struct {
 	dark         bool
 	variant      tokens.Variant
 	contrast     tokens.Contrast
+	surfaceStyle tokens.SurfaceStyle
 	textScale    float32
 	reduceMotion bool
 }
@@ -738,13 +752,15 @@ var (
 	schemeComputeCount atomic.Uint64
 )
 
-func cachedColorScheme(seed ui.Color, dark bool, variant tokens.Variant, contrast tokens.Contrast) tokens.ColorScheme {
+func cachedColorScheme(seed ui.Color, dark bool, variant tokens.Variant, contrast tokens.Contrast, surfaceStyle tokens.SurfaceStyle) tokens.ColorScheme {
 	contrast = sanitizeContrast(contrast)
+	surfaceStyle = surfaceStyle.Normalize()
 	key := schemeCacheKey{
-		seed:     seed,
-		dark:     dark,
-		variant:  variant,
-		contrast: contrast,
+		seed:         seed,
+		dark:         dark,
+		variant:      variant,
+		contrast:     contrast,
+		surfaceStyle: surfaceStyle,
 	}
 	schemeCacheMu.RLock()
 	if cs, ok := schemeCache[key]; ok {
@@ -755,10 +771,11 @@ func cachedColorScheme(seed ui.Color, dark bool, variant tokens.Variant, contras
 
 	schemeComputeCount.Add(1)
 	cs := tokens.NewDynamicScheme(tokens.DynamicSchemeOptions{
-		Seed:     seed,
-		Dark:     dark,
-		Variant:  variant,
-		Contrast: contrast,
+		Seed:         seed,
+		Dark:         dark,
+		Variant:      variant,
+		Contrast:     contrast,
+		SurfaceStyle: surfaceStyle,
 	}).Colors
 
 	schemeCacheMu.Lock()
@@ -1036,14 +1053,11 @@ func minContrastAcross(fg ui.Color, bgs ...ui.Color) float64 {
 	return best
 }
 
-// ensurePairContrast adjusts an interpolated foreground role when linear sRGB
-// mixing crosses background luminance mid-transition (e.g. Light <-> Dark at
-// t ≈ 0.5), keeping text and icons legible across all paired backgrounds.
-func ensurePairContrast(fg, fromFg, toFg ui.Color, bgs, fromBgs, toBgs []ui.Color) ui.Color {
-	if fg.A == 0 {
-		return fg
-	}
+func targetPairContrast(highContrast bool, fromFg, toFg ui.Color, fromBgs, toBgs []ui.Color) float64 {
 	targetRatio := 4.5
+	if highContrast {
+		targetRatio = 7.0
+	}
 	if len(fromBgs) > 0 && fromFg.A > 0 {
 		if r := minContrastAcross(fromFg, fromBgs...); r < targetRatio {
 			targetRatio = r
@@ -1054,6 +1068,23 @@ func ensurePairContrast(fg, fromFg, toFg ui.Color, bgs, fromBgs, toBgs []ui.Colo
 			targetRatio = r
 		}
 	}
+	return targetRatio
+}
+
+func maxBlackWhiteContrast(bgs ...ui.Color) float64 {
+	black := ui.RGB(0, 0, 0)
+	white := ui.RGB(255, 255, 255)
+	return max(minContrastAcross(black, bgs...), minContrastAcross(white, bgs...))
+}
+
+// ensurePairContrast adjusts an interpolated foreground role when mixing crosses
+// background luminance mid-transition (e.g. Light <-> Dark at t ≈ 0.5), keeping
+// text and icons legible across all paired backgrounds.
+func ensurePairContrast(fg, fromFg, toFg ui.Color, bgs, fromBgs, toBgs []ui.Color, highContrast bool) ui.Color {
+	if fg.A == 0 {
+		return fg
+	}
+	targetRatio := targetPairContrast(highContrast, fromFg, toFg, fromBgs, toBgs)
 	if targetRatio <= 1 || minContrastAcross(fg, bgs...) >= targetRatio {
 		return fg
 	}
@@ -1121,7 +1152,21 @@ func ensurePairContrast(fg, fromFg, toFg ui.Color, bgs, fromBgs, toBgs []ui.Colo
 	return best
 }
 
-func lerpColorScheme(a, b tokens.ColorScheme, t float32) tokens.ColorScheme {
+// ensureSinglePairWithBg snaps (fg, bg) together to the closer endpoint when a
+// high-contrast Light <-> Dark transition passes through a mid-gray where
+// neither black nor white can meet targetRatio (e.g. 7:1).
+func ensureSinglePairWithBg(fg, bg, fromFg, fromBg, toFg, toBg ui.Color, t float32, highContrast bool) (ui.Color, ui.Color) {
+	targetRatio := targetPairContrast(highContrast, fromFg, toFg, []ui.Color{fromBg}, []ui.Color{toBg})
+	if highContrast && targetRatio > 4.5 && maxBlackWhiteContrast(bg) < targetRatio {
+		if t >= 0.5 {
+			return toFg, toBg
+		}
+		return fromFg, fromBg
+	}
+	return ensurePairContrast(fg, fromFg, toFg, []ui.Color{bg}, []ui.Color{fromBg}, []ui.Color{toBg}, highContrast), bg
+}
+
+func lerpColorScheme(a, b tokens.ColorScheme, t float32, highContrast bool) tokens.ColorScheme {
 	cs := tokens.ColorScheme{
 		Primary:                 mixRoleColor(a.Primary, b.Primary, t),
 		OnPrimary:               mixRoleColor(a.OnPrimary, b.OnPrimary, t),
@@ -1174,46 +1219,77 @@ func lerpColorScheme(a, b tokens.ColorScheme, t float32) tokens.ColorScheme {
 		Shadow:                  mixRoleColor(a.Shadow, b.Shadow, t),
 	}
 
-	cs.OnPrimary = ensurePairContrast(cs.OnPrimary, a.OnPrimary, b.OnPrimary,
-		[]ui.Color{cs.Primary}, []ui.Color{a.Primary}, []ui.Color{b.Primary})
-	cs.OnPrimaryContainer = ensurePairContrast(cs.OnPrimaryContainer, a.OnPrimaryContainer, b.OnPrimaryContainer,
-		[]ui.Color{cs.PrimaryContainer}, []ui.Color{a.PrimaryContainer}, []ui.Color{b.PrimaryContainer})
+	cs.OnPrimary, cs.Primary = ensureSinglePairWithBg(cs.OnPrimary, cs.Primary, a.OnPrimary, a.Primary, b.OnPrimary, b.Primary, t, highContrast)
+	cs.OnPrimaryContainer, cs.PrimaryContainer = ensureSinglePairWithBg(cs.OnPrimaryContainer, cs.PrimaryContainer, a.OnPrimaryContainer, a.PrimaryContainer, b.OnPrimaryContainer, b.PrimaryContainer, t, highContrast)
 	cs.OnPrimaryFixed = ensurePairContrast(cs.OnPrimaryFixed, a.OnPrimaryFixed, b.OnPrimaryFixed,
-		[]ui.Color{cs.PrimaryFixed, cs.PrimaryFixedDim}, []ui.Color{a.PrimaryFixed, a.PrimaryFixedDim}, []ui.Color{b.PrimaryFixed, b.PrimaryFixedDim})
+		[]ui.Color{cs.PrimaryFixed, cs.PrimaryFixedDim}, []ui.Color{a.PrimaryFixed, a.PrimaryFixedDim}, []ui.Color{b.PrimaryFixed, b.PrimaryFixedDim}, highContrast)
 	cs.OnPrimaryFixedVariant = ensurePairContrast(cs.OnPrimaryFixedVariant, a.OnPrimaryFixedVariant, b.OnPrimaryFixedVariant,
-		[]ui.Color{cs.PrimaryFixed, cs.PrimaryFixedDim}, []ui.Color{a.PrimaryFixed, a.PrimaryFixedDim}, []ui.Color{b.PrimaryFixed, b.PrimaryFixedDim})
+		[]ui.Color{cs.PrimaryFixed, cs.PrimaryFixedDim}, []ui.Color{a.PrimaryFixed, a.PrimaryFixedDim}, []ui.Color{b.PrimaryFixed, b.PrimaryFixedDim}, highContrast)
 
-	cs.OnSecondary = ensurePairContrast(cs.OnSecondary, a.OnSecondary, b.OnSecondary,
-		[]ui.Color{cs.Secondary}, []ui.Color{a.Secondary}, []ui.Color{b.Secondary})
-	cs.OnSecondaryContainer = ensurePairContrast(cs.OnSecondaryContainer, a.OnSecondaryContainer, b.OnSecondaryContainer,
-		[]ui.Color{cs.SecondaryContainer}, []ui.Color{a.SecondaryContainer}, []ui.Color{b.SecondaryContainer})
+	cs.OnSecondary, cs.Secondary = ensureSinglePairWithBg(cs.OnSecondary, cs.Secondary, a.OnSecondary, a.Secondary, b.OnSecondary, b.Secondary, t, highContrast)
+	cs.OnSecondaryContainer, cs.SecondaryContainer = ensureSinglePairWithBg(cs.OnSecondaryContainer, cs.SecondaryContainer, a.OnSecondaryContainer, a.SecondaryContainer, b.OnSecondaryContainer, b.SecondaryContainer, t, highContrast)
 	cs.OnSecondaryFixed = ensurePairContrast(cs.OnSecondaryFixed, a.OnSecondaryFixed, b.OnSecondaryFixed,
-		[]ui.Color{cs.SecondaryFixed, cs.SecondaryFixedDim}, []ui.Color{a.SecondaryFixed, a.SecondaryFixedDim}, []ui.Color{b.SecondaryFixed, b.SecondaryFixedDim})
+		[]ui.Color{cs.SecondaryFixed, cs.SecondaryFixedDim}, []ui.Color{a.SecondaryFixed, a.SecondaryFixedDim}, []ui.Color{b.SecondaryFixed, b.SecondaryFixedDim}, highContrast)
 	cs.OnSecondaryFixedVariant = ensurePairContrast(cs.OnSecondaryFixedVariant, a.OnSecondaryFixedVariant, b.OnSecondaryFixedVariant,
-		[]ui.Color{cs.SecondaryFixed, cs.SecondaryFixedDim}, []ui.Color{a.SecondaryFixed, a.SecondaryFixedDim}, []ui.Color{b.SecondaryFixed, b.SecondaryFixedDim})
+		[]ui.Color{cs.SecondaryFixed, cs.SecondaryFixedDim}, []ui.Color{a.SecondaryFixed, a.SecondaryFixedDim}, []ui.Color{b.SecondaryFixed, b.SecondaryFixedDim}, highContrast)
 
-	cs.OnTertiary = ensurePairContrast(cs.OnTertiary, a.OnTertiary, b.OnTertiary,
-		[]ui.Color{cs.Tertiary}, []ui.Color{a.Tertiary}, []ui.Color{b.Tertiary})
-	cs.OnTertiaryContainer = ensurePairContrast(cs.OnTertiaryContainer, a.OnTertiaryContainer, b.OnTertiaryContainer,
-		[]ui.Color{cs.TertiaryContainer}, []ui.Color{a.TertiaryContainer}, []ui.Color{b.TertiaryContainer})
+	cs.OnTertiary, cs.Tertiary = ensureSinglePairWithBg(cs.OnTertiary, cs.Tertiary, a.OnTertiary, a.Tertiary, b.OnTertiary, b.Tertiary, t, highContrast)
+	cs.OnTertiaryContainer, cs.TertiaryContainer = ensureSinglePairWithBg(cs.OnTertiaryContainer, cs.TertiaryContainer, a.OnTertiaryContainer, a.TertiaryContainer, b.OnTertiaryContainer, b.TertiaryContainer, t, highContrast)
 	cs.OnTertiaryFixed = ensurePairContrast(cs.OnTertiaryFixed, a.OnTertiaryFixed, b.OnTertiaryFixed,
-		[]ui.Color{cs.TertiaryFixed, cs.TertiaryFixedDim}, []ui.Color{a.TertiaryFixed, a.TertiaryFixedDim}, []ui.Color{b.TertiaryFixed, b.TertiaryFixedDim})
+		[]ui.Color{cs.TertiaryFixed, cs.TertiaryFixedDim}, []ui.Color{a.TertiaryFixed, a.TertiaryFixedDim}, []ui.Color{b.TertiaryFixed, b.TertiaryFixedDim}, highContrast)
 	cs.OnTertiaryFixedVariant = ensurePairContrast(cs.OnTertiaryFixedVariant, a.OnTertiaryFixedVariant, b.OnTertiaryFixedVariant,
-		[]ui.Color{cs.TertiaryFixed, cs.TertiaryFixedDim}, []ui.Color{a.TertiaryFixed, a.TertiaryFixedDim}, []ui.Color{b.TertiaryFixed, b.TertiaryFixedDim})
+		[]ui.Color{cs.TertiaryFixed, cs.TertiaryFixedDim}, []ui.Color{a.TertiaryFixed, a.TertiaryFixedDim}, []ui.Color{b.TertiaryFixed, b.TertiaryFixedDim}, highContrast)
 
-	cs.OnError = ensurePairContrast(cs.OnError, a.OnError, b.OnError,
-		[]ui.Color{cs.Error}, []ui.Color{a.Error}, []ui.Color{b.Error})
-	cs.OnErrorContainer = ensurePairContrast(cs.OnErrorContainer, a.OnErrorContainer, b.OnErrorContainer,
-		[]ui.Color{cs.ErrorContainer}, []ui.Color{a.ErrorContainer}, []ui.Color{b.ErrorContainer})
+	cs.OnError, cs.Error = ensureSinglePairWithBg(cs.OnError, cs.Error, a.OnError, a.Error, b.OnError, b.Error, t, highContrast)
+	cs.OnErrorContainer, cs.ErrorContainer = ensureSinglePairWithBg(cs.OnErrorContainer, cs.ErrorContainer, a.OnErrorContainer, a.ErrorContainer, b.OnErrorContainer, b.ErrorContainer, t, highContrast)
 
-	cs.OnBackground = ensurePairContrast(cs.OnBackground, a.OnBackground, b.OnBackground,
-		[]ui.Color{cs.Background}, []ui.Color{a.Background}, []ui.Color{b.Background})
-	cs.OnSurface = ensurePairContrast(cs.OnSurface, a.OnSurface, b.OnSurface,
-		[]ui.Color{cs.Surface, cs.SurfaceContainer}, []ui.Color{a.Surface, a.SurfaceContainer}, []ui.Color{b.Surface, b.SurfaceContainer})
-	cs.OnSurfaceVariant = ensurePairContrast(cs.OnSurfaceVariant, a.OnSurfaceVariant, b.OnSurfaceVariant,
-		[]ui.Color{cs.Surface, cs.SurfaceVariant}, []ui.Color{a.Surface, a.SurfaceVariant}, []ui.Color{b.Surface, b.SurfaceVariant})
-	cs.InverseOnSurface = ensurePairContrast(cs.InverseOnSurface, a.InverseOnSurface, b.InverseOnSurface,
-		[]ui.Color{cs.InverseSurface}, []ui.Color{a.InverseSurface}, []ui.Color{b.InverseSurface})
+	surfaces := []ui.Color{
+		cs.Surface, cs.SurfaceContainerLowest, cs.SurfaceContainerLow,
+		cs.SurfaceContainer, cs.SurfaceContainerHigh, cs.SurfaceContainerHighest,
+	}
+	aSurfaces := []ui.Color{
+		a.Surface, a.SurfaceContainerLowest, a.SurfaceContainerLow,
+		a.SurfaceContainer, a.SurfaceContainerHigh, a.SurfaceContainerHighest,
+	}
+	bSurfaces := []ui.Color{
+		b.Surface, b.SurfaceContainerLowest, b.SurfaceContainerLow,
+		b.SurfaceContainer, b.SurfaceContainerHigh, b.SurfaceContainerHighest,
+	}
+	surfTarget := targetPairContrast(highContrast, a.OnSurface, b.OnSurface, aSurfaces, bSurfaces)
+	if highContrast && surfTarget > 4.5 && maxBlackWhiteContrast(surfaces...) < surfTarget {
+		src := a
+		if t >= 0.5 {
+			src = b
+		}
+		cs.Background = src.Background
+		cs.OnBackground = src.OnBackground
+		cs.Surface = src.Surface
+		cs.SurfaceDim = src.SurfaceDim
+		cs.SurfaceBright = src.SurfaceBright
+		cs.SurfaceVariant = src.SurfaceVariant
+		cs.SurfaceContainerLowest = src.SurfaceContainerLowest
+		cs.SurfaceContainerLow = src.SurfaceContainerLow
+		cs.SurfaceContainer = src.SurfaceContainer
+		cs.SurfaceContainerHigh = src.SurfaceContainerHigh
+		cs.SurfaceContainerHighest = src.SurfaceContainerHighest
+		cs.OnSurface = src.OnSurface
+		cs.OnSurfaceVariant = src.OnSurfaceVariant
+		cs.Outline = src.Outline
+		cs.OutlineVariant = src.OutlineVariant
+	} else {
+		cs.OnBackground = ensurePairContrast(cs.OnBackground, a.OnBackground, b.OnBackground,
+			[]ui.Color{cs.Background}, []ui.Color{a.Background}, []ui.Color{b.Background}, highContrast)
+		cs.OnSurface = ensurePairContrast(cs.OnSurface, a.OnSurface, b.OnSurface,
+			surfaces, aSurfaces, bSurfaces, highContrast)
+		cs.OnSurfaceVariant = ensurePairContrast(cs.OnSurfaceVariant, a.OnSurfaceVariant, b.OnSurfaceVariant,
+			surfaces, aSurfaces, bSurfaces, highContrast)
+	}
+	cs.InverseOnSurface, cs.InverseSurface = ensureSinglePairWithBg(
+		cs.InverseOnSurface, cs.InverseSurface,
+		a.InverseOnSurface, a.InverseSurface,
+		b.InverseOnSurface, b.InverseSurface,
+		t, highContrast,
+	)
 
 	return cs
 }
@@ -1222,9 +1298,10 @@ func lerpColorScheme(a, b tokens.ColorScheme, t float32) tokens.ColorScheme {
 // with NaN treated as 0). All 49 ColorScheme roles and extended Warning/Success
 // semantic roles are smoothly mixed while preserving usable foreground contrast
 // and non-transparent colors across mid-transition luminance crossings.
-// TextScale interpolates linearly, while discrete fields (Dark, Motion, Density,
-// Shapes, Typography, Contrast, ReduceMotion, Font, MonoFont) switch at t >= 0.5.
-// Intermediate themes clear seed provenance so they never pollute schemeCache.
+// TextScale interpolates linearly, while discrete fields (Dark, SurfaceStyle,
+// Motion, Density, Shapes, Typography, Contrast, ReduceMotion, Font, MonoFont)
+// switch at t >= 0.5. Intermediate themes clear seed provenance so they never
+// pollute schemeCache.
 func LerpTheme(from, to *Theme, t float32) *Theme {
 	if from == nil {
 		from = DefaultTheme(nil)
@@ -1257,6 +1334,7 @@ func LerpTheme(from, to *Theme, t float32) *Theme {
 	out := sa
 	if t >= 0.5 {
 		out.Dark = sb.Dark
+		out.SurfaceStyle = sb.SurfaceStyle
 		out.Motion = sb.Motion
 		out.Density = sb.Density
 		out.Typography = sb.Typography
@@ -1266,22 +1344,19 @@ func LerpTheme(from, to *Theme, t float32) *Theme {
 		out.Font = sb.Font
 		out.MonoFont = sb.MonoFont
 	}
+	highContrast := sa.Contrast >= tokens.ContrastHigh && sb.Contrast >= tokens.ContrastHigh
 	out.TextScale = sanitizePositiveScale(sa.TextScale+(sb.TextScale-sa.TextScale)*t, 1)
-	out.Colors = lerpColorScheme(sa.Colors, sb.Colors, t)
+	out.Colors = lerpColorScheme(sa.Colors, sb.Colors, t, highContrast)
 
 	out.Warning = mixRoleColor(sa.Warning, sb.Warning, t)
-	out.OnWarning = ensurePairContrast(mixRoleColor(sa.OnWarning, sb.OnWarning, t), sa.OnWarning, sb.OnWarning,
-		[]ui.Color{out.Warning}, []ui.Color{sa.Warning}, []ui.Color{sb.Warning})
+	out.OnWarning, out.Warning = ensureSinglePairWithBg(mixRoleColor(sa.OnWarning, sb.OnWarning, t), out.Warning, sa.OnWarning, sa.Warning, sb.OnWarning, sb.Warning, t, highContrast)
 	out.WarningContainer = mixRoleColor(sa.WarningContainer, sb.WarningContainer, t)
-	out.OnWarningContainer = ensurePairContrast(mixRoleColor(sa.OnWarningContainer, sb.OnWarningContainer, t), sa.OnWarningContainer, sb.OnWarningContainer,
-		[]ui.Color{out.WarningContainer}, []ui.Color{sa.WarningContainer}, []ui.Color{sb.WarningContainer})
+	out.OnWarningContainer, out.WarningContainer = ensureSinglePairWithBg(mixRoleColor(sa.OnWarningContainer, sb.OnWarningContainer, t), out.WarningContainer, sa.OnWarningContainer, sa.WarningContainer, sb.OnWarningContainer, sb.WarningContainer, t, highContrast)
 
 	out.Success = mixRoleColor(sa.Success, sb.Success, t)
-	out.OnSuccess = ensurePairContrast(mixRoleColor(sa.OnSuccess, sb.OnSuccess, t), sa.OnSuccess, sb.OnSuccess,
-		[]ui.Color{out.Success}, []ui.Color{sa.Success}, []ui.Color{sb.Success})
+	out.OnSuccess, out.Success = ensureSinglePairWithBg(mixRoleColor(sa.OnSuccess, sb.OnSuccess, t), out.Success, sa.OnSuccess, sa.Success, sb.OnSuccess, sb.Success, t, highContrast)
 	out.SuccessContainer = mixRoleColor(sa.SuccessContainer, sb.SuccessContainer, t)
-	out.OnSuccessContainer = ensurePairContrast(mixRoleColor(sa.OnSuccessContainer, sb.OnSuccessContainer, t), sa.OnSuccessContainer, sb.OnSuccessContainer,
-		[]ui.Color{out.SuccessContainer}, []ui.Color{sa.SuccessContainer}, []ui.Color{sb.SuccessContainer})
+	out.OnSuccessContainer, out.SuccessContainer = ensureSinglePairWithBg(mixRoleColor(sa.OnSuccessContainer, sb.OnSuccessContainer, t), out.SuccessContainer, sa.OnSuccessContainer, sa.SuccessContainer, sb.OnSuccessContainer, sb.SuccessContainer, t, highContrast)
 
 	// Intermediate blended themes do not belong to a single seed, preventing
 	// schemeCache entries from ever being generated during transitions.
@@ -1327,6 +1402,7 @@ type themeTransitionProgressKey struct{}
 type themeVisualSig struct {
 	dark               bool
 	contrast           tokens.Contrast
+	surfaceStyle       tokens.SurfaceStyle
 	colors             tokens.ColorScheme
 	warning            ui.Color
 	onWarning          ui.Color
@@ -1343,6 +1419,7 @@ func visualSigOf(t Theme) themeVisualSig {
 	return themeVisualSig{
 		dark:               t.Dark,
 		contrast:           t.Contrast,
+		surfaceStyle:       t.SurfaceStyle,
 		colors:             t.Colors,
 		warning:            t.Warning,
 		onWarning:          t.OnWarning,

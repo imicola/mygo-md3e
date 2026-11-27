@@ -264,6 +264,82 @@ func resolveSurfaceShape(th *Theme, opt SurfaceOptions) resolvedSurfaceShape {
 	}
 }
 
+func outlineBorderWidth(th *Theme) float32 {
+	if th != nil && th.Contrast >= tokens.ContrastHigh {
+		return 1.5
+	}
+	return 1
+}
+
+func highContrastBorder(th *Theme) (float32, ui.Color) {
+	if th == nil || th.Contrast < tokens.ContrastHigh {
+		return 0, ui.Color{}
+	}
+	col := th.Colors.Outline
+	if col.A == 0 {
+		col = th.Colors.OnSurface
+	}
+	return 1.5, col
+}
+
+func hasTopSpecularReflection(th *Theme, level tokens.ElevationLevel) bool {
+	return th != nil && th.Dark && th.Contrast < tokens.ContrastHigh &&
+		(level == tokens.Level2 || level == tokens.Level3)
+}
+
+// paintTopSpecularStrip paints the subtle dark-mode E2/E3 inner-top reflection
+// α(y) = 0.035 * max(0, 1 - y/2)^2 over the top 2 DIP of r. Caller must clip
+// to the container's rounded corners or polygon path.
+func paintTopSpecularStrip(p *ui.Painter, r ui.Rect) {
+	h := min(float32(2), r.H)
+	if h <= 0 || r.W <= 0 {
+		return
+	}
+	stops := [5]ui.GradientStop{
+		{Color: ui.RGBA(255, 255, 255, 0.035), At: 0},
+		{Color: ui.RGBA(255, 255, 255, 0.0196875), At: 0.25},
+		{Color: ui.RGBA(255, 255, 255, 0.00875), At: 0.50},
+		{Color: ui.RGBA(255, 255, 255, 0.0021875), At: 0.75},
+		{Color: ui.RGBA(255, 255, 255, 0), At: 1},
+	}
+	p.FillGradient(ui.Rect{X: r.X, Y: r.Y, W: r.W, H: h}, ui.LinearGradient{
+		Angle: 180,
+		Stops: stops[:],
+	}, 0)
+}
+
+// PaintTopSpecular paints the MD3E dark-mode E2/E3 inner-top 2 DIP specular
+// reflection clipped inside a rounded rectangle of radius. It is a no-op in
+// light mode, high-contrast mode, or non-E2/E3 elevations, and is ghost-draw
+// safe (reads no live element state and schedules no frames).
+func PaintTopSpecular(p *ui.Painter, r ui.Rect, radius float32, th *Theme, level tokens.ElevationLevel) {
+	if !hasTopSpecularReflection(th, level) || !isPositiveFiniteF32(r.W) || !isPositiveFiniteF32(r.H) {
+		return
+	}
+	rad := sanitizeNonNegF32(radius)
+	p.Clip(r, rad, func() {
+		paintTopSpecularStrip(p, r)
+	})
+}
+
+func attachTopSpecular(el ui.Element, th *Theme, level tokens.ElevationLevel, radii [4]float32) {
+	if !hasTopSpecularReflection(th, level) {
+		return
+	}
+	var scratch *ui.Path
+	if !equalRadii(radii) {
+		scratch = localDrawPath(el)
+	}
+	el.Draw(func(p *ui.Painter, r ui.Rect) {
+		if !isPositiveFiniteF32(r.W) || !isPositiveFiniteF32(r.H) {
+			return
+		}
+		clipSurfaceRadii(p, scratch, r, radii, func() {
+			paintTopSpecularStrip(p, r)
+		})
+	})
+}
+
 func resolveHairlineColor(th *Theme, override ui.Color) ui.Color {
 	if override.A > 0 {
 		return override
@@ -359,7 +435,7 @@ func Surface(c *ui.Context, opts ...SurfaceOptions) ui.Element {
 			borderCol = th.Colors.Outline
 		}
 	} else if borderW == 0 && opt.Hairline {
-		borderW = 1
+		borderW = outlineBorderWidth(th)
 		borderCol = resolveHairlineColor(th, opt.HairlineColor)
 	}
 
@@ -395,6 +471,7 @@ func Surface(c *ui.Context, opts ...SurfaceOptions) ui.Element {
 		scratch := localDrawPath(el)
 		elevation := opt.Elevation
 		drawShadow := !opt.DisableShadow && elevation > tokens.Level0
+		wantSpecular := !opt.DisableShadow && hasTopSpecularReflection(th, elevation)
 		shadow := th.Colors.Shadow
 		el.Draw(func(p *ui.Painter, r ui.Rect) {
 			if !isPositiveFiniteF32(r.W) || !isPositiveFiniteF32(r.H) {
@@ -433,13 +510,16 @@ func Surface(c *ui.Context, opts ...SurfaceOptions) ui.Element {
 			if linGrad != nil {
 				p.FillPathGradient(path, *linGrad)
 			}
-			if radGrad != nil || backdrop != nil {
+			if radGrad != nil || backdrop != nil || wantSpecular {
 				p.ClipPath(path, func() {
 					if radGrad != nil {
 						p.FillRadialGradient(r, *radGrad, 0)
 					}
 					if backdrop != nil {
 						backdrop(p, r)
+					}
+					if wantSpecular {
+						paintTopSpecularStrip(p, r)
 					}
 				})
 			}
@@ -457,7 +537,8 @@ func Surface(c *ui.Context, opts ...SurfaceOptions) ui.Element {
 		} else if radGrad != nil {
 			el.RadialGradient(*radGrad)
 		}
-		if (linGrad != nil && radGrad != nil) || backdrop != nil {
+		wantSpecular := !opt.DisableShadow && hasTopSpecularReflection(th, opt.Elevation)
+		if (linGrad != nil && radGrad != nil) || backdrop != nil || wantSpecular {
 			radii := geom.radii
 			overlayRadial := linGrad != nil && radGrad != nil
 			var scratch *ui.Path
@@ -474,6 +555,9 @@ func Surface(c *ui.Context, opts ...SurfaceOptions) ui.Element {
 					}
 					if backdrop != nil {
 						backdrop(p, r)
+					}
+					if wantSpecular {
+						paintTopSpecularStrip(p, r)
 					}
 				})
 			})
