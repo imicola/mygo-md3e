@@ -497,6 +497,7 @@ func (a *appState) monitorLedgerSection(c *ui.Context) {
 			tableLabel = "DNS queries virtual table"
 		}
 
+		srv := c.Services()
 		md3e.DataTable(c.Key(tableKey), cols, count, func(row, col int) {
 			a.renderLedgerCell(c, cs, row, col)
 		}, md3e.DataTableOptions{
@@ -516,7 +517,7 @@ func (a *appState) monitorLedgerSection(c *ui.Context) {
 			OnSortChanged: func(ui.SortOrder, []ui.SortOrder) {
 				a.mon.markFilterDirty()
 				a.dirty = true
-				c.Invalidate()
+				srv.Invalidate()
 			},
 			OnRowClick: func(row int) {
 				a.mon.syncSelectedRow(row)
@@ -524,7 +525,7 @@ func (a *appState) monitorLedgerSection(c *ui.Context) {
 			OnRowSubmit: func(row int) {
 				a.mon.syncSelectedRow(row)
 				if host := a.mon.hostAt(row); host != "" {
-					c.WriteClipboard(host)
+					srv.WriteClipboard(host)
 					a.snack.Show(md3e.SnackbarOptions{Message: "Copied " + host})
 				}
 			},
@@ -532,7 +533,7 @@ func (a *appState) monitorLedgerSection(c *ui.Context) {
 				a.buildLedgerHeaderMenu(m, cols, col)
 			},
 			CellMenu: func(m *ui.Menu, row, _ int) {
-				a.buildLedgerCellMenu(c, m, row)
+				a.buildLedgerCellMenu(srv, m, row)
 			},
 		}).FillWidth().Height(400)
 		a.mon.syncSelectedRow(a.mon.selectedRow)
@@ -645,7 +646,7 @@ func (a *appState) buildLedgerHeaderMenu(m *ui.Menu, cols []md3e.DataTableColumn
 	md3e.ApplyDataTableMenuActions(m, actions)
 }
 
-func (a *appState) buildLedgerCellMenu(c *ui.Context, m *ui.Menu, row int) {
+func (a *appState) buildLedgerCellMenu(srv ui.Services, m *ui.Menu, row int) {
 	host := a.mon.hostAt(row)
 	if host == "" {
 		return
@@ -654,8 +655,9 @@ func (a *appState) buildLedgerCellMenu(c *ui.Context, m *ui.Menu, row int) {
 		{
 			Label: "Copy " + host,
 			OnClick: func() {
-				c.WriteClipboard(host)
+				srv.WriteClipboard(host)
 				a.snack.Show(md3e.SnackbarOptions{Message: "Copied " + host})
+				srv.Invalidate()
 			},
 		},
 		{

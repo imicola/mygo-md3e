@@ -478,3 +478,74 @@ func TestVirtualListRTLReduceMotionDisabledAndAccess(t *testing.T) {
 		t.Fatalf("disabled list mutated state: sel=%d clicks=%d submits=%d", disSel, disClicks, disSubmits)
 	}
 }
+
+func TestVirtualListExternalStateOverrideRetract(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor, ThemeOptions{ReduceMotion: true})
+	state := &ui.ListState{}
+	small := []string{"first", "second"}
+	large := make([]string, 20)
+	for i := range large {
+		large[i] = fmt.Sprintf("large-%d", i)
+	}
+
+	useLarge := false
+	oldSelected := -1
+	var multi ui.Selection[int]
+
+	tt := ui.NewTester(func(c *ui.Context) {
+		ThemeScope(c, th, func() {
+			ui.Column(c).Size(340, 260).Background(canvasRGB).Children(func() {
+				if !useLarge {
+					snap := small
+					VirtualList(c.Key("ext-vl"), len(snap), func(r ui.ListRow) {
+						Text(r.Context, snap[r.Index], tokens.BodyMedium)
+					}, VirtualListOptions{
+						State:     state,
+						ItemKey:   func(row int) any { return snap[row] },
+						Selected:  &oldSelected,
+						RowHeight: 36,
+						RowLabel:  func(row int) string { return snap[row] },
+						Label:     "Dynamic list",
+					}).Grow(1).FillWidth()
+				} else {
+					VirtualList(c.Key("ext-vl"), len(large), func(r ui.ListRow) {
+						Text(r.Context, large[r.Index], tokens.BodyMedium)
+					}, VirtualListOptions{
+						State:     state,
+						Selection: &multi,
+						RowHeight: 36,
+						RowLabel:  func(row int) string { return large[row] },
+						Label:     "Dynamic list",
+					}).Grow(1).FillWidth()
+				}
+			})
+		})
+	}, 340, 260)
+
+	if err := tt.Click("second"); err != nil {
+		t.Fatalf("click second: %v", err)
+	}
+	if oldSelected != 1 {
+		t.Fatalf("oldSelected = %d, want 1", oldSelected)
+	}
+
+	// Switch to 20 items omitting ItemKey and Selected, using multi Selection instead.
+	// Must not panic by calling stale 2-item ItemKey closure and must not mutate oldSelected.
+	useLarge = true
+	tt.Frame()
+	if state.Key != nil {
+		t.Fatal("stale ItemKey closure remained on external ListState after omission")
+	}
+	if state.Selected == &oldSelected {
+		t.Fatal("stale Selected pointer remained on external ListState after omission")
+	}
+	if err := tt.Click("large-3"); err != nil {
+		t.Fatalf("click large-3: %v", err)
+	}
+	if !multi.Has(3) {
+		t.Fatal("multi Selection did not select row 3")
+	}
+	if oldSelected != 1 {
+		t.Fatalf("clicking in new mode mutated oldSelected to %d, want 1", oldSelected)
+	}
+}

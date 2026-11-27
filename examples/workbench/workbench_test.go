@@ -388,3 +388,41 @@ func TestWorkbenchAccessibility(t *testing.T) {
 		t.Fatal("ReduceMotion left pending frames after tab switch")
 	}
 }
+
+func TestWorkbenchMonitorCellMenuSafeAcrossPageSwitchAndSort(t *testing.T) {
+	a, tt := newWorkbenchTester(t, true)
+
+	// Leave Monitor page for Media, then return to Monitor.
+	if err := tt.Click("Media"); err != nil {
+		t.Fatalf("switch to Media: %v", err)
+	}
+	tt.Advance(500 * time.Millisecond)
+	if err := tt.Click("Monitor"); err != nil {
+		t.Fatalf("return to Monitor: %v", err)
+	}
+	tt.Advance(500 * time.Millisecond)
+
+	// Scroll to ledger, sort by Latency, and right-click copy the first row via CellMenu.
+	tt.Wheel(205, 120, 0, 600)
+	tt.Advance(400 * time.Millisecond)
+	latHdr, ok := tt.AccessByRole(ui.RoleColumnHeader, "Latency")
+	if !ok {
+		t.Fatal("Latency column header missing after returning to Monitor")
+	}
+	tt.ClickAt(centerOf(latHdr.Bounds))
+	tt.Advance(200 * time.Millisecond)
+
+	wantHost := a.mon.hostAt(0)
+	rowInfo, ok := tt.AccessByRole(ui.RoleRow, wantHost)
+	if !ok {
+		t.Fatalf("first sorted row %q missing", wantHost)
+	}
+	tt.RightClickAt(centerOf(rowInfo.Bounds))
+	if err := tt.ChooseMenuItem("Copy " + wantHost); err != nil {
+		t.Fatalf("choose Copy menu item: %v (menu=%v)", err, tt.Menu())
+	}
+	tt.Advance(100 * time.Millisecond)
+	if got := tt.Clipboard(); got != wantHost {
+		t.Fatalf("CellMenu copy wrote %q, want %q", got, wantHost)
+	}
+}

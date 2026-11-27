@@ -629,3 +629,200 @@ func TestDataTableColumnCacheUpdatesInPlaceChanges(t *testing.T) {
 		t.Fatalf("removing all columns left stale columns: %+v", got)
 	}
 }
+
+func TestDataTableExternalStateMenuRetractAndRestore(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor, ThemeOptions{ReduceMotion: true})
+	cols := []DataTableColumn{{Title: "Name", Width: 140}, {Title: "Kind", Width: 100}}
+
+	// Part A: external state with nil baseline menus retracts menus when switching to read-only.
+	state := &ui.ListState{}
+	readOnly := false
+	headerRuns, cellRuns := 0, 0
+	tt := ui.NewTester(func(c *ui.Context) {
+		ThemeScope(c, th, func() {
+			var hMenu func(*ui.Menu, int)
+			var cMenu func(*ui.Menu, int, int)
+			if !readOnly {
+				hMenu = func(m *ui.Menu, _ int) {
+					ApplyDataTableMenuActions(m, []DataTableMenuAction{
+						{Label: "Edit Columns", OnClick: func() { headerRuns++ }},
+					})
+				}
+				cMenu = func(m *ui.Menu, _, _ int) {
+					ApplyDataTableMenuActions(m, []DataTableMenuAction{
+						{Label: "Delete Row", OnClick: func() { cellRuns++ }},
+					})
+				}
+			}
+			ui.Column(c).Size(360, 220).Background(canvasRGB).Children(func() {
+				DataTable(c.Key("ext-menu"), cols, 3, func(row, col int) {
+					DataTableCellText(c, fmt.Sprintf("r%dc%d", row, col))
+				}, DataTableOptions{
+					State:      state,
+					HeaderMenu: hMenu,
+					CellMenu:   cMenu,
+					Label:      "External menu table",
+				}).Grow(1).FillWidth()
+			})
+		})
+	}, 360, 220)
+
+	if err := tt.RightClick("Name"); err != nil {
+		t.Fatalf("right click header: %v", err)
+	}
+	if err := tt.ChooseMenuItem("Edit Columns"); err != nil {
+		t.Fatalf("choose Edit Columns: %v", err)
+	}
+	if headerRuns != 1 {
+		t.Fatalf("headerRuns = %d, want 1", headerRuns)
+	}
+	if err := tt.RightClick("r1c0"); err != nil {
+		t.Fatalf("right click cell: %v", err)
+	}
+	if err := tt.ChooseMenuItem("Delete Row"); err != nil {
+		t.Fatalf("choose Delete Row: %v", err)
+	}
+	if cellRuns != 1 {
+		t.Fatalf("cellRuns = %d, want 1", cellRuns)
+	}
+
+	// Switch to read-only (HeaderMenu=nil, CellMenu=nil): stale menus must be retracted.
+	readOnly = true
+	tt.Frame()
+	if state.HeaderMenu != nil || state.CellMenu != nil {
+		t.Fatalf("read-only switch left stale menus on external ListState: header=%v cell=%v", state.HeaderMenu != nil, state.CellMenu != nil)
+	}
+	if err := tt.RightClick("Name"); err != nil {
+		t.Fatalf("right click header in read-only: %v", err)
+	}
+	if len(tt.Menu()) != 0 {
+		t.Fatalf("read-only header still opened stale menu: %v", tt.Menu())
+	}
+	if err := tt.RightClick("r1c0"); err != nil {
+		t.Fatalf("right click cell in read-only: %v", err)
+	}
+	if len(tt.Menu()) != 0 {
+		t.Fatalf("read-only cell still opened stale menu: %v", tt.Menu())
+	}
+
+	// Part B: caller-owned baseline menu on external state is restored when option override clears.
+	baseRuns, overrideRuns := 0, 0
+	baseState := &ui.ListState{
+		HeaderMenu: func(m *ui.Menu, _ int) {
+			ApplyDataTableMenuActions(m, []DataTableMenuAction{
+				{Label: "Caller Baseline", OnClick: func() { baseRuns++ }},
+			})
+		},
+	}
+	useOverride := true
+	ttBase := ui.NewTester(func(c *ui.Context) {
+		ThemeScope(c, th, func() {
+			var hMenu func(*ui.Menu, int)
+			if useOverride {
+				hMenu = func(m *ui.Menu, _ int) {
+					ApplyDataTableMenuActions(m, []DataTableMenuAction{
+						{Label: "Temp Override", OnClick: func() { overrideRuns++ }},
+					})
+				}
+			}
+			ui.Column(c).Size(360, 220).Background(canvasRGB).Children(func() {
+				DataTable(c.Key("base-restore"), cols, 2, func(row, col int) {
+					DataTableCellText(c, fmt.Sprintf("b%dc%d", row, col))
+				}, DataTableOptions{
+					State:      baseState,
+					HeaderMenu: hMenu,
+					Label:      "Baseline restore table",
+				}).Grow(1).FillWidth()
+			})
+		})
+	}, 360, 220)
+
+	if err := ttBase.RightClick("Name"); err != nil {
+		t.Fatalf("right click override header: %v", err)
+	}
+	if err := ttBase.ChooseMenuItem("Temp Override"); err != nil {
+		t.Fatalf("choose Temp Override: %v", err)
+	}
+	if overrideRuns != 1 {
+		t.Fatalf("overrideRuns = %d, want 1", overrideRuns)
+	}
+	useOverride = false
+	ttBase.Frame()
+	if err := ttBase.RightClick("Name"); err != nil {
+		t.Fatalf("right click restored header: %v", err)
+	}
+	if err := ttBase.ChooseMenuItem("Caller Baseline"); err != nil {
+		t.Fatalf("choose restored Caller Baseline: %v (menu=%v)", err, ttBase.Menu())
+	}
+	if baseRuns != 1 {
+		t.Fatalf("baseRuns = %d, want 1", baseRuns)
+	}
+}
+
+func TestDataTableExternalStateCellsStyleThemeRefreshAndPreserveCaller(t *testing.T) {
+	lightTh := ThemeFromSeed(DefaultSeedColor, ThemeOptions{Dark: false, ReduceMotion: true})
+	darkTh := ThemeFromSeed(DefaultSeedColor, ThemeOptions{Dark: true, ReduceMotion: true})
+	hcTh := ThemeFromSeed(DefaultSeedColor, ThemeOptions{Dark: true, Contrast: tokens.ContrastHigh, ReduceMotion: true})
+
+	curTh := lightTh
+	cols := []DataTableColumn{{Title: "Col", Width: 140}}
+	autoState := &ui.ListState{}
+	customStyle := ui.CellsStyle{
+		Cell:     ui.RGB(10, 20, 30),
+		CellText: ui.RGB(240, 245, 250),
+		Row:      ui.RGBA(10, 20, 30, 0.2),
+		Stripe:   ui.RGBA(10, 20, 30, 0.05),
+	}
+	callerState := &ui.ListState{CellsStyle: customStyle}
+	var selA, selB ui.Selection[int]
+
+	tt := ui.NewTester(func(c *ui.Context) {
+		ThemeScope(c, curTh, func() {
+			ui.Column(c).Size(360, 300).Background(canvasRGB).Children(func() {
+				DataTable(c.Key("auto-cs"), cols, 2, func(row, col int) {
+					DataTableCellText(c, fmt.Sprintf("a%d", row))
+				}, DataTableOptions{
+					State:      autoState,
+					Selection:  &selA,
+					CellSelect: true,
+					Label:      "Auto style table",
+				}).Height(140).FillWidth()
+				DataTable(c.Key("caller-cs"), cols, 2, func(row, col int) {
+					DataTableCellText(c, fmt.Sprintf("c%d", row))
+				}, DataTableOptions{
+					State:      callerState,
+					Selection:  &selB,
+					CellSelect: true,
+					Label:      "Caller style table",
+				}).Height(140).FillWidth()
+			})
+		})
+	}, 360, 300)
+
+	if autoState.CellsStyle.Cell != lightTh.Colors.PrimaryContainer || autoState.CellsStyle.CellText != lightTh.Colors.OnPrimaryContainer {
+		t.Fatalf("light auto CellsStyle = %+v, want PrimaryContainer/OnPrimaryContainer", autoState.CellsStyle)
+	}
+	if callerState.CellsStyle != customStyle {
+		t.Fatalf("light caller CellsStyle overwritten: %+v", callerState.CellsStyle)
+	}
+
+	// Switch to Dark theme: library-owned auto CellsStyle must refresh, caller-owned stays intact.
+	curTh = darkTh
+	tt.Frame()
+	if autoState.CellsStyle.Cell != darkTh.Colors.PrimaryContainer || autoState.CellsStyle.CellText != darkTh.Colors.OnPrimaryContainer {
+		t.Fatalf("dark auto CellsStyle stayed stale: got %+v, want dark PrimaryContainer %+v", autoState.CellsStyle.Cell, darkTh.Colors.PrimaryContainer)
+	}
+	if callerState.CellsStyle != customStyle {
+		t.Fatalf("dark caller CellsStyle overwritten: %+v", callerState.CellsStyle)
+	}
+
+	// Switch to High Contrast: auto CellsStyle refreshes again.
+	curTh = hcTh
+	tt.Frame()
+	if autoState.CellsStyle.Cell != hcTh.Colors.PrimaryContainer || autoState.CellsStyle.CellText != hcTh.Colors.OnPrimaryContainer {
+		t.Fatalf("high-contrast auto CellsStyle stayed stale: got %+v, want %+v", autoState.CellsStyle.Cell, hcTh.Colors.PrimaryContainer)
+	}
+	if callerState.CellsStyle != customStyle {
+		t.Fatalf("high-contrast caller CellsStyle overwritten: %+v", callerState.CellsStyle)
+	}
+}

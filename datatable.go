@@ -208,11 +208,108 @@ type DataTableOptions struct {
 }
 
 type (
-	dataTableThemeKey struct{}
-	dataTableStateKey struct{}
-	dataTableLeadKey  struct{}
-	dataTableTrackKey struct{}
+	dataTableThemeKey    struct{}
+	dataTableStateKey    struct{}
+	dataTableLeadKey     struct{}
+	dataTableTrackKey    struct{}
+	dataTableOverrideKey struct{}
 )
+
+type dataTableStateOverrides struct {
+	target *ui.ListState
+
+	overrodeKey bool
+	baseKey     func(int) any
+
+	overrodeSelected bool
+	baseSelected     *int
+
+	overrodeSelection bool
+	baseSelection     ui.Selector
+
+	overrodeLabel bool
+	baseLabel     func(int) string
+
+	overrodeHeader bool
+	baseHeader     func(int) bool
+
+	overrodeSort bool
+	baseSort     *ui.SortOrder
+
+	overrodeSortBy bool
+	baseSortBy     *[]ui.SortOrder
+
+	overrodeRoundRows bool
+	baseRoundRows     bool
+
+	overrodeCellSelect bool
+	baseCellSelect     bool
+
+	overrodeCellsStyle bool
+	autoCellsStyle     bool
+	baseCellsStyle     ui.CellsStyle
+	lastAutoCellsStyle ui.CellsStyle
+
+	overrodeHeaderMenu bool
+	baseHeaderMenu     func(*ui.Menu, int)
+
+	overrodeCellMenu bool
+	baseCellMenu     func(*ui.Menu, int, int)
+}
+
+func (ov *dataTableStateOverrides) restore() {
+	s := ov.target
+	if s == nil {
+		return
+	}
+	if ov.overrodeKey {
+		s.Key = ov.baseKey
+	}
+	if ov.overrodeSelected {
+		s.Selected = ov.baseSelected
+	}
+	if ov.overrodeSelection {
+		s.Selection = ov.baseSelection
+	}
+	if ov.overrodeLabel {
+		s.Label = ov.baseLabel
+	}
+	if ov.overrodeHeader {
+		s.Header = ov.baseHeader
+	}
+	if ov.overrodeSort {
+		s.Sort = ov.baseSort
+	}
+	if ov.overrodeSortBy {
+		s.SortBy = ov.baseSortBy
+	}
+	if ov.overrodeRoundRows {
+		s.RoundRows = ov.baseRoundRows
+	}
+	if ov.overrodeCellSelect {
+		s.CellSelect = ov.baseCellSelect
+	}
+	if ov.overrodeCellsStyle || (ov.autoCellsStyle && s.CellsStyle == ov.lastAutoCellsStyle) {
+		s.CellsStyle = ov.baseCellsStyle
+	}
+	if ov.overrodeHeaderMenu {
+		s.HeaderMenu = ov.baseHeaderMenu
+	}
+	if ov.overrodeCellMenu {
+		s.CellMenu = ov.baseCellMenu
+	}
+	*ov = dataTableStateOverrides{}
+}
+
+func dataTableDefaultCellsStyle(th *Theme) ui.CellsStyle {
+	cs := th.Colors
+	return ui.CellsStyle{
+		Cell:     cs.PrimaryContainer,
+		CellText: cs.OnPrimaryContainer,
+		Row:      cs.SecondaryContainer.Alpha(0.45),
+		Stripe:   cs.OnSurface.Alpha(0.03),
+	}
+}
 
 type dataTableTrack struct {
 	hasLayout          bool
@@ -366,6 +463,10 @@ func DataTable(c *ui.Context, columns []DataTableColumn, count int, cell func(ro
 		return false
 	}
 	userHeaderCell := o.HeaderCell
+	prevHeaderCell := state.HeaderCell
+	if userHeaderCell == nil && o.State != nil {
+		userHeaderCell = prevHeaderCell
+	}
 	primaryInk := th.Colors.Primary
 	state.HeaderCell = func(cell ui.Element, col int) {
 		cell.Background(headerBg)
@@ -380,6 +481,11 @@ func DataTable(c *ui.Context, columns []DataTableColumn, count int, cell func(ro
 		if userHeaderCell != nil {
 			userHeaderCell(cell, col)
 		}
+	}
+	if o.State != nil {
+		defer func() {
+			state.HeaderCell = prevHeaderCell
+		}()
 	}
 	onRowClick := !disabled && o.OnRowClick != nil
 	onRowSubmit := !disabled && o.OnRowSubmit != nil
@@ -530,49 +636,180 @@ func buildDataTableUITheme(root ui.Element, origUI *ui.Theme, th *Theme, contain
 }
 
 func resolveDataTableState(root ui.Element, th *Theme, o DataTableOptions) *ui.ListState {
+	ov := ui.Local(root, dataTableOverrideKey{}, func() dataTableStateOverrides { return dataTableStateOverrides{} })
 	var s *ui.ListState
 	if o.State != nil {
 		s = o.State
+		if ov.target != nil && ov.target != s {
+			ov.restore()
+		}
+		ov.target = s
+
 		if o.ItemKey != nil {
+			if !ov.overrodeKey {
+				ov.baseKey = s.Key
+				ov.overrodeKey = true
+			}
 			s.Key = o.ItemKey
+		} else if ov.overrodeKey {
+			s.Key = ov.baseKey
+			ov.baseKey = nil
+			ov.overrodeKey = false
 		}
+
 		if o.Selected != nil {
+			if !ov.overrodeSelected {
+				ov.baseSelected = s.Selected
+				ov.overrodeSelected = true
+			}
 			s.Selected = o.Selected
+		} else if ov.overrodeSelected {
+			s.Selected = ov.baseSelected
+			ov.baseSelected = nil
+			ov.overrodeSelected = false
 		}
+
 		if o.Selection != nil {
+			if !ov.overrodeSelection {
+				ov.baseSelection = s.Selection
+				ov.overrodeSelection = true
+			}
 			s.Selection = o.Selection
+		} else if ov.overrodeSelection {
+			s.Selection = ov.baseSelection
+			ov.baseSelection = nil
+			ov.overrodeSelection = false
 		}
+
 		if o.RowLabel != nil {
+			if !ov.overrodeLabel {
+				ov.baseLabel = s.Label
+				ov.overrodeLabel = true
+			}
 			s.Label = o.RowLabel
+		} else if ov.overrodeLabel {
+			s.Label = ov.baseLabel
+			ov.baseLabel = nil
+			ov.overrodeLabel = false
 		}
+
 		if o.IsHeader != nil {
+			if !ov.overrodeHeader {
+				ov.baseHeader = s.Header
+				ov.overrodeHeader = true
+			}
 			s.Header = o.IsHeader
+		} else if ov.overrodeHeader {
+			s.Header = ov.baseHeader
+			ov.baseHeader = nil
+			ov.overrodeHeader = false
 		}
+
 		if o.Sort != nil {
+			if !ov.overrodeSort {
+				ov.baseSort = s.Sort
+				ov.overrodeSort = true
+			}
 			s.Sort = o.Sort
+		} else if ov.overrodeSort {
+			s.Sort = ov.baseSort
+			ov.baseSort = nil
+			ov.overrodeSort = false
 		}
+
 		if o.SortBy != nil {
+			if !ov.overrodeSortBy {
+				ov.baseSortBy = s.SortBy
+				ov.overrodeSortBy = true
+			}
 			s.SortBy = o.SortBy
+		} else if ov.overrodeSortBy {
+			s.SortBy = ov.baseSortBy
+			ov.baseSortBy = nil
+			ov.overrodeSortBy = false
 		}
+
 		if o.RoundRows {
+			if !ov.overrodeRoundRows {
+				ov.baseRoundRows = s.RoundRows
+				ov.overrodeRoundRows = true
+			}
 			s.RoundRows = true
+		} else if ov.overrodeRoundRows {
+			s.RoundRows = ov.baseRoundRows
+			ov.overrodeRoundRows = false
 		}
+
 		if o.CellSelect {
+			if !ov.overrodeCellSelect {
+				ov.baseCellSelect = s.CellSelect
+				ov.overrodeCellSelect = true
+			}
 			s.CellSelect = true
+		} else if ov.overrodeCellSelect {
+			s.CellSelect = ov.baseCellSelect
+			ov.overrodeCellSelect = false
 		}
+
 		if o.CellsStyle != (ui.CellsStyle{}) {
+			if !ov.overrodeCellsStyle && !ov.autoCellsStyle {
+				ov.baseCellsStyle = s.CellsStyle
+			}
 			s.CellsStyle = o.CellsStyle
+			ov.overrodeCellsStyle = true
+			ov.autoCellsStyle = false
+		} else {
+			if ov.overrodeCellsStyle {
+				s.CellsStyle = ov.baseCellsStyle
+				ov.overrodeCellsStyle = false
+			}
+			if ov.autoCellsStyle && s.CellsStyle != ov.lastAutoCellsStyle {
+				// Caller explicitly updated s.CellsStyle directly; adopt as caller-owned.
+				ov.autoCellsStyle = false
+			}
+			if s.CellSelect {
+				if s.CellsStyle == (ui.CellsStyle{}) || ov.autoCellsStyle {
+					if !ov.autoCellsStyle {
+						ov.baseCellsStyle = ui.CellsStyle{}
+					}
+					auto := dataTableDefaultCellsStyle(th)
+					s.CellsStyle = auto
+					ov.autoCellsStyle = true
+					ov.lastAutoCellsStyle = auto
+				}
+			} else if ov.autoCellsStyle {
+				s.CellsStyle = ov.baseCellsStyle
+				ov.autoCellsStyle = false
+			}
 		}
+
 		if o.HeaderMenu != nil {
+			if !ov.overrodeHeaderMenu {
+				ov.baseHeaderMenu = s.HeaderMenu
+				ov.overrodeHeaderMenu = true
+			}
 			s.HeaderMenu = o.HeaderMenu
+		} else if ov.overrodeHeaderMenu {
+			s.HeaderMenu = ov.baseHeaderMenu
+			ov.baseHeaderMenu = nil
+			ov.overrodeHeaderMenu = false
 		}
-		if o.HeaderCell != nil {
-			s.HeaderCell = o.HeaderCell
-		}
+
 		if o.CellMenu != nil {
+			if !ov.overrodeCellMenu {
+				ov.baseCellMenu = s.CellMenu
+				ov.overrodeCellMenu = true
+			}
 			s.CellMenu = o.CellMenu
+		} else if ov.overrodeCellMenu {
+			s.CellMenu = ov.baseCellMenu
+			ov.baseCellMenu = nil
+			ov.overrodeCellMenu = false
 		}
 	} else {
+		if ov.target != nil {
+			ov.restore()
+		}
 		s = ui.Local(root, dataTableStateKey{}, func() ui.ListState { return ui.ListState{} })
 		lead := ui.Local(root, dataTableLeadKey{}, func() int { return -1 })
 		s.Key = o.ItemKey
@@ -595,17 +832,11 @@ func resolveDataTableState(root ui.Element, th *Theme, o DataTableOptions) *ui.L
 		default:
 			s.Selected = nil
 		}
-	}
-
-	if s.CellSelect && s.CellsStyle == (ui.CellsStyle{}) {
-		cs := th.Colors
-		s.CellsStyle = ui.CellsStyle{
-			Cell:     cs.PrimaryContainer,
-			CellText: cs.OnPrimaryContainer,
-			Row:      cs.SecondaryContainer.Alpha(0.45),
-			Stripe:   cs.OnSurface.Alpha(0.03),
+		if s.CellSelect && s.CellsStyle == (ui.CellsStyle{}) {
+			s.CellsStyle = dataTableDefaultCellsStyle(th)
 		}
 	}
+
 	if isPositiveFiniteF32(o.RowHeight) {
 		s.RowHeight = o.RowHeight
 	} else {

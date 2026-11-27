@@ -71,11 +71,54 @@ const (
 )
 
 type (
-	virtualListThemeKey struct{}
-	virtualListStateKey struct{}
-	virtualListLeadKey  struct{}
-	vlRowStateKey       struct{}
+	virtualListThemeKey    struct{}
+	virtualListStateKey    struct{}
+	virtualListLeadKey     struct{}
+	vlRowStateKey          struct{}
+	virtualListOverrideKey struct{}
 )
+
+type virtualListStateOverrides struct {
+	target *ui.ListState
+
+	overrodeKey bool
+	baseKey     func(int) any
+
+	overrodeSelected bool
+	baseSelected     *int
+
+	overrodeSelection bool
+	baseSelection     ui.Selector
+
+	overrodeLabel bool
+	baseLabel     func(int) string
+
+	overrodeHeader bool
+	baseHeader     func(int) bool
+}
+
+func (ov *virtualListStateOverrides) restore() {
+	s := ov.target
+	if s == nil {
+		return
+	}
+	if ov.overrodeKey {
+		s.Key = ov.baseKey
+	}
+	if ov.overrodeSelected {
+		s.Selected = ov.baseSelected
+	}
+	if ov.overrodeSelection {
+		s.Selection = ov.baseSelection
+	}
+	if ov.overrodeLabel {
+		s.Label = ov.baseLabel
+	}
+	if ov.overrodeHeader {
+		s.Header = ov.baseHeader
+	}
+	*ov = virtualListStateOverrides{}
+}
 
 type vlRowAnimState struct {
 	ripple       rippleState
@@ -222,26 +265,79 @@ func buildVirtualListRoot(c *ui.Context, th *Theme, o VirtualListOptions) ui.Ele
 }
 
 func resolveVirtualListState(root ui.Element, o VirtualListOptions) *ui.ListState {
+	ov := ui.Local(root, virtualListOverrideKey{}, func() virtualListStateOverrides { return virtualListStateOverrides{} })
 	if o.State != nil {
 		s := o.State
+		if ov.target != nil && ov.target != s {
+			ov.restore()
+		}
+		ov.target = s
+
 		if o.ItemKey != nil {
+			if !ov.overrodeKey {
+				ov.baseKey = s.Key
+				ov.overrodeKey = true
+			}
 			s.Key = o.ItemKey
+		} else if ov.overrodeKey {
+			s.Key = ov.baseKey
+			ov.baseKey = nil
+			ov.overrodeKey = false
 		}
+
 		if o.Selected != nil {
+			if !ov.overrodeSelected {
+				ov.baseSelected = s.Selected
+				ov.overrodeSelected = true
+			}
 			s.Selected = o.Selected
+		} else if ov.overrodeSelected {
+			s.Selected = ov.baseSelected
+			ov.baseSelected = nil
+			ov.overrodeSelected = false
 		}
+
 		if o.Selection != nil {
+			if !ov.overrodeSelection {
+				ov.baseSelection = s.Selection
+				ov.overrodeSelection = true
+			}
 			s.Selection = o.Selection
+		} else if ov.overrodeSelection {
+			s.Selection = ov.baseSelection
+			ov.baseSelection = nil
+			ov.overrodeSelection = false
 		}
+
 		if o.RowLabel != nil {
+			if !ov.overrodeLabel {
+				ov.baseLabel = s.Label
+				ov.overrodeLabel = true
+			}
 			s.Label = o.RowLabel
+		} else if ov.overrodeLabel {
+			s.Label = ov.baseLabel
+			ov.baseLabel = nil
+			ov.overrodeLabel = false
 		}
+
 		if o.IsHeader != nil {
+			if !ov.overrodeHeader {
+				ov.baseHeader = s.Header
+				ov.overrodeHeader = true
+			}
 			s.Header = o.IsHeader
+		} else if ov.overrodeHeader {
+			s.Header = ov.baseHeader
+			ov.baseHeader = nil
+			ov.overrodeHeader = false
 		}
 		return s
 	}
 
+	if ov.target != nil {
+		ov.restore()
+	}
 	s := ui.Local(root, virtualListStateKey{}, func() ui.ListState { return ui.ListState{} })
 	lead := ui.Local(root, virtualListLeadKey{}, func() int { return -1 })
 	s.Key = o.ItemKey
