@@ -54,11 +54,13 @@ type MetricCardOptions struct {
 
 	// Variant selects CardElevated (default), CardFilled, or CardOutlined.
 	Variant md3e.CardVariant
-	// ShapeScale selects the MD3E corner token (default tokens.ShapeLarge).
+	// ShapeScale selects the MD3E corner token (default tokens.ShapeLargeIncreased
+	// for Elevated/Filled and tokens.ShapeLarge for Outlined).
 	ShapeScale tokens.ShapeScale
 	// Radius overrides the corner radius in DIP when positive and finite.
 	Radius float32
-	// Hairline draws a subtle 1 DIP tonal highlight border. Nil defaults to true.
+	// Hairline draws a subtle 1 DIP tonal highlight border (1.5 DIP in
+	// HighContrast). Nil defaults to false.
 	Hairline *bool
 	// AccentGlow paints a delicate radial ambient wash in the top corner using
 	// the card's accent color. Nil defaults to true when Icon or Sparkline is set.
@@ -92,9 +94,12 @@ func MetricCard(c *ui.Context, opts MetricCardOptions) ui.Element {
 	cs := th.Colors
 	reduce := th.ReduceMotion || c.Preferences().ReduceMotion
 	interactive := opts.Clickable || opts.OnClick != nil
-	hairline := boolDefault(opts.Hairline, true)
+	hairline := boolDefault(opts.Hairline, false)
 
-	baseScale := tokens.ShapeLarge
+	baseScale := tokens.ShapeLargeIncreased
+	if opts.Variant == md3e.CardOutlined {
+		baseScale = tokens.ShapeLarge
+	}
 	if opts.ShapeScale > tokens.ShapeNone && opts.ShapeScale <= tokens.ShapeFull {
 		baseScale = opts.ShapeScale
 	}
@@ -127,7 +132,7 @@ func MetricCard(c *ui.Context, opts MetricCardOptions) ui.Element {
 	el.Disabled(opts.Disabled)
 	disabled := opts.Disabled || el.IsDisabled()
 
-	bg, border, elev := metricCardPalette(th, opts.Variant, hairline, disabled)
+	bg, border, borderW, elev := metricCardPalette(th, opts.Variant, hairline, disabled)
 	radius := restRadius
 	if interactive {
 		target := restRadius
@@ -146,8 +151,8 @@ func MetricCard(c *ui.Context, opts MetricCardOptions) ui.Element {
 	if bg.A > 0 {
 		el.Background(bg)
 	}
-	if border.A > 0 {
-		el.Border(1, border)
+	if borderW > 0 && border.A > 0 {
+		el.Border(borderW, border)
 	}
 	if elev > tokens.Level0 {
 		md3e.ApplyElevationShadows(th, el, elev)
@@ -196,8 +201,8 @@ func MetricCard(c *ui.Context, opts MetricCardOptions) ui.Element {
 
 	if interactive {
 		borderInset := float32(0)
-		if border.A > 0 {
-			borderInset = 1
+		if borderW > 0 && border.A > 0 {
+			borderInset = borderW
 		}
 		md3e.AttachRipple(c, el, md3e.StateLayerOptions{
 			Color:       ink,
@@ -357,10 +362,13 @@ func MetricCard(c *ui.Context, opts MetricCardOptions) ui.Element {
 		// Edge-to-edge bottom-flush sparkline clipped neatly to the card's inner bottom corners.
 		if hasFlushSparkline {
 			spOpts := *opts.Sparkline
+			if spOpts.FillTopAlpha <= 0 && !spOpts.NoFill {
+				spOpts.FillTopAlpha = 0.10
+			}
 			if spOpts.BottomRadius <= 0 && spOpts.Radii == [4]float32{} {
 				innerRad := radius
-				if border.A > 0 {
-					innerRad = max(radius-1, 0)
+				if borderW > 0 && border.A > 0 {
+					innerRad = max(radius-borderW, 0)
 				}
 				spOpts.BottomRadius = innerRad
 			}
@@ -383,37 +391,50 @@ func MetricCard(c *ui.Context, opts MetricCardOptions) ui.Element {
 	return el
 }
 
-func metricCardPalette(th *md3e.Theme, v md3e.CardVariant, hairline, disabled bool) (bg, border ui.Color, elev tokens.ElevationLevel) {
+func metricCardPalette(th *md3e.Theme, v md3e.CardVariant, hairline, disabled bool) (bg, border ui.Color, borderW float32, elev tokens.ElevationLevel) {
 	cs := th.Colors
 	if disabled {
-		return cs.OnSurface.Alpha(float32(tokens.DisabledContainerOpacity)), ui.Transparent, tokens.Level0
+		if v == md3e.CardOutlined {
+			return cs.Surface, cs.OnSurface.Alpha(float32(tokens.DisabledContainerOpacity)), 1, tokens.Level0
+		}
+		return cs.OnSurface.Alpha(float32(tokens.DisabledContainerOpacity)), ui.Transparent, 0, tokens.Level0
+	}
+	hc := th.Contrast >= tokens.ContrastHigh
+	bw := float32(1)
+	if hc {
+		bw = 1.5
 	}
 	switch v {
-	case md3e.CardFilled:
-		bg = cs.SurfaceContainerHighest
-		if bg.A == 0 {
-			bg = md3e.SurfaceColorForElevation(th, tokens.Level2)
-		}
 	case md3e.CardOutlined:
 		bg = cs.Surface
 		border = cs.OutlineVariant
-		if th.Contrast >= tokens.ContrastHigh && cs.Outline.A > 0 {
+		if hc && cs.Outline.A > 0 {
 			border = cs.Outline
 		}
-	default:
-		bg = md3e.SurfaceColorForElevation(th, tokens.Level1)
-		elev = tokens.Level1
+		borderW = bw
+	default: // CardElevated & CardFilled share borderless tonal Low / E0
+		bg = cs.SurfaceContainerLow
+		if bg.A == 0 {
+			bg = md3e.SurfaceColorForElevation(th, tokens.Level1)
+		}
 	}
 	if hairline && border.A == 0 {
-		if th.Contrast >= tokens.ContrastHigh && cs.Outline.A > 0 {
+		borderW = bw
+		if hc && cs.Outline.A > 0 {
 			border = cs.Outline
 		} else if th.Dark {
 			border = cs.OutlineVariant.Mix(cs.OnSurface, 0.15).Alpha(0.42)
 		} else {
 			border = cs.OutlineVariant.Alpha(0.45)
 		}
+	} else if hc && border.A == 0 {
+		borderW = 1.5
+		border = cs.Outline
+		if border.A == 0 {
+			border = cs.OnSurface
+		}
 	}
-	return bg, border, elev
+	return bg, border, borderW, elev
 }
 
 func metricCardAccentColor(th *md3e.Theme, opts MetricCardOptions) ui.Color {

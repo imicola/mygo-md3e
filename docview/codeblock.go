@@ -46,7 +46,8 @@ type CodeBlockOptions struct {
 	ShapeScale tokens.ShapeScale
 	// Radius overrides the corner radius in DIP when positive and finite.
 	Radius float32
-	// Hairline draws a subtle 1 DIP tonal highlight border (nil defaults to true).
+	// Hairline draws a subtle 1 DIP tonal highlight border (1.5 DIP in
+	// HighContrast). Nil defaults to false.
 	Hairline *bool
 	// CodeColors overrides the syntax highlighting palette (defaults to
 	// codeview.ThemeFromMD3E(th)).
@@ -93,7 +94,7 @@ type codeCardOptions struct {
 	label         string
 }
 
-// CodeBlock builds an MD3E SurfaceContainerHigh code card with a language badge,
+// CodeBlock builds an MD3E SurfaceContainer code card with a language badge,
 // optional filename title, syntax highlighting via ui/editor's language
 // tokenizers, optional TabularNums line numbers, and a one-click copy button
 // with Check feedback and optional Snackbar notification.
@@ -132,7 +133,7 @@ func CodeBlock(c *ui.Context, code string, opts ...CodeBlockOptions) ui.Element 
 		onCopy:        o.OnCopy,
 		shapeScale:    o.ShapeScale,
 		radius:        o.Radius,
-		hairline:      boolDefault(o.Hairline, true),
+		hairline:      boolDefault(o.Hairline, false),
 		label:         o.Label,
 	}
 
@@ -244,16 +245,17 @@ func buildCodeBlockCard(c *ui.Context, th *md3e.Theme, o codeCardOptions, bodyFn
 	cs := th.Colors
 	m := docCodeMetricsFor(th)
 
-	bg := pickColor(cs.SurfaceContainerHigh, md3e.SurfaceColorForElevation(th, tokens.Level3))
-	headerBg := pickColor(cs.SurfaceContainerHighest, bg)
+	bg := pickColor(cs.SurfaceContainer, md3e.SurfaceColorForElevation(th, tokens.Level2))
+	headerBg := pickColor(cs.SurfaceContainerHigh, bg)
 	if !th.Dark && cs.OnSurface.A > 0 {
 		headerBg = bg.MixOklab(cs.OnSurface, 0.045)
 	} else if headerBg == bg && cs.OnSurface.A > 0 {
-		headerBg = bg.MixOklab(cs.OnSurface, 0.035)
+		headerBg = bg.MixOklab(cs.OnSurface, 0.04)
 	}
 	ink := pickColor(cs.OnSurface, th.ContentColorFor(bg))
 	muted := pickColor(cs.OnSurfaceVariant, ink.Alpha(0.72))
 	hairlineCol := resolveHairlineColor(th)
+	highContrast := th.Contrast >= tokens.ContrastHigh
 	radius := resolveCodeRadius(th, o.shapeScale, o.radius)
 
 	label := o.label
@@ -280,7 +282,16 @@ func buildCodeBlockCard(c *ui.Context, th *md3e.Theme, o codeCardOptions, bodyFn
 		Role(ui.RoleGroup).
 		Label(label)
 	if o.hairline && hairlineCol.A > 0 {
-		card.Border(1, hairlineCol)
+		bw := float32(1)
+		if highContrast {
+			bw = 1.5
+		}
+		card.Border(bw, hairlineCol)
+	} else if highContrast {
+		hcCol := pickColor(cs.Outline, cs.OnSurface)
+		if hcCol.A > 0 {
+			card.Border(1.5, hcCol)
+		}
 	}
 
 	showHeader := o.language != "" || o.title != "" || o.showCopy
@@ -293,9 +304,18 @@ func buildCodeBlockCard(c *ui.Context, th *md3e.Theme, o codeCardOptions, bodyFn
 				PaddingStart(m.headerPadX).
 				PaddingEnd(m.headerPadX).
 				Gap(8).
-				Background(headerBg).
-				BorderWidth(0, 0, 1, 0).
-				BorderColor(hairlineCol)
+				Background(headerBg)
+			if o.hairline && hairlineCol.A > 0 {
+				bw := float32(1)
+				if highContrast {
+					bw = 1.5
+				}
+				head.BorderWidth(0, 0, bw, 0).BorderColor(hairlineCol)
+			} else if highContrast {
+				if hcCol := pickColor(cs.Outline, cs.OnSurface); hcCol.A > 0 {
+					head.BorderWidth(0, 0, 1.5, 0).BorderColor(hcCol)
+				}
+			}
 			head.Children(func() {
 				if o.language != "" {
 					badgeBg := pickColor(cs.SecondaryContainer, cs.SurfaceContainerHigh, bg)

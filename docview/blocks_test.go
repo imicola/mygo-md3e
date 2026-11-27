@@ -219,3 +219,62 @@ func TestCalloutVariantsThemeAndRTL(t *testing.T) {
 		t.Fatalf("out-of-range CalloutKind.String() = %q, want Note", got)
 	}
 }
+
+func TestCodeBlockBorderlessDefaultHairlineOptInAndHighContrast(t *testing.T) {
+	darkStd := md3e.ThemeFromSeed(md3e.DefaultSeedColor, md3e.ThemeOptions{Dark: true, ReduceMotion: true})
+	darkHC := md3e.ThemeFromSeed(md3e.DefaultSeedColor, md3e.ThemeOptions{
+		Dark:         true,
+		Contrast:     tokens.ContrastHigh,
+		ReduceMotion: true,
+	})
+
+	showCopy := false
+	renderBottomEdge := func(th *md3e.Theme, hairline *bool) (r, g, b uint8) {
+		tt := ui.NewTester(func(c *ui.Context) {
+			md3e.ThemeScope(c, th, func() {
+				ui.Box(c).Size(320, 140).Background(th.Colors.Surface).Padding(20).Children(func() {
+					docview.CodeBlock(c.Key("cb"), "println(1)", docview.CodeBlockOptions{
+						ShowCopy: &showCopy,
+						Hairline: hairline,
+					})
+				})
+			})
+		}, 320, 140)
+		tt.Frame()
+		grp, ok := tt.AccessByRole(ui.RoleGroup, "Code")
+		if !ok {
+			t.Fatal("CodeBlock missing RoleGroup")
+		}
+		// Top center edge of borderless header-free CodeBlock.
+		px := tt.Image().RGBAAt(int(grp.Bounds.X+grp.Bounds.W/2), int(grp.Bounds.Y))
+		return px.R, px.G, px.B
+	}
+
+	absDiff := func(a, b uint8) int {
+		d := int(a) - int(b)
+		if d < 0 {
+			return -d
+		}
+		return d
+	}
+
+	wantBg := darkStd.Colors.SurfaceContainer
+	r0, g0, b0 := renderBottomEdge(darkStd, nil)
+	if absDiff(r0, wantBg.R) > 4 || absDiff(g0, wantBg.G) > 4 || absDiff(b0, wantBg.B) > 4 {
+		t.Fatalf("default CodeBlock (Hairline==nil) drew unexpected border or wrong bg: top=(%d,%d,%d) want SurfaceContainer=(%d,%d,%d)",
+			r0, g0, b0, wantBg.R, wantBg.G, wantBg.B)
+	}
+
+	wantHair := true
+	r1, g1, b1 := renderBottomEdge(darkStd, &wantHair)
+	if absDiff(r1, wantBg.R) <= 4 && absDiff(g1, wantBg.G) <= 4 && absDiff(b1, wantBg.B) <= 4 {
+		t.Fatalf("CodeBlock with explicit Hairline=true did not paint border: top=(%d,%d,%d)", r1, g1, b1)
+	}
+
+	hcOut := darkHC.Colors.Outline
+	r2, g2, b2 := renderBottomEdge(darkHC, nil)
+	if absDiff(r2, hcOut.R) > 35 || absDiff(g2, hcOut.G) > 35 || absDiff(b2, hcOut.B) > 35 {
+		t.Fatalf("HighContrast CodeBlock did not paint 1.5 DIP Outline border: top=(%d,%d,%d) want~=(%d,%d,%d)",
+			r2, g2, b2, hcOut.R, hcOut.G, hcOut.B)
+	}
+}

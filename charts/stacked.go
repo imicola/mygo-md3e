@@ -387,13 +387,21 @@ func renderCompactSegmentTip(c *ui.Context, th *md3e.Theme, name, val string, sw
 	if bg.A == 0 {
 		bg = md3e.SurfaceColorForElevation(th, tokens.Level3)
 	}
-	border := cs.OutlineVariant
-	if th.Contrast >= tokens.ContrastHigh && cs.Outline.A > 0 {
-		border = cs.Outline
-	}
+	tipRadius := th.Shapes.Radius(tokens.ShapeSmall)
 	box := ui.Row(c).AlignItems(ui.Center).Gap(6).
-		Padding(5, 10).Radius(th.Shapes.Radius(tokens.ShapeSmall)).
-		Background(bg).Border(1, border).PassThrough()
+		Padding(5, 10).Radius(tipRadius).
+		Background(bg).PassThrough()
+	if th.Contrast >= tokens.ContrastHigh {
+		border := cs.Outline
+		if border.A == 0 {
+			border = cs.OnSurface
+		}
+		box.Border(1.5, border)
+	} else if th.Dark {
+		box.Draw(func(p *ui.Painter, r ui.Rect) {
+			md3e.PaintTopSpecular(p, r, tipRadius, th, tokens.Level2)
+		})
+	}
 	md3e.ApplyElevationShadows(th, box, tokens.Level2)
 	box.Children(func() {
 		ui.Box(c).Size(8, 8).Radius(4).Background(swatch).Shrink(0)

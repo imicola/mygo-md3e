@@ -26,8 +26,9 @@ type chartLegendItem struct {
 }
 
 // renderChartTooltipCard builds an instant, pointer-through MD3E RichTooltip-
-// styled surface panel (SurfaceContainerHigh + Level2 shadows + subtle
-// OutlineVariant hairline + ShapeMedium radius + TabularNums alignment).
+// styled surface panel (borderless SurfaceContainerHigh + Level3 shadows +
+// dark-mode 2 DIP top specular + ShapeMedium radius + TabularNums alignment,
+// with a 1.5 DIP Outline boundary in HighContrast).
 func renderChartTooltipCard(c *ui.Context, th *md3e.Theme, title string, rows []TooltipRow, footerLabel, footerValue string) {
 	if title == "" && len(rows) == 0 && footerValue == "" {
 		return
@@ -37,24 +38,24 @@ func renderChartTooltipCard(c *ui.Context, th *md3e.Theme, title string, rows []
 	if bg.A == 0 {
 		bg = md3e.SurfaceColorForElevation(th, tokens.Level3)
 	}
-	border := cs.OutlineVariant
-	if th.Contrast >= tokens.ContrastHigh && cs.Outline.A > 0 {
-		border = cs.Outline
-	} else if th.Dark {
-		border = cs.OutlineVariant.Mix(cs.OnSurface, 0.14).Alpha(0.55)
-	} else {
-		border = cs.OutlineVariant.Alpha(0.60)
-	}
-
+	panelRadius := th.Shapes.Radius(tokens.ShapeMedium)
 	panel := ui.Column(c).MinWidth(128).MaxWidth(240).
 		Padding(10, 12).Gap(6).
-		Radius(th.Shapes.Radius(tokens.ShapeMedium)).
-		Background(bg).Border(1, border).
+		Radius(panelRadius).
+		Background(bg).
 		TextColor(cs.OnSurface).PassThrough()
-	md3e.ApplyElevationShadows(th, panel, tokens.Level3)
-	if th.Dark {
-		panel.InsetShadow(0, 1, 0, 0, cs.OnSurface.Alpha(0.08))
+	if th.Contrast >= tokens.ContrastHigh {
+		border := cs.Outline
+		if border.A == 0 {
+			border = cs.OnSurface
+		}
+		panel.Border(1.5, border)
+	} else if th.Dark {
+		panel.Draw(func(p *ui.Painter, r ui.Rect) {
+			md3e.PaintTopSpecular(p, r, panelRadius, th, tokens.Level3)
+		})
 	}
+	md3e.ApplyElevationShadows(th, panel, tokens.Level3)
 
 	panel.Children(func() {
 		if title != "" {

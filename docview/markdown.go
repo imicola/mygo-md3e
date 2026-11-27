@@ -155,7 +155,11 @@ func MarkdownThemeFor(th *md3e.Theme, opts ...MarkdownThemeOptions) *markdown.Th
 	if th.Dark {
 		inlineCodeBg = textCol.Alpha(0.11)
 	}
-	codeBlockBg := pickColor(cs.SurfaceContainerHigh, cs.SurfaceContainerHighest, inlineCodeBg)
+	codeBlockBg := pickColor(cs.SurfaceContainer, md3e.SurfaceColorForElevation(th, tokens.Level2), inlineCodeBg)
+	codeBlockBorder := ui.Transparent
+	if th.Contrast >= tokens.ContrastHigh {
+		codeBlockBorder = pickColor(cs.Outline, hairlineCol, cs.OnSurface)
+	}
 	tableHeader := pickColor(cs.SurfaceContainerHigh, cs.SurfaceContainer, textCol.Alpha(0.05))
 	tableStripe := pickColor(cs.SurfaceContainerLow, cs.Surface)
 	markCol := pickColor(cs.TertiaryContainer, cs.SecondaryContainer, ui.RGBA(250, 204, 21, 0.32))
@@ -230,7 +234,7 @@ func MarkdownThemeFor(th *md3e.Theme, opts ...MarkdownThemeOptions) *markdown.Th
 		Alerts:              [5]ui.Color{linkCol, pickColor(th.Success, cs.Tertiary, linkCol), pickColor(cs.Tertiary, linkCol), pickColor(th.Warning, cs.Secondary, linkCol), pickColor(cs.Error, linkCol)},
 		Rule:                ruleCol,
 		CodeBlockBackground: codeBlockBg,
-		CodeBlockBorder:     hairlineCol,
+		CodeBlockBorder:     codeBlockBorder,
 		CodeBlockRadius:     resolveCodeRadius(th, tokens.ShapeMedium, 0),
 		CodeBlockPadding:    0.9,
 		CodeColors:          codeview.ThemeFromMD3E(th),
@@ -445,7 +449,7 @@ func configureMarkdownOptions(
 						o.OnCopyCode(code, b.Language)
 					}
 				},
-				hairline: true,
+				hairline: false,
 			}, func() {
 				b.Body(c)
 			})

@@ -239,3 +239,59 @@ func TestMetricCardSparklineProgressInteractionAndDensity(t *testing.T) {
 		t.Fatal("MetricCard with LinearWavyProgress under ReduceMotion must not request frames")
 	}
 }
+
+func TestMetricCardBorderlessDefaultHairlineOptInAndHighContrast(t *testing.T) {
+	darkStd := md3e.ThemeFromSeed(md3e.DefaultSeedColor, md3e.ThemeOptions{Dark: true, ReduceMotion: true})
+	darkHC := md3e.ThemeFromSeed(md3e.DefaultSeedColor, md3e.ThemeOptions{
+		Dark:         true,
+		Contrast:     tokens.ContrastHigh,
+		ReduceMotion: true,
+	})
+
+	renderTopEdge := func(th *md3e.Theme, hairline *bool) (r, g, b uint8) {
+		tt := ui.NewTester(func(c *ui.Context) {
+			md3e.ThemeScope(c, th, func() {
+				ui.Box(c).Size(240, 140).Background(th.Colors.Surface).Padding(20).Children(func() {
+					MetricCard(c.Key("mc"), MetricCardOptions{
+						Title:    "Latency",
+						Value:    "14",
+						Unit:     "ms",
+						Hairline: hairline,
+					})
+				})
+			})
+		}, 240, 140)
+		tt.Frame()
+		// Top center edge of MetricCard (x=120, y=20).
+		px := tt.Image().RGBAAt(120, 20)
+		return px.R, px.G, px.B
+	}
+
+	absDiff := func(a, b uint8) int {
+		d := int(a) - int(b)
+		if d < 0 {
+			return -d
+		}
+		return d
+	}
+
+	low := darkStd.Colors.SurfaceContainerLow
+	r0, g0, b0 := renderTopEdge(darkStd, nil)
+	if absDiff(r0, low.R) > 4 || absDiff(g0, low.G) > 4 || absDiff(b0, low.B) > 4 {
+		t.Fatalf("default MetricCard (Hairline==nil) drew unexpected border: top=(%d,%d,%d) want SurfaceContainerLow=(%d,%d,%d)",
+			r0, g0, b0, low.R, low.G, low.B)
+	}
+
+	wantHair := true
+	r1, g1, b1 := renderTopEdge(darkStd, &wantHair)
+	if absDiff(r1, low.R) <= 4 && absDiff(g1, low.G) <= 4 && absDiff(b1, low.B) <= 4 {
+		t.Fatalf("MetricCard with explicit Hairline=true did not draw border: top=(%d,%d,%d)", r1, g1, b1)
+	}
+
+	hcOut := darkHC.Colors.Outline
+	r2, g2, b2 := renderTopEdge(darkHC, nil)
+	if absDiff(r2, hcOut.R) > 35 || absDiff(g2, hcOut.G) > 35 || absDiff(b2, hcOut.B) > 35 {
+		t.Fatalf("HighContrast MetricCard did not draw 1.5 DIP Outline border: top=(%d,%d,%d) want~=(%d,%d,%d)",
+			r2, g2, b2, hcOut.R, hcOut.G, hcOut.B)
+	}
+}
