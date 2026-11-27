@@ -197,26 +197,31 @@ func modalNavigationDrawer(c *ui.Context, th *Theme, items []NavigationDrawerIte
 		back.IgnoreInput(exiting).AccessHidden(exiting)
 
 		back.Children(func() {
+			panelBg := SurfaceColorForElevation(th, tokens.Level3)
 			panel := ui.Column(c).
 				Width(width).
 				FillHeight().
 				DimDisabled(false).
-				Background(SurfaceColorForElevation(th, tokens.Level1)).
+				Background(panelBg).
 				Role(ui.RoleDialog).
 				Label(label)
 			ApplyElevationShadows(th, panel, tokens.Level2)
 			edge := float32(th.Shapes.Radius(tokens.ShapeLarge))
+			var panelRadii [4]float32
 			if rtl {
+				panelRadii = [4]float32{edge, 0, 0, edge}
 				panel.Radius(edge, 0, 0, edge)
-				if hl := resolveHairlineColor(th, ui.Color{}); hl.A > 0 {
-					panel.Border(1, hl).BorderWidth(0, 0, 0, 1)
+				if hcW, hcCol := highContrastBorder(th); hcW > 0 {
+					panel.Border(hcW, hcCol).BorderWidth(0, 0, 0, hcW)
 				}
 			} else {
+				panelRadii = [4]float32{0, edge, edge, 0}
 				panel.Radius(0, edge, edge, 0)
-				if hl := resolveHairlineColor(th, ui.Color{}); hl.A > 0 {
-					panel.Border(1, hl).BorderWidth(0, 1, 0, 0)
+				if hcW, hcCol := highContrastBorder(th); hcW > 0 {
+					panel.Border(hcW, hcCol).BorderWidth(0, hcW, 0, 0)
 				}
 			}
+			attachTopSpecular(panel, th, tokens.Level2, panelRadii)
 			panel.Disabled(o.Disabled)
 
 			drag.dragging = false
@@ -233,7 +238,7 @@ func modalNavigationDrawer(c *ui.Context, th *Theme, items []NavigationDrawerIte
 
 			withExitingOverlay(c, exiting, func() {
 				panel.Children(func() {
-					navDrawerContent(c, th, items, o, drag, exiting)
+					navDrawerContent(c, th, panelBg, items, o, drag, exiting)
 				})
 			})
 
@@ -285,11 +290,12 @@ func modalNavigationDrawer(c *ui.Context, th *Theme, items []NavigationDrawerIte
 
 // inlineNavigationDrawer builds the dismissible drawer in the layout.
 func inlineNavigationDrawer(c *ui.Context, th *Theme, items []NavigationDrawerItem, o NavigationDrawerOptions, width float32, label string) ui.Element {
+	panelBg := SurfaceColorForElevation(th, tokens.Level1)
 	root := ui.Column(c).
 		DimDisabled(false).
 		FillHeight().
 		Clip().
-		Background(SurfaceColorForElevation(th, tokens.Level1)).
+		Background(panelBg).
 		Role(ui.RoleRegion).
 		Label(label)
 	open := o.Open
@@ -312,11 +318,11 @@ func inlineNavigationDrawer(c *ui.Context, th *Theme, items []NavigationDrawerIt
 	}
 	root.Width(openWidth)
 	if openWidth > 1 {
-		if hl := resolveHairlineColor(th, ui.Color{}); hl.A > 0 {
+		if hcW, hcCol := highContrastBorder(th); hcW > 0 {
 			if c.Direction() == ui.RightToLeft {
-				root.Border(1, hl).BorderWidth(0, 0, 0, 1)
+				root.Border(hcW, hcCol).BorderWidth(0, 0, 0, hcW)
 			} else {
-				root.Border(1, hl).BorderWidth(0, 1, 0, 0)
+				root.Border(hcW, hcCol).BorderWidth(0, hcW, 0, 0)
 			}
 		}
 	}
@@ -330,7 +336,7 @@ func inlineNavigationDrawer(c *ui.Context, th *Theme, items []NavigationDrawerIt
 	if *open || openWidth > 0.5 {
 		withExitingOverlay(c, exiting, func() {
 			root.Children(func() {
-				navDrawerContent(c, th, items, o, nil, exiting)
+				navDrawerContent(c, th, panelBg, items, o, nil, exiting)
 			})
 		})
 	}
@@ -339,7 +345,7 @@ func inlineNavigationDrawer(c *ui.Context, th *Theme, items []NavigationDrawerIt
 
 // navDrawerContent builds the drawer's scrollable section titles, dividers and
 // destinations into the current parent.
-func navDrawerContent(c *ui.Context, th *Theme, items []NavigationDrawerItem, o NavigationDrawerOptions, drag *navDrawerDragState, exiting bool) {
+func navDrawerContent(c *ui.Context, th *Theme, panelBg ui.Color, items []NavigationDrawerItem, o NavigationDrawerOptions, drag *navDrawerDragState, exiting bool) {
 	cs := th.Colors
 	scroll := ui.Scroll(c).Grow(1).FillWidth().Scrollbars(false)
 	scroll.Children(func() {
@@ -357,14 +363,14 @@ func navDrawerContent(c *ui.Context, th *Theme, items []NavigationDrawerItem, o 
 					label.TextColor(cs.OnSurfaceVariant).Padding(16, 16, 6, 16)
 					lastSection = item.Section
 				}
-				navDrawerDestination(c, th, item, i, o, drag, exiting)
+				navDrawerDestination(c, th, panelBg, item, i, o, drag, exiting)
 			}
 		})
 	})
 }
 
 // navDrawerDestination builds one destination of a drawer.
-func navDrawerDestination(c *ui.Context, th *Theme, item *NavigationDrawerItem, i int, o NavigationDrawerOptions, drag *navDrawerDragState, exiting bool) {
+func navDrawerDestination(c *ui.Context, th *Theme, panelBg ui.Color, item *NavigationDrawerItem, i int, o NavigationDrawerOptions, drag *navDrawerDragState, exiting bool) {
 	cs := th.Colors
 	c.Key(navDrawerItemKey{i: i})
 	el := ui.ButtonBase(c).
@@ -398,7 +404,7 @@ func navDrawerDestination(c *ui.Context, th *Theme, item *NavigationDrawerItem, 
 		}
 	}
 
-	base := SurfaceColorForElevation(th, tokens.Level1)
+	base := panelBg
 	selectedBg := cs.SecondaryContainer
 	if selectedBg.A == 0 {
 		selectedBg = cs.PrimaryContainer

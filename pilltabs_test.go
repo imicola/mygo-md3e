@@ -74,11 +74,11 @@ func TestPillTabsClickKeyboardDisabledAndBadges(t *testing.T) {
 		t.Fatal("PillTabs sliding capsule did not settle")
 	}
 
-	// Verify active capsule painted PrimaryContainer inside Alerts bounds.
+	// Verify active capsule painted Primary inside Alerts bounds.
 	img := tt.Image()
 	px := img.RGBAAt(int(alertsInfo.Bounds.X)+6, int(alertsInfo.Bounds.Y+alertsInfo.Bounds.H/2))
-	if !colorMatches(px, th.Colors.PrimaryContainer, 20) {
-		t.Fatalf("Alerts active capsule color = %+v, want PrimaryContainer %+v", px, rgbOf(th.Colors.PrimaryContainer))
+	if !colorMatches(px, th.Colors.Primary, 20) {
+		t.Fatalf("Alerts active capsule color = %+v, want Primary %+v", px, rgbOf(th.Colors.Primary))
 	}
 
 	// Keyboard navigation: Right moves 2 -> 3, Home -> 0, Right skips disabled 1 -> 2, End -> 3.

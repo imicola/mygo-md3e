@@ -89,6 +89,14 @@ func SwitchCard(c *ui.Context, title string, on *bool, opts ...SwitchCardOptions
 	row.Disabled(o.Disabled)
 
 	bg, border, elevation := tileContainerPalette(th, o.Variant, o.HasVariant, o.Hairline, disabled)
+	borderW := float32(0)
+	if !disabled {
+		if border.A > 0 {
+			borderW = outlineBorderWidth(th)
+		} else {
+			borderW, border = highContrastBorder(th)
+		}
+	}
 	onT := clampF32(animateEffect(c, row, th, animChan0, boolFloat(*on && !disabled), motion.FastEffects), 0, 1)
 	if onT > 0.001 && bg.A > 0 && cs.SecondaryContainer.A > 0 {
 		bg = bg.MixOklab(cs.SecondaryContainer, 0.28*onT)
@@ -104,8 +112,8 @@ func SwitchCard(c *ui.Context, title string, on *bool, opts ...SwitchCardOptions
 	if bg.A > 0 {
 		row.Background(bg)
 	}
-	if border.A > 0 {
-		row.Border(1, border)
+	if borderW > 0 && border.A > 0 {
+		row.Border(borderW, border)
 	}
 	if elevation > tokens.Level0 && !disabled {
 		ApplyElevationShadows(th, row, elevation)
@@ -123,8 +131,8 @@ func SwitchCard(c *ui.Context, title string, on *bool, opts ...SwitchCardOptions
 	row.TextColor(titleInk)
 
 	borderInset := float32(0)
-	if border.A > 0 {
-		borderInset = 1
+	if borderW > 0 && border.A > 0 {
+		borderInset = borderW
 	}
 	attachRippleWithContext(c, th, row, StateLayerOptions{
 		Color:       titleInk,
@@ -279,11 +287,19 @@ func ActionTile(c *ui.Context, title string, opts ...ActionTileOptions) ui.Eleme
 	el.Radius(curRadius)
 
 	bg, border, elevation := tileContainerPalette(th, o.Variant, o.HasVariant, o.Hairline, disabled)
+	borderW := float32(0)
+	if !disabled {
+		if border.A > 0 {
+			borderW = outlineBorderWidth(th)
+		} else {
+			borderW, border = highContrastBorder(th)
+		}
+	}
 	if bg.A > 0 {
 		el.Background(bg)
 	}
-	if border.A > 0 {
-		el.Border(1, border)
+	if borderW > 0 && border.A > 0 {
+		el.Border(borderW, border)
 	}
 	if elevation > tokens.Level0 && !disabled {
 		ApplyElevationShadows(th, el, elevation)
@@ -316,8 +332,8 @@ func ActionTile(c *ui.Context, title string, opts ...ActionTileOptions) ui.Eleme
 	}
 
 	borderInset := float32(0)
-	if border.A > 0 {
-		borderInset = 1
+	if borderW > 0 && border.A > 0 {
+		borderInset = borderW
 	}
 	attachRippleWithContext(c, th, el, StateLayerOptions{
 		Color:       titleInk,

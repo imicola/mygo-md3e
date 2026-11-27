@@ -3,6 +3,7 @@ package md3e
 import (
 	"github.com/egoist/mygo/ui"
 
+	"github.com/imicola/mygo-md3e/internal/mdicon"
 	"github.com/imicola/mygo-md3e/motion"
 	"github.com/imicola/mygo-md3e/tokens"
 )
@@ -12,17 +13,19 @@ import (
 type PillTabsTone int
 
 const (
-	// PillTabsToneAuto selects PrimaryContainer on SurfaceContainerHighest for
-	// PillTabs, and SurfaceContainerLowest on SurfaceContainer for SegmentedTabs.
+	// PillTabsToneAuto selects PillTabsTonePrimary for PillTabs, and
+	// PillTabsToneSurface for SegmentedTabs.
 	PillTabsToneAuto PillTabsTone = iota
-	// PillTabsTonePrimary paints a PrimaryContainer active capsule with
-	// OnPrimaryContainer text over a SurfaceContainerHighest trough.
+	// PillTabsTonePrimary paints a Primary active capsule with OnPrimary text
+	// over the unified tonal trough (Dark SurfaceContainerLowest / Light
+	// SurfaceContainer).
 	PillTabsTonePrimary
 	// PillTabsToneSecondary paints a SecondaryContainer active capsule with
-	// OnSecondaryContainer text over a SurfaceContainerHighest trough.
+	// OnSecondaryContainer text over the unified tonal trough.
 	PillTabsToneSecondary
-	// PillTabsToneSurface paints an elevated SurfaceContainerLowest active
-	// capsule with OnSurface text over a SurfaceContainer trough.
+	// PillTabsToneSurface paints a neutral tonal active capsule (Dark
+	// SurfaceContainerHigh / Light SurfaceContainerLowest) with OnSurface text
+	// over the unified tonal trough.
 	PillTabsToneSurface
 )
 
@@ -105,6 +108,7 @@ type pillTabsPalette struct {
 	troughBorder ui.Color
 	capsule      ui.Color
 	capsuleEdge  ui.Color
+	borderW      float32
 	activeInk    ui.Color
 	inactiveInk  ui.Color
 	badgeBg      ui.Color
@@ -125,30 +129,39 @@ func pillTabsPaletteOf(th *Theme, tone PillTabsTone, segmented, disabled bool) p
 		}
 	}
 
+	// Unified borderless trough across all tones: deeper in Dark mode so the
+	// active capsule always reads as lifted, soft Container in Light mode.
+	trough := cs.SurfaceContainer
+	if trough.A == 0 {
+		trough = SurfaceColorForElevation(th, tokens.Level2)
+	}
+	if th.Dark {
+		trough = cs.SurfaceContainerLowest
+		if trough.A == 0 {
+			trough = cs.SurfaceDim
+		}
+	}
+
 	var pal pillTabsPalette
 	switch resolved {
 	case PillTabsToneSecondary:
 		pal = pillTabsPalette{
-			trough:       cs.SurfaceContainerHighest,
+			trough:       trough,
 			capsule:      cs.SecondaryContainer,
 			activeInk:    cs.OnSecondaryContainer,
 			inactiveInk:  cs.OnSurfaceVariant,
-			badgeBg:      cs.SurfaceContainerHigh,
+			badgeBg:      trough,
 			badgeInk:     cs.OnSurfaceVariant,
-			activeBdgBg:  cs.Secondary,
-			activeBdgInk: cs.OnSecondary,
+			activeBdgBg:  cs.SecondaryContainer,
+			activeBdgInk: cs.OnSecondaryContainer,
 			dotCol:       cs.Error,
 		}
 	case PillTabsToneSurface:
-		trough := cs.SurfaceContainer
 		capsule := cs.SurfaceContainerLowest
+		if capsule.A == 0 {
+			capsule = cs.Surface
+		}
 		if th.Dark {
-			// In dark mode, keep the trough deeper than the active capsule so
-			// the selected segment reads as raised rather than sunken.
-			trough = cs.SurfaceContainerLowest
-			if trough.A == 0 {
-				trough = cs.SurfaceDim
-			}
 			capsule = cs.SurfaceContainerHigh
 			if capsule.A == 0 {
 				capsule = SurfaceColorForElevation(th, tokens.Level3)
@@ -156,28 +169,34 @@ func pillTabsPaletteOf(th *Theme, tone PillTabsTone, segmented, disabled bool) p
 		}
 		pal = pillTabsPalette{
 			trough:       trough,
-			troughBorder: resolveHairlineColor(th, ui.Color{}),
 			capsule:      capsule,
-			capsuleEdge:  resolveHairlineColor(th, ui.Color{}),
 			activeInk:    cs.OnSurface,
 			inactiveInk:  cs.OnSurfaceVariant,
-			badgeBg:      cs.SurfaceContainerHighest,
+			badgeBg:      trough,
 			badgeInk:     cs.OnSurfaceVariant,
-			activeBdgBg:  cs.PrimaryContainer,
-			activeBdgInk: cs.OnPrimaryContainer,
+			activeBdgBg:  capsule,
+			activeBdgInk: cs.OnSurface,
 			dotCol:       cs.Error,
 		}
 	default: // PillTabsTonePrimary
 		pal = pillTabsPalette{
-			trough:       cs.SurfaceContainerHighest,
-			capsule:      cs.PrimaryContainer,
-			activeInk:    cs.OnPrimaryContainer,
+			trough:       trough,
+			capsule:      cs.Primary,
+			activeInk:    cs.OnPrimary,
 			inactiveInk:  cs.OnSurfaceVariant,
-			badgeBg:      cs.SurfaceContainerHigh,
+			badgeBg:      trough,
 			badgeInk:     cs.OnSurfaceVariant,
 			activeBdgBg:  cs.Primary,
 			activeBdgInk: cs.OnPrimary,
 			dotCol:       cs.Error,
+		}
+	}
+
+	if !disabled {
+		if hcW, hcCol := highContrastBorder(th); hcW > 0 {
+			pal.borderW = hcW
+			pal.troughBorder = hcCol
+			pal.capsuleEdge = hcCol
 		}
 	}
 
@@ -188,7 +207,9 @@ func pillTabsPaletteOf(th *Theme, tone PillTabsTone, segmented, disabled bool) p
 		disContainer := cs.OnSurface.Alpha(float32(tokens.DisabledContainerOpacity))
 		disContent := cs.OnSurface.Alpha(float32(tokens.DisabledContentOpacity))
 		pal.capsule = disContainer
+		pal.troughBorder = ui.Transparent
 		pal.capsuleEdge = ui.Transparent
+		pal.borderW = 0
 		pal.activeInk = disContent
 		pal.inactiveInk = disContent
 		pal.badgeBg = disContainer
@@ -289,12 +310,14 @@ func buildPillTabs(c *ui.Context, items []TabItem, o PillTabsOptions, segmented 
 			Radius(outerRadius).
 			Background(pal.trough).
 			AlignItems(ui.Center)
-		if pal.troughBorder.A > 0 {
-			tabs.List.Border(1, pal.troughBorder)
+		if pal.troughBorder.A > 0 && pal.borderW > 0 {
+			tabs.List.Border(pal.borderW, pal.troughBorder)
 		}
 		if o.FullWidth && !o.Scrollable {
 			tabs.List.FillWidth()
 		}
+		lowGraphicContrast := !disabledAll && pal.capsule.A > 0 && pal.trough.A > 0 &&
+			tokens.ContrastRatio(pal.capsule, pal.trough) < 3.0
 		tabs.List.Children(func() {
 			for i := range items {
 				item := &items[i]
@@ -339,6 +362,8 @@ func buildPillTabs(c *ui.Context, items []TabItem, o PillTabsOptions, segmented 
 				tab.Children(func() {
 					if item.Icon != nil {
 						drawIconBox(c, item.Icon, m.iconSize, ink)
+					} else if lowGraphicContrast && on && !itemDisabled {
+						drawIconBox(c, mdicon.Check.Draw, 14, ink)
 					}
 					if item.Label != "" {
 						txt := ui.Text(c, item.Label).NoWrap()
@@ -489,12 +514,7 @@ func buildPillTabs(c *ui.Context, items []TabItem, o PillTabsOptions, segmented 
 	indW := indicator.w
 	indReady := indicator.set
 	trackPad := m.trackPad
-	elevatedCapsule := (o.Tone == PillTabsToneSurface || (segmented && o.Tone == PillTabsToneAuto)) && !disabledAll && !selTab.IsDisabled()
-	shadowCol := th.Colors.Shadow
-	if shadowCol.A == 0 {
-		shadowCol = ui.RGB(0, 0, 0)
-	}
-	darkMode := th.Dark
+	capsuleBorderW := pal.borderW
 
 	// Paint the sliding capsule in Draw (underneath the tab labels, icons, and ripples).
 	tabList := tabs.List
@@ -521,21 +541,14 @@ func buildPillTabs(c *ui.Context, items []TabItem, o PillTabsOptions, segmented 
 			W: capW,
 			H: capH,
 		}
-		if elevatedCapsule && capsuleCol.A > 0 {
-			ambA, keyA := float32(0.12), float32(0.08)
-			if darkMode {
-				ambA, keyA = 0.28, 0.16
-			}
-			p.Shadow(capRect, rad, 0, 1, 3, 0, shadowCol.Alpha(ambA))
-			p.Shadow(capRect, rad, 0, 1, 1, 0, shadowCol.Alpha(keyA))
-		}
 		if capsuleCol.A > 0 {
 			p.Fill(capRect, capsuleCol, rad)
 		}
-		if capsuleEdge.A > 0 {
-			inRect := insetRect(capRect, 0.5)
+		if capsuleEdge.A > 0 && capsuleBorderW > 0 {
+			half := capsuleBorderW * 0.5
+			inRect := insetRect(capRect, half)
 			if inRect.W > 0 && inRect.H > 0 {
-				p.Stroke(inRect, capsuleEdge, max(0, rad-0.5), 1)
+				p.Stroke(inRect, capsuleEdge, max(0, rad-half), capsuleBorderW)
 			}
 		}
 	})

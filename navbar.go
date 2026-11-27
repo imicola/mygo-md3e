@@ -104,8 +104,8 @@ func NavigationBar(c *ui.Context, destinations []NavigationDestination, opts ...
 		Role(ui.RoleNavigation).
 		FocusGroup(ui.Horizontal).
 		Label(label)
-	if hl := resolveHairlineColor(th, ui.Color{}); hl.A > 0 {
-		bar.Border(1, hl).BorderWidth(1, 0, 0, 0)
+	if hcW, hcCol := highContrastBorder(th); hcW > 0 {
+		bar.Border(hcW, hcCol).BorderWidth(hcW, 0, 0, 0)
 	}
 	bar.Disabled(o.Disabled)
 

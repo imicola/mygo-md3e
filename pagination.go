@@ -237,15 +237,24 @@ func Pagination(c *ui.Context, page *int, totalPages int, opts ...PaginationOpti
 			pal := paginationPagePalette(th, o.Variant, active, true)
 			container, content, border = pal.container, pal.content, pal.border
 		}
-		if border.A == 0 && active && o.Variant == ButtonElevated && !disabledAll && th.Dark {
-			border = resolveHairlineColor(th, ui.Color{})
+		borderW := float32(0)
+		if border.A > 0 {
+			borderW = 1
+			if !disabledAll {
+				borderW = outlineBorderWidth(th)
+			}
+		} else if active && o.Variant == ButtonElevated && !disabledAll {
+			if hcW, hcCol := highContrastBorder(th); hcW > 0 {
+				borderW = hcW
+				border = hcCol
+			}
 		}
 		el.TextColor(content)
 		if container.A > 0 {
 			el.Background(container)
 		}
-		if border.A > 0 {
-			el.Border(1, border)
+		if borderW > 0 && border.A > 0 {
+			el.Border(borderW, border)
 		}
 		if active && o.Variant == ButtonElevated && !disabledAll {
 			ApplyElevationShadows(th, el, tokens.Level1)
@@ -259,8 +268,8 @@ func Pagination(c *ui.Context, page *int, totalPages int, opts ...PaginationOpti
 		el.Radius(radius)
 
 		borderInset := float32(0)
-		if border.A > 0 {
-			borderInset = 1
+		if borderW > 0 && border.A > 0 {
+			borderInset = borderW
 		}
 		attachRippleWithContext(c, th, el, StateLayerOptions{
 			Color:       content,
@@ -361,7 +370,11 @@ func paginationPagePalette(th *Theme, variant ButtonVariant, active, disabled bo
 		}
 	}
 	if variant == ButtonOutlined {
-		return buttonColors{content: cs.OnSurface, border: cs.OutlineVariant}
+		border := cs.OutlineVariant
+		if th.Contrast >= tokens.ContrastHigh || border.A == 0 {
+			border = cs.Outline
+		}
+		return buttonColors{content: cs.OnSurface, border: border}
 	}
 	return buttonColors{content: cs.OnSurface}
 }

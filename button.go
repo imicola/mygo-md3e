@@ -119,9 +119,9 @@ func Button(c *ui.Context, label string, opts ...ButtonOptions) ui.Element {
 	if container.A > 0 {
 		el.Background(container)
 	}
-	border := resolveButtonBorder(th, o.Variant, pal.border, disabled)
-	if border.A > 0 {
-		el.Border(1, border)
+	borderW, border := resolveButtonBorder(th, o.Variant, pal.border, disabled)
+	if borderW > 0 && border.A > 0 {
+		el.Border(borderW, border)
 	}
 
 	elevation := pal.elevation
@@ -143,8 +143,8 @@ func Button(c *ui.Context, label string, opts ...ButtonOptions) ui.Element {
 	applyButtonHoverElevation(el, th, o.Variant, radius, disabled || pressed)
 
 	borderInset := float32(0)
-	if border.A > 0 {
-		borderInset = 1
+	if borderW > 0 && border.A > 0 {
+		borderInset = borderW
 	}
 	attachRippleWithContext(c, th, el, StateLayerOptions{
 		Color:       pal.content,
@@ -173,11 +173,17 @@ func Button(c *ui.Context, label string, opts ...ButtonOptions) ui.Element {
 	return el
 }
 
-func resolveButtonBorder(th *Theme, variant ButtonVariant, border ui.Color, disabled bool) ui.Color {
-	if border.A == 0 && variant == ButtonElevated && !disabled && th.Dark {
-		return resolveHairlineColor(th, ui.Color{})
+func resolveButtonBorder(th *Theme, variant ButtonVariant, border ui.Color, disabled bool) (float32, ui.Color) {
+	if border.A > 0 {
+		if disabled {
+			return 1, border
+		}
+		return outlineBorderWidth(th), border
 	}
-	return border
+	if variant == ButtonElevated && !disabled {
+		return highContrastBorder(th)
+	}
+	return 0, ui.Color{}
 }
 
 func applyButtonHoverElevation(el ui.Element, th *Theme, variant ButtonVariant, radius float32, suppressed bool) {

@@ -358,12 +358,13 @@ func AlertDialog(c *ui.Context, open *bool, opts ...AlertDialogOptions) ui.Eleme
 				scaleT := clampF32(show, 0, 1.06)
 				panelScale := 0.92 + 0.08*scaleT
 				panelY := (1 - scaleT) * 10
+				panelRadius := th.Shapes.Radius(tokens.ShapeExtraLarge)
 				panel := ui.Column(c).
 					Width(alertDialogWidth).
 					MaxWidthPercent(92).
 					Padding(alertDialogPadding).
 					Gap(16).
-					Radius(th.Shapes.Radius(tokens.ShapeExtraLarge)).
+					Radius(panelRadius).
 					Background(SurfaceColorForElevation(th, tokens.Level3)).
 					TextColor(cs.OnSurface).
 					Role(ui.RoleAlertDialog).
@@ -371,9 +372,10 @@ func AlertDialog(c *ui.Context, open *bool, opts ...AlertDialogOptions) ui.Eleme
 					Opacity(clampF32(scrimT, 0, 1)).
 					Scale(panelScale, panelScale).
 					Translate(0, panelY)
-				if hl := resolveHairlineColor(th, ui.Color{}); hl.A > 0 {
-					panel.Border(1, hl)
+				if hcW, hcCol := highContrastBorder(th); hcW > 0 {
+					panel.Border(hcW, hcCol)
 				}
+				attachTopSpecular(panel, th, tokens.Level3, [4]float32{panelRadius, panelRadius, panelRadius, panelRadius})
 				ApplyElevationShadows(th, panel, tokens.Level3)
 				// A press on the panel's own surface must not reach the scrim.
 				panel.Clicked()

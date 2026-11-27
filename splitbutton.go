@@ -247,14 +247,16 @@ func SplitButton(c *ui.Context, label string, opts ...SplitButtonOptions) (group
 	if o.Menu != nil {
 		reduce := th.ReduceMotion || c.Preferences().ReduceMotion
 		panel := ui.PopoverBase(c, arrow, open, func(panel ui.Element) {
+			panelRadius := th.Shapes.Radius(tokens.ShapeMedium)
 			panel.MinWidth(112).
-				Background(SurfaceColorForElevation(th, tokens.Level2)).
+				Background(SurfaceColorForElevation(th, tokens.Level3)).
 				TextColor(th.Colors.OnSurface).
-				Radius(th.Shapes.Radius(tokens.ShapeLarge)).
+				Radius(panelRadius).
 				Padding(6)
-			if hl := resolveHairlineColor(th, ui.Color{}); hl.A > 0 {
-				panel.Border(1, hl)
+			if hcW, hcCol := highContrastBorder(th); hcW > 0 {
+				panel.Border(hcW, hcCol)
 			}
+			attachTopSpecular(panel, th, tokens.Level2, [4]float32{panelRadius, panelRadius, panelRadius, panelRadius})
 			ApplyElevationShadows(th, panel, tokens.Level2)
 			o.Menu(panel)
 		})
@@ -281,9 +283,9 @@ func styleSplitSegment(c *ui.Context, th *Theme, el ui.Element, variant ButtonVa
 	if pal.container.A > 0 {
 		el.Background(pal.container)
 	}
-	border := resolveButtonBorder(th, variant, pal.border, disabled)
-	if border.A > 0 {
-		el.Border(1, border)
+	borderW, border := resolveButtonBorder(th, variant, pal.border, disabled)
+	if borderW > 0 && border.A > 0 {
+		el.Border(borderW, border)
 	}
 	if elevation > tokens.Level0 {
 		ApplyElevationShadows(th, el, elevation)
@@ -296,8 +298,8 @@ func styleSplitSegment(c *ui.Context, th *Theme, el ui.Element, variant ButtonVa
 	avgR := (radii[0] + radii[1] + radii[2] + radii[3]) * 0.25
 	applyButtonHoverElevation(el, th, variant, avgR, disabled || pressed)
 	borderInset := float32(0)
-	if border.A > 0 {
-		borderInset = 1
+	if borderW > 0 && border.A > 0 {
+		borderInset = borderW
 	}
 	attachRippleWithContext(c, th, el, StateLayerOptions{
 		Color:       pal.content,

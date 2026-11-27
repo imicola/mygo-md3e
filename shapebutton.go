@@ -463,16 +463,17 @@ func renderShapeButton(c *ui.Context, th *Theme, el ui.Element, cfg shapeButtonR
 		return nil
 	}
 
-	// Draw and DrawOver finish flattening the outline before the other
-	// callback can reuse its storage, even when the ripple uses an inset.
-	borderInset := float32(0)
+	borderW := float32(0)
 	if borderCol.A > 0 {
-		borderInset = 1.0
+		borderW = 1
+		if !cfg.disabled {
+			borderW = outlineBorderWidth(th)
+		}
 	}
 	attachRippleWithContext(c, th, el, StateLayerOptions{
 		Color:       contentCol,
 		ClipPath:    pathForRect,
-		BorderInset: borderInset,
+		BorderInset: borderW,
 		Disabled:    cfg.disabled,
 	})
 
@@ -483,17 +484,17 @@ func renderShapeButton(c *ui.Context, th *Theme, el ui.Element, cfg shapeButtonR
 			return
 		}
 		drawRect := r
-		if borderCol.A > 0 {
-			// Inset by half the 1 DIP stroke width so flat edges never clip 0.5px.
-			drawRect = insetRect(r, 0.5)
+		if borderW > 0 && borderCol.A > 0 {
+			// Inset by half the stroke width so flat edges never clip.
+			drawRect = insetRect(r, borderW*0.5)
 		}
 		path := pathForRect(drawRect)
 		if path != nil {
 			if containerCol.A > 0 {
 				p.FillPath(path, containerCol)
 			}
-			if borderCol.A > 0 {
-				p.StrokePath(path, 1, borderCol)
+			if borderW > 0 && borderCol.A > 0 {
+				p.StrokePath(path, borderW, borderCol)
 			}
 		}
 		drawMorphCrossfadeIcon(p, r, iconSize, icon, selectedIcon, contentCol, clampedIconT)
@@ -680,6 +681,13 @@ func IconBadge(c *ui.Context, icon IconDraw, opts ...IconBadgeOptions) ui.Elemen
 	el.Disabled(o.Disabled)
 
 	bg, fg, border := iconBadgePaletteOf(th, o.Variant, disabled, o.ContainerColor, o.ContentColor, o.BorderColor)
+	borderW := float32(0)
+	if border.A > 0 {
+		borderW = 1
+		if !disabled {
+			borderW = outlineBorderWidth(th)
+		}
+	}
 	el.TextColor(fg)
 
 	poly := validShapePolygon(o.Shape, nil)
@@ -693,8 +701,8 @@ func IconBadge(c *ui.Context, icon IconDraw, opts ...IconBadgeOptions) ui.Elemen
 			if bg.A > 0 {
 				p.FillPath(path, bg)
 			}
-			if border.A > 0 {
-				p.StrokePath(path, 1, border)
+			if borderW > 0 && border.A > 0 {
+				p.StrokePath(path, borderW, border)
 			}
 			drawMorphCrossfadeIcon(p, r, iconSize, icon, nil, fg, 0)
 		})
@@ -712,8 +720,8 @@ func IconBadge(c *ui.Context, icon IconDraw, opts ...IconBadgeOptions) ui.Elemen
 	if bg.A > 0 {
 		el.Background(bg)
 	}
-	if border.A > 0 {
-		el.Border(1, border)
+	if borderW > 0 && border.A > 0 {
+		el.Border(borderW, border)
 	}
 	el.Radius(radius)
 	el.Draw(func(p *ui.Painter, r ui.Rect) {

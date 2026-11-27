@@ -90,14 +90,28 @@ func ApplyElevationShadows(t *Theme, el ui.Element, level tokens.ElevationLevel)
 }
 
 func attachHoverElevation(el ui.Element, th *Theme, baseLevel, hoverLevel tokens.ElevationLevel, radius float32, disabled bool) {
-	if hoverLevel <= baseLevel {
+	attachElevatedSurfaceEffects(el, th, baseLevel, hoverLevel, radius, disabled, tokens.Level0)
+}
+
+func attachElevatedSurfaceEffects(el ui.Element, th *Theme, baseLevel, hoverLevel tokens.ElevationLevel, radius float32, disabled bool, specularLevel tokens.ElevationLevel) {
+	wantHover := hoverLevel > baseLevel && !disabled
+	wantSpecular := !disabled && hasTopSpecularReflection(th, specularLevel)
+	if !wantHover && !wantSpecular {
 		return
 	}
 	if th == nil {
 		th = DefaultTheme(nil)
 	}
+	rad := sanitizeNonNegF32(radius)
+	if !wantHover {
+		attachTopSpecular(el, th, specularLevel, [4]float32{rad, rad, rad, rad})
+		return
+	}
 	st := localHaloFade(el, animChan7)
 	if st == nil {
+		if wantSpecular {
+			attachTopSpecular(el, th, specularLevel, [4]float32{rad, rad, rad, rad})
+		}
 		return
 	}
 	baseSpec := baseLevel.Spec()
@@ -107,16 +121,20 @@ func attachHoverElevation(el ui.Element, th *Theme, baseLevel, hoverLevel tokens
 		shadowCol = ui.RGB(0, 0, 0)
 	}
 	thReduce := th.ReduceMotion
-	rad := sanitizeNonNegF32(radius)
 
 	el.Draw(func(p *ui.Painter, r ui.Rect) {
 		if !isPositiveFiniteF32(r.W) || !isPositiveFiniteF32(r.H) {
 			return
 		}
+		if wantSpecular {
+			p.Clip(r, rad, func() {
+				paintTopSpecularStrip(p, r)
+			})
+		}
 		if !el.Valid() {
 			return
 		}
-		if disabled || el.IsDisabled() {
+		if el.IsDisabled() {
 			st.reset()
 			return
 		}

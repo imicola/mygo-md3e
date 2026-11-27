@@ -190,13 +190,13 @@ func buildButtonGroup(c *ui.Context, items []ButtonGroupItem, o ButtonGroupOptio
 				pal := groupSegmentPalette(th, o.Variant, selectable, active, disabled)
 				container, content, border, elevation = pal.container, pal.content, pal.border, pal.elevation
 			}
-			border = resolveButtonBorder(th, o.Variant, border, disabled)
+			borderW, border := resolveButtonBorder(th, o.Variant, border, disabled)
 			el.Disabled(o.Disabled || item.Disabled).TextColor(content)
 			if container.A > 0 {
 				el.Background(container)
 			}
-			if border.A > 0 {
-				el.Border(1, border)
+			if borderW > 0 && border.A > 0 {
+				el.Border(borderW, border)
 			}
 			if pressed[i] && elevation > tokens.Level0 && elevation < tokens.Level5 {
 				// MD3E lifts a pressed Elevated segment one step.
@@ -254,8 +254,8 @@ func buildButtonGroup(c *ui.Context, items []ButtonGroupItem, o ButtonGroupOptio
 			applyButtonHoverElevation(el, th, o.Variant, avgR, disabled || pressed[i])
 
 			borderInset := float32(0)
-			if border.A > 0 {
-				borderInset = 1
+			if borderW > 0 && border.A > 0 {
+				borderInset = borderW
 			}
 			attachRippleWithContext(c, th, el, StateLayerOptions{
 				Color:       content,

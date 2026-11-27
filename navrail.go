@@ -132,11 +132,11 @@ func buildNavigationRail(c *ui.Context, destinations []NavigationDestination, op
 		Role(ui.RoleNavigation).
 		FocusGroup(ui.Vertical).
 		Label(label)
-	if hl := resolveHairlineColor(th, ui.Color{}); hl.A > 0 {
+	if hcW, hcCol := highContrastBorder(th); hcW > 0 {
 		if c.Direction() == ui.RightToLeft {
-			root.Border(1, hl).BorderWidth(0, 0, 0, 1)
+			root.Border(hcW, hcCol).BorderWidth(0, 0, 0, hcW)
 		} else {
-			root.Border(1, hl).BorderWidth(0, 1, 0, 0)
+			root.Border(hcW, hcCol).BorderWidth(0, hcW, 0, 0)
 		}
 	}
 	root.Disabled(o.Disabled)

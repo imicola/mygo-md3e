@@ -200,7 +200,7 @@ func Carousel(c *ui.Context, items []CarouselItem, opts ...CarouselOptions) ui.E
 
 	radius := th.Shapes.Radius(tokens.ShapeExtraLarge)
 	base := SurfaceColorForElevation(th, tokens.Level1)
-	hairline := resolveHairlineColor(th, ui.Color{})
+	hcW, hcCol := highContrastBorder(th)
 	ink := cs.OnSurface
 	if disabled {
 		ink = cs.OnSurface.Alpha(float32(tokens.DisabledContentOpacity))
@@ -263,8 +263,8 @@ func Carousel(c *ui.Context, items []CarouselItem, opts ...CarouselOptions) ui.E
 						Background(base).
 						TextColor(ink)
 					if !disabled {
-						if hairline.A > 0 {
-							el.Border(1, hairline)
+						if hcW > 0 && hcCol.A > 0 {
+							el.Border(hcW, hcCol)
 						}
 						if drag.active {
 							el.Cursor(ui.CursorGrabbing)
@@ -351,8 +351,8 @@ func Carousel(c *ui.Context, items []CarouselItem, opts ...CarouselOptions) ui.E
 						}
 					})
 					borderInset := float32(0)
-					if !disabled && hairline.A > 0 {
-						borderInset = 1
+					if !disabled && hcW > 0 && hcCol.A > 0 {
+						borderInset = hcW
 					}
 					attachRippleWithContext(c, th, el, StateLayerOptions{
 						Color:          ink,

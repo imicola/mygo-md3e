@@ -317,9 +317,9 @@ func RichTooltip(c *ui.Context, anchor ui.Element, opts ...RichTooltipOptions) u
 // buildRichTooltipPanel styles a rich tooltip's popover panel and builds its
 // text and action.
 func buildRichTooltipPanel(c *ui.Context, th *Theme, panel ui.Element, o RichTooltipOptions, onAction func()) {
-	bg := th.Colors.SurfaceContainer
+	bg := th.Colors.SurfaceContainerHigh
 	if bg.A == 0 {
-		bg = SurfaceColorForElevation(th, tokens.Level2)
+		bg = SurfaceColorForElevation(th, tokens.Level3)
 	}
 	if o.Width > 0 && isPositiveFiniteF32(o.Width) {
 		panel.Width(o.Width)
@@ -330,12 +330,13 @@ func buildRichTooltipPanel(c *ui.Context, th *Theme, panel ui.Element, o RichToo
 	if o.Action != nil && o.Action.Label != "" {
 		padBottom = 10
 	}
+	panelRadius := th.Shapes.Radius(tokens.ShapeMedium)
 	panel.MaxWidthPercent(92).MaxHeightPercent(85).
-		Padding(14, 16, padBottom, 16).Gap(6).Radius(th.Shapes.Radius(tokens.ShapeMedium)).
+		Padding(14, 16, padBottom, 16).Gap(6).Radius(panelRadius).
 		Background(bg).TextColor(th.Colors.OnSurface).
 		Role(ui.RoleGroup)
-	if hl := resolveHairlineColor(th, ui.Color{}); hl.A > 0 {
-		panel.Border(1, hl)
+	if hcW, hcCol := highContrastBorder(th); hcW > 0 {
+		panel.Border(hcW, hcCol)
 	}
 	label := o.Label
 	if label == "" {
@@ -344,6 +345,7 @@ func buildRichTooltipPanel(c *ui.Context, th *Theme, panel ui.Element, o RichToo
 	if label != "" {
 		panel.Label(label)
 	}
+	attachTopSpecular(panel, th, tokens.Level2, [4]float32{panelRadius, panelRadius, panelRadius, panelRadius})
 	ApplyElevationShadows(th, panel, tokens.Level2)
 	panel.Children(func() {
 		if o.Title != "" {

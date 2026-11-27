@@ -75,16 +75,50 @@ func semanticColorsFor(th *Theme, tone SemanticTone) semanticColors {
 			border:      cs.Error,
 		}
 	case ToneWarning:
+		if th.WarningContainer.A > 0 && th.OnWarningContainer.A > 0 {
+			border := th.Warning
+			if highContrast && cs.Outline.A > 0 {
+				border = cs.Outline
+			}
+			return semanticColors{
+				container:   th.WarningContainer,
+				onContainer: th.OnWarningContainer,
+				accent:      th.Warning,
+				border:      border,
+			}
+		}
 		return hctSemanticPair(th.Dark, highContrast, 68, 64)
 	case ToneSuccess:
+		if th.SuccessContainer.A > 0 && th.OnSuccessContainer.A > 0 {
+			border := th.Success
+			if highContrast && cs.Outline.A > 0 {
+				border = cs.Outline
+			}
+			return semanticColors{
+				container:   th.SuccessContainer,
+				onContainer: th.OnSuccessContainer,
+				accent:      th.Success,
+				border:      border,
+			}
+		}
 		return hctSemanticPair(th.Dark, highContrast, 145, 56)
 	default:
 		border := cs.OutlineVariant
-		if highContrast && cs.Outline.A > 0 {
-			border = cs.Outline
+		container := cs.SurfaceContainerHighest
+		if highContrast {
+			if cs.Outline.A > 0 {
+				border = cs.Outline
+			}
+			if th.Dark && cs.SurfaceContainerHigh.A > 0 {
+				// SurfaceContainerHighest sits at T30 in dark HighContrast where
+				// a 10% pressed white state layer caps pure white below 7:1;
+				// stepping down to SurfaceContainerHigh (T25) preserves >= 7:1
+				// across rest, hover, and pressed states.
+				container = cs.SurfaceContainerHigh
+			}
 		}
 		return semanticColors{
-			container:   cs.SurfaceContainerHighest,
+			container:   container,
 			onContainer: cs.OnSurfaceVariant,
 			accent:      cs.Outline,
 			border:      border,
@@ -96,7 +130,7 @@ func hctSemanticPair(dark, highContrast bool, hue, chroma float64) semanticColor
 	if dark {
 		cTone, fgTone, accTone := 26.0, 92.0, 76.0
 		if highContrast {
-			cTone, fgTone, accTone = 32.0, 98.0, 84.0
+			cTone, fgTone, accTone = 24.0, 98.0, 86.0
 		}
 		return semanticColors{
 			container:   tokens.HCT{Hue: hue, Chroma: chroma * 0.72, Tone: cTone}.ToColor(),
@@ -185,14 +219,19 @@ func Tag(c *ui.Context, text string, opts ...TagOptions) ui.Element {
 	bg := sem.container
 	fg := sem.onContainer
 	var border ui.Color
+	borderW := float32(0)
 	if o.Variant == TagOutlined {
 		bg = ui.Transparent
 		border = sem.border
+		borderW = outlineBorderWidth(th)
 		if o.Tone == ToneNeutral {
 			fg = cs.OnSurfaceVariant
 		} else {
 			fg = sem.accent
 		}
+	} else if hcW, hcCol := highContrastBorder(th); hcW > 0 {
+		borderW = hcW
+		border = hcCol
 	}
 
 	name := o.Label
@@ -219,15 +258,18 @@ func Tag(c *ui.Context, text string, opts ...TagOptions) ui.Element {
 			fg = cs.OnSurface.Alpha(float32(tokens.DisabledContentOpacity))
 			if o.Variant == TagOutlined {
 				border = cs.OnSurface.Alpha(float32(tokens.DisabledContainerOpacity))
+				borderW = 1
 			} else {
 				bg = cs.OnSurface.Alpha(float32(tokens.DisabledContainerOpacity))
+				border = ui.Transparent
+				borderW = 0
 			}
 		}
 		if bg.A > 0 {
 			el.Background(bg)
 		}
-		if border.A > 0 {
-			el.Border(1, border)
+		if borderW > 0 && border.A > 0 {
+			el.Border(borderW, border)
 		}
 		el.TextColor(fg)
 		if name != "" {
@@ -237,8 +279,8 @@ func Tag(c *ui.Context, text string, opts ...TagOptions) ui.Element {
 			o.OnClick()
 		}
 		borderInset := float32(0)
-		if border.A > 0 {
-			borderInset = 1
+		if borderW > 0 && border.A > 0 {
+			borderInset = borderW
 		}
 		attachRippleWithContext(c, th, el, StateLayerOptions{
 			Color:       fg,
@@ -271,15 +313,18 @@ func Tag(c *ui.Context, text string, opts ...TagOptions) ui.Element {
 		fg = cs.OnSurface.Alpha(float32(tokens.DisabledContentOpacity))
 		if o.Variant == TagOutlined {
 			border = cs.OnSurface.Alpha(float32(tokens.DisabledContainerOpacity))
+			borderW = 1
 		} else {
 			bg = cs.OnSurface.Alpha(float32(tokens.DisabledContainerOpacity))
+			border = ui.Transparent
+			borderW = 0
 		}
 	}
 	if bg.A > 0 {
 		row.Background(bg)
 	}
-	if border.A > 0 {
-		row.Border(1, border)
+	if borderW > 0 && border.A > 0 {
+		row.Border(borderW, border)
 	}
 	row.TextColor(fg)
 	if o.OnClose == nil {
@@ -313,8 +358,8 @@ func Tag(c *ui.Context, text string, opts ...TagOptions) ui.Element {
 				bodyRadii = [4]float32{0, radius, radius, 0}
 			}
 			borderInset := float32(0)
-			if border.A > 0 {
-				borderInset = 1
+			if borderW > 0 && border.A > 0 {
+				borderInset = borderW
 			}
 			body := ui.ButtonBase(c.Key(tagBodyKey{})).
 				DimDisabled(false).
@@ -451,14 +496,19 @@ func StatusPill(c *ui.Context, text string, opts ...StatusPillOptions) ui.Elemen
 	bg := sem.container
 	fg := sem.onContainer
 	var border ui.Color
+	borderW := float32(0)
 	if o.Outlined {
 		bg = ui.Transparent
 		border = sem.border
+		borderW = outlineBorderWidth(th)
 		if o.Tone == ToneNeutral {
 			fg = cs.OnSurfaceVariant
 		} else {
 			fg = sem.accent
 		}
+	} else if hcW, hcCol := highContrastBorder(th); hcW > 0 {
+		borderW = hcW
+		border = hcCol
 	}
 	dotCol := o.DotColor
 	if dotCol.A == 0 {
@@ -481,8 +531,8 @@ func StatusPill(c *ui.Context, text string, opts ...StatusPillOptions) ui.Elemen
 	if bg.A > 0 {
 		pill.Background(bg)
 	}
-	if border.A > 0 {
-		pill.Border(1, border)
+	if borderW > 0 && border.A > 0 {
+		pill.Border(borderW, border)
 	}
 	pill.TextColor(fg)
 	label := o.Label

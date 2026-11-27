@@ -143,14 +143,18 @@ func FAB(c *ui.Context, label string, icon IconDraw, opts ...FABOptions) ui.Elem
 	if pal.container.A > 0 {
 		el.Background(pal.container)
 	}
-	if o.Color == FABSurface && th.Dark && !visuallyDisabled {
-		el.Border(1, resolveHairlineColor(th, ui.Color{}))
+	borderInset := float32(0)
+	if !visuallyDisabled {
+		if hcW, hcCol := highContrastBorder(th); hcW > 0 {
+			el.Border(hcW, hcCol)
+			borderInset = hcW
+		}
 	}
 
-	elevation := tokens.Level3
+	elevation := tokens.Level2
 	if !inputDisabled && el.Pressed() {
 		// MD3E lifts a pressed FAB one elevation step.
-		elevation = tokens.Level4
+		elevation = tokens.Level3
 	}
 	if !visuallyDisabled {
 		ApplyElevationShadows(th, el, elevation)
@@ -162,14 +166,19 @@ func FAB(c *ui.Context, label string, icon IconDraw, opts ...FABOptions) ui.Elem
 	}
 	corner := max(animateWithTheme(el, th, animChan0, radius, motion.FastSpatial), 0)
 	el.Radius(corner)
-	if !visuallyDisabled && elevation == tokens.Level3 {
-		attachHoverElevation(el, th, tokens.Level3, tokens.Level4, corner, inputDisabled)
+	if !visuallyDisabled {
+		baseL, hoverL := tokens.Level0, tokens.Level0
+		if elevation == tokens.Level2 && !inputDisabled {
+			baseL, hoverL = tokens.Level2, tokens.Level3
+		}
+		attachElevatedSurfaceEffects(el, th, baseL, hoverL, corner, false, elevation)
 	}
 
 	attachRippleWithContext(c, th, el, StateLayerOptions{
-		Color:    pal.content,
-		Radius:   corner,
-		Disabled: inputDisabled,
+		Color:       pal.content,
+		Radius:      corner,
+		BorderInset: borderInset,
+		Disabled:    inputDisabled,
 	})
 
 	if o.Visible != nil {
@@ -275,13 +284,17 @@ func ExtendedFAB(c *ui.Context, label string, icon IconDraw, opts ...ExtendedFAB
 	if pal.container.A > 0 {
 		el.Background(pal.container)
 	}
-	if o.Color == FABSurface && th.Dark && !disabled {
-		el.Border(1, resolveHairlineColor(th, ui.Color{}))
+	borderInset := float32(0)
+	if !disabled {
+		if hcW, hcCol := highContrastBorder(th); hcW > 0 {
+			el.Border(hcW, hcCol)
+			borderInset = hcW
+		}
 	}
-	elevation := tokens.Level3
+	elevation := tokens.Level2
 	if !disabled {
 		if el.Pressed() {
-			elevation = tokens.Level4
+			elevation = tokens.Level3
 		}
 		ApplyElevationShadows(th, el, elevation)
 	}
@@ -295,8 +308,12 @@ func ExtendedFAB(c *ui.Context, label string, icon IconDraw, opts ...ExtendedFAB
 	}
 	radius := max(animateWithTheme(el, th, animChan1, radiusTarget, motion.FastSpatial), 0)
 	el.Radius(radius)
-	if !disabled && elevation == tokens.Level3 {
-		attachHoverElevation(el, th, tokens.Level3, tokens.Level4, radius, disabled)
+	if !disabled {
+		baseL, hoverL := tokens.Level0, tokens.Level0
+		if elevation == tokens.Level2 {
+			baseL, hoverL = tokens.Level2, tokens.Level3
+		}
+		attachElevatedSurfaceEffects(el, th, baseL, hoverL, radius, false, elevation)
 	}
 
 	// The width springs between the square icon-only button and the full
@@ -324,9 +341,10 @@ func ExtendedFAB(c *ui.Context, label string, icon IconDraw, opts ...ExtendedFAB
 	}
 
 	attachRippleWithContext(c, th, el, StateLayerOptions{
-		Color:    pal.content,
-		Radius:   radius,
-		Disabled: disabled,
+		Color:       pal.content,
+		Radius:      radius,
+		BorderInset: borderInset,
+		Disabled:    disabled,
 	})
 
 	el.Children(func() {

@@ -177,7 +177,7 @@ type DataTableOptions struct {
 	// drop shadows.
 	Elevation tokens.ElevationLevel
 	// ShapeScale selects the outer container corner token. Zero defaults to
-	// tokens.ShapeMedium.
+	// tokens.ShapeLarge (16 DIP).
 	ShapeScale tokens.ShapeScale
 	// RowHeight fixes row height in DIP when positive and finite. When <= 0 or
 	// non-finite, automatically follows Theme.Density (Comfortable: 48,
@@ -406,12 +406,18 @@ func DataTable(c *ui.Context, columns []DataTableColumn, count int, cell func(ro
 
 	shapeScale := o.ShapeScale
 	if shapeScale == tokens.ShapeNone {
-		shapeScale = tokens.ShapeMedium
+		shapeScale = tokens.ShapeLarge
 	}
 	surfOpt := SurfaceOptions{
 		Hairline:   o.Hairline,
 		ShapeScale: shapeScale,
 		Clip:       true,
+	}
+	if !o.Hairline {
+		if hcW, hcCol := highContrastBorder(th); hcW > 0 {
+			surfOpt.BorderWidth = hcW
+			surfOpt.BorderColor = hcCol
+		}
 	}
 	if o.Elevation > tokens.Level0 {
 		surfOpt.Elevation = o.Elevation

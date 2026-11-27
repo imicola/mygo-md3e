@@ -338,22 +338,26 @@ func BottomSheet(c *ui.Context, open *bool, opts ...BottomSheetOptions) ui.Eleme
 func bottomSheetPanel(c *ui.Context, th *Theme, height float32, label string, o BottomSheetOptions, modal, dragActive bool, handle func(ui.InputEvent) bool) ui.Element {
 	cs := th.Colors
 	radius := th.Shapes.Radius(tokens.ShapeExtraLarge)
+	bg := SurfaceColorForElevation(th, tokens.Level2)
+	if modal {
+		bg = SurfaceColorForElevation(th, tokens.Level3)
+	}
 	panel := ui.Column(c).
 		FillWidth().
 		Height(height).
 		Clip().
 		Radius(radius, radius, 0, 0).
-		Background(SurfaceColorForElevation(th, tokens.Level2)).
+		Background(bg).
 		TextColor(cs.OnSurface)
-	if hl := resolveHairlineColor(th, ui.Color{}); hl.A > 0 {
-		panel.Border(1, hl).BorderWidth(1, 1, 0, 1)
+	if hcW, hcCol := highContrastBorder(th); hcW > 0 {
+		panel.Border(hcW, hcCol).BorderWidth(hcW, hcW, 0, hcW)
 	}
 	if modal {
 		panel.Role(ui.RoleDialog).Label(label)
+		attachTopSpecular(panel, th, tokens.Level3, [4]float32{radius, radius, 0, 0})
 		ApplyElevationShadows(th, panel, tokens.Level3)
 	} else {
 		panel.Role(ui.RoleRegion).Label(label)
-		ApplyElevationShadows(th, panel, tokens.Level1)
 	}
 	thReduce := th.ReduceMotion
 	panel.Children(func() {

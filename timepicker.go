@@ -129,19 +129,21 @@ func TimePicker(c *ui.Context, value *time.Time, opts ...TimePickerOptions) ui.E
 	now := c.Now()
 
 	_, pickerW := timeFieldMetrics(th)
+	panelRadius := th.Shapes.Radius(tokens.ShapeExtraLarge)
 	outer := ui.Column(c).Width(pickerW).Padding(timePickerPad).Gap(16).
-		Radius(th.Shapes.Radius(tokens.ShapeExtraLarge)).
-		Background(SurfaceColorForElevation(th, tokens.Level2)).
+		Radius(panelRadius).
+		Background(SurfaceColorForElevation(th, tokens.Level3)).
 		TextColor(cs.OnSurface).
 		DimDisabled(false).Disabled(o.Disabled)
-	if hl := resolveHairlineColor(th, ui.Color{}); hl.A > 0 {
-		outer.Border(1, hl)
+	if hcW, hcCol := highContrastBorder(th); hcW > 0 {
+		outer.Border(hcW, hcCol)
 	}
 	st := localPtr(outer, timePickerStateKey{}, func() *timePickerState {
 		return &timePickerState{mode: o.Mode, segment: timeSegmentHour}
 	})
 	disabled := o.Disabled || outer.IsDisabled()
 	if !disabled {
+		attachTopSpecular(outer, th, tokens.Level2, [4]float32{panelRadius, panelRadius, panelRadius, panelRadius})
 		ApplyElevationShadows(th, outer, tokens.Level2)
 	}
 	if disabled {

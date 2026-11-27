@@ -137,12 +137,14 @@ func floatingToolbarBar(c *ui.Context, items []FloatingToolbarItem, o FloatingTo
 
 	container := th.Colors.PrimaryContainer
 	ink := th.Colors.OnPrimaryContainer
+	elevation := tokens.Level3
 	if o.Tone == ToolbarStandard {
-		container = th.Colors.SurfaceContainer
+		container = th.Colors.SurfaceContainerLow
 		if container.A == 0 {
-			container = SurfaceColorForElevation(th, tokens.Level2)
+			container = SurfaceColorForElevation(th, tokens.Level1)
 		}
 		ink = th.Colors.OnSurface
+		elevation = tokens.Level1
 	}
 
 	var bar ui.Element
@@ -159,19 +161,21 @@ func floatingToolbarBar(c *ui.Context, items []FloatingToolbarItem, o FloatingTo
 			Gap(floatingToolbarGap).
 			AlignItems(ui.Center)
 	}
+	barRadius := float32(floatingToolbarSide / 2)
 	bar.Clip().
 		Background(container).
 		TextColor(ink).
-		Radius(floatingToolbarSide / 2).
+		Radius(barRadius).
 		DimDisabled(false).
 		Role(ui.RoleToolbar).
 		Orientation(toolbarOrientation(o.Orientation)).
 		FocusGroup(toolbarOrientation(o.Orientation)).
 		Label(label)
-	if o.Tone == ToolbarStandard && th.Dark {
-		bar.Border(1, resolveHairlineColor(th, ui.Color{}))
+	if hcW, hcCol := highContrastBorder(th); hcW > 0 {
+		bar.Border(hcW, hcCol)
 	}
-	ApplyElevationShadows(th, bar, tokens.Level3)
+	attachTopSpecular(bar, th, elevation, [4]float32{barRadius, barRadius, barRadius, barRadius})
+	ApplyElevationShadows(th, bar, elevation)
 
 	reduce := th.ReduceMotion || c.Preferences().ReduceMotion
 	shown := len(items)

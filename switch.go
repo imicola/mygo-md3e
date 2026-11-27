@@ -137,7 +137,7 @@ func Switch(c *ui.Context, on *bool, opts ...SwitchOptions) ui.Element {
 	offIcon := o.OffIcon
 	rtl := c.Direction() == ui.RightToLeft
 	onPClamped := clampF32(onP, 0, 1)
-	if !disabled && cs.OnPrimaryContainer.A > 0 {
+	if !disabled && cs.OnPrimaryContainer.A > 0 && tokens.ContrastRatio(cs.OnPrimaryContainer, onThumb) >= 3.0 {
 		onIconInk = cs.OnPrimaryContainer
 	}
 	haloInk := cs.OnSurface.MixOklab(cs.Primary, onPClamped)

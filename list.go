@@ -304,10 +304,10 @@ func listRow(c *ui.Context, th *Theme, st listStyle, item *ListItem, i, n int, o
 	}
 	row.Background(bg).TextColor(content)
 	borderInset := float32(0)
-	if o.Segmented && !disabled && !selected && th.Dark {
-		if hl := resolveHairlineColor(th, ui.Color{}); hl.A > 0 {
-			row.Border(1, hl)
-			borderInset = 1
+	if o.Segmented && !disabled && !selected {
+		if hcW, hcCol := highContrastBorder(th); hcW > 0 {
+			row.Border(hcW, hcCol)
+			borderInset = hcW
 		}
 	}
 	if interactive {

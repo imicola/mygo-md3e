@@ -2,6 +2,7 @@ package md3e
 
 import (
 	"fmt"
+	"image/color"
 	"testing"
 	"time"
 
@@ -250,6 +251,56 @@ func TestContrastMatrixComponentsAndLerpTheme(t *testing.T) {
 						checkComposited(ctx, "MetricCardGlow/OnSurface", cs.OnSurface, glowBg, textMin, true)
 						checkComposited(ctx, "MetricCardGlow/OnSurfaceVariant", cs.OnSurfaceVariant, glowBg, textMin, true)
 
+						// PillTabs & SegmentedTabs across all tones (active/inactive ink, badges, Primary graphic contrast).
+						for _, tone := range []PillTabsTone{PillTabsTonePrimary, PillTabsToneSecondary, PillTabsToneSurface} {
+							pal := pillTabsPaletteOf(th, tone, tone == PillTabsToneSurface, false)
+							checkComposited(ctx, fmt.Sprintf("PillTabs(%d)/Active", tone), pal.activeInk, pal.capsule, textMin, true)
+							checkComposited(ctx, fmt.Sprintf("PillTabs(%d)/Inactive", tone), pal.inactiveInk, pal.trough, textMin, true)
+							checkComposited(ctx, fmt.Sprintf("PillTabs(%d)/ActiveBadge", tone), pal.activeBdgInk, pal.activeBdgBg, textMin, false)
+							checkComposited(ctx, fmt.Sprintf("PillTabs(%d)/InactiveBadge", tone), pal.badgeInk, pal.badgeBg, textMin, false)
+							if tone == PillTabsTonePrimary {
+								if gr := tokens.ContrastRatio(pal.capsule, pal.trough); gr+1e-6 < 3.0 {
+									t.Errorf("%s [PillTabs(Primary) capsule/trough graphic]: capsule=%s trough=%s ratio=%.2f < 3.00",
+										ctx, fmtColorRGBA(pal.capsule), fmtColorRGBA(pal.trough), gr)
+								}
+							}
+						}
+
+						// Switch: selected thumb on track + checkmark icon on thumb (catches Monochrome regression).
+						onTrack, onThumb := cs.Primary, cs.OnPrimary
+						onIconInk := onTrack
+						if cs.OnPrimaryContainer.A > 0 && tokens.ContrastRatio(cs.OnPrimaryContainer, onThumb) >= 3.0 {
+							onIconInk = cs.OnPrimaryContainer
+						}
+						if r := tokens.ContrastRatio(onThumb, onTrack); r+1e-6 < textMin {
+							t.Errorf("%s [Switch onThumb/onTrack]: fg=%s bg=%s ratio=%.2f < %.2f",
+								ctx, fmtColorRGBA(onThumb), fmtColorRGBA(onTrack), r, textMin)
+						}
+						if r := tokens.ContrastRatio(onIconInk, onThumb); r+1e-6 < 3.0 {
+							t.Errorf("%s [Switch onIcon/onThumb]: fg=%s bg=%s ratio=%.2f < 3.00",
+								ctx, fmtColorRGBA(onIconInk), fmtColorRGBA(onThumb), r)
+						}
+
+						// Chip (outlined, elevated, selected filter).
+						for _, elev := range []bool{false, true} {
+							cp := chipPaletteOf(th, elev, true, false)
+							bg := cp.container
+							if bg.A == 0 {
+								bg = cs.SurfaceContainerLow
+							}
+							checkComposited(ctx, fmt.Sprintf("Chip(elev=%v)/Rest", elev), cp.content, bg, textMin, true)
+							checkComposited(ctx, fmt.Sprintf("Chip(elev=%v)/Selected", elev), cp.selectedContent, cp.selectedContainer, textMin, true)
+						}
+
+						// Tag / StatusPill across all 7 SemanticTones.
+						for _, tone := range []SemanticTone{
+							ToneNeutral, TonePrimary, ToneSecondary, ToneTertiary,
+							ToneError, ToneWarning, ToneSuccess,
+						} {
+							sem := semanticColorsFor(th, tone)
+							checkComposited(ctx, fmt.Sprintf("SemanticTone(%d)", tone), sem.onContainer, sem.container, textMin, true)
+						}
+
 						// DataTable cells & selection contrast.
 						cells := dataTableDefaultCellsStyle(th)
 						checkComposited(ctx, "DataTable/CellSelect", cells.CellText, cells.Cell, textMin, false)
@@ -321,5 +372,129 @@ func TestContrastMatrixComponentsAndLerpTheme(t *testing.T) {
 			checkComposited(ctx, "OnWarning/Warning", mid.OnWarning, mid.Warning, minRatio, false)
 			checkComposited(ctx, "OnSuccess/Success", mid.OnSuccess, mid.Success, minRatio, false)
 		}
+	}
+}
+
+// TestBorderlessDefaultExplicitHairlineAndHighContrast15DIP verifies M17.2a
+// borderless tonal defaults, explicit Hairline preservation, HighContrast 1.5 DIP
+// boundaries, PillTabs/SegmentedTabs single-layer framing, and Monochrome Switch
+// checkmark legibility via headless pixel inspection.
+func TestBorderlessDefaultExplicitHairlineAndHighContrast15DIP(t *testing.T) {
+	darkStd := ThemeFromSeed(DefaultSeedColor, ThemeOptions{Dark: true, ReduceMotion: true})
+	darkHC := ThemeFromSeed(DefaultSeedColor, ThemeOptions{Dark: true, Contrast: tokens.ContrastHigh, ReduceMotion: true})
+
+	// 1. CardFilled in Dark Standard has no border; Hairline:true draws hairline;
+	//    HighContrast draws 1.5 DIP Outline boundary.
+	sampleCardEdge := func(th *Theme, hairline bool) (edge, center color.RGBA) {
+		tt := ui.NewTester(func(c *ui.Context) {
+			ThemeScope(c, th, func() {
+				ui.Box(c).Size(200, 120).Background(th.Colors.Surface).Padding(20).Children(func() {
+					Card(c, nil, CardOptions{
+						Variant:  CardFilled,
+						Hairline: hairline,
+					}).Size(140, 72)
+				})
+			})
+		}, 200, 120)
+		img := tt.Image()
+		// Top center edge (x=90, y=20) and center interior (x=90, y=56).
+		return img.RGBAAt(90, 20), img.RGBAAt(90, 56)
+	}
+
+	ePlain, cPlain := sampleCardEdge(darkStd, false)
+	if !colorMatches(ePlain, darkStd.Colors.SurfaceContainerLow, 4) {
+		t.Fatalf("Dark default CardFilled unexpectedly drew top border: edge=%+v center=%+v want=%+v",
+			ePlain, cPlain, rgbOf(darkStd.Colors.SurfaceContainerLow))
+	}
+	eHair, _ := sampleCardEdge(darkStd, true)
+	if colorMatches(eHair, darkStd.Colors.SurfaceContainerLow, 4) {
+		t.Fatalf("CardFilled with explicit Hairline:true did not paint border: edge=%+v", eHair)
+	}
+	eHC, _ := sampleCardEdge(darkHC, false)
+	if !colorMatches(eHC, darkHC.Colors.Outline, 35) {
+		t.Fatalf("Dark HighContrast CardFilled did not paint Outline boundary: edge=%+v want~=%+v",
+			eHC, rgbOf(darkHC.Colors.Outline))
+	}
+
+	// 2. SegmentedTabs: borderless in Dark Standard, Outline border in HighContrast,
+	//    and non-color check indicator painted inside selected low-contrast capsule.
+	sel := 0
+	segStd := ui.NewTester(func(c *ui.Context) {
+		ThemeScope(c, darkStd, func() {
+			ui.Box(c).Size(320, 96).Background(darkStd.Colors.Surface).Padding(20).Children(func() {
+				SegmentedTabs(c.Key("seg-std"), []TabItem{{Label: "Day"}, {Label: "Week"}}, PillTabsOptions{
+					Selected: &sel,
+					Label:    "Period",
+				})
+			})
+		})
+	}, 320, 96)
+	segStd.Frame()
+	listStd, ok := segStd.AccessByRole(ui.RoleTabList, "Period")
+	if !ok {
+		t.Fatal("SegmentedTabs missing RoleTabList")
+	}
+	// Top center of trough must equal SurfaceContainerLowest (no trough border).
+	troughTop := segStd.Image().RGBAAt(int(listStd.Bounds.X+listStd.Bounds.W/2), int(listStd.Bounds.Y))
+	if !colorMatches(troughTop, darkStd.Colors.SurfaceContainerLowest, 5) {
+		t.Fatalf("Dark Standard SegmentedTabs trough painted border: top=%+v want=%+v",
+			troughTop, rgbOf(darkStd.Colors.SurfaceContainerLowest))
+	}
+
+	segHC := ui.NewTester(func(c *ui.Context) {
+		ThemeScope(c, darkHC, func() {
+			ui.Box(c).Size(320, 96).Background(darkHC.Colors.Surface).Padding(20).Children(func() {
+				SegmentedTabs(c.Key("seg-hc"), []TabItem{{Label: "Day"}, {Label: "Week"}}, PillTabsOptions{
+					Selected: &sel,
+					Label:    "PeriodHC",
+				})
+			})
+		})
+	}, 320, 96)
+	segHC.Frame()
+	listHC, ok := segHC.AccessByRole(ui.RoleTabList, "PeriodHC")
+	if !ok {
+		t.Fatal("HC SegmentedTabs missing RoleTabList")
+	}
+	troughTopHC := segHC.Image().RGBAAt(int(listHC.Bounds.X+listHC.Bounds.W/2), int(listHC.Bounds.Y))
+	if !colorMatches(troughTopHC, darkHC.Colors.Outline, 35) {
+		t.Fatalf("HighContrast SegmentedTabs missing Outline trough border: top=%+v want~=%+v",
+			troughTopHC, rgbOf(darkHC.Colors.Outline))
+	}
+
+	// 3. Switch in Dark Monochrome renders a visible checkmark inside the selected thumb.
+	monoDark := ThemeFromSeed(ui.Hex("#808080"), ThemeOptions{
+		Dark:         true,
+		Variant:      tokens.Monochrome,
+		ReduceMotion: true,
+	})
+	on := true
+	swTT := ui.NewTester(func(c *ui.Context) {
+		ThemeScope(c, monoDark, func() {
+			ui.Box(c).Size(120, 80).Background(monoDark.Colors.Surface).Padding(16).Children(func() {
+				Switch(c.Key("mono-sw"), &on, SwitchOptions{Label: "Mono"})
+			})
+		})
+	}, 120, 80)
+	swInfo, ok := swTT.AccessByRole(ui.RoleSwitch, "Mono")
+	if !ok {
+		t.Fatal("Monochrome Switch missing RoleSwitch")
+	}
+	// Selected thumb center sits at trackX + 36, midY.
+	cx := int(swInfo.Bounds.X) + 36
+	cy := int(swInfo.Bounds.Y + swInfo.Bounds.H/2)
+	swImg := swTT.Image()
+	thumbCol := monoDark.Colors.OnPrimary
+	distinctPixels := 0
+	for dy := -6; dy <= 6; dy++ {
+		for dx := -6; dx <= 6; dx++ {
+			px := swImg.RGBAAt(cx+dx, cy+dy)
+			if absColorDiff(px, rgbOf(thumbCol)) > 60 {
+				distinctPixels++
+			}
+		}
+	}
+	if distinctPixels < 12 {
+		t.Fatalf("Dark Monochrome Switch checkmark is invisible inside thumb: distinctPixels=%d", distinctPixels)
 	}
 }

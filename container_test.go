@@ -70,7 +70,7 @@ func TestCardVariantsAndDisabled(t *testing.T) {
 		want ui.Color
 	}{
 		{"elevated", 104, 72, SurfaceColorForElevation(th, tokens.Level1)},
-		{"filled", 280, 72, cs.SurfaceContainerHighest},
+		{"filled", 280, 72, cs.SurfaceContainerLow},
 		{"outlined", 456, 72, cs.Surface},
 	}
 	for _, tc := range cases {

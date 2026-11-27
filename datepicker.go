@@ -419,13 +419,17 @@ func styleDatePickerPanel(th *Theme, panel ui.Element, m datePickerModel, o Date
 			name = datePickerLabel
 		}
 	}
+	panelRadius := th.Shapes.Radius(tokens.ShapeExtraLarge)
 	panel.Width(datePickerWidth).Padding(datePickerPad).Gap(dateFieldGap).
-		Radius(th.Shapes.Radius(tokens.ShapeExtraLarge)).
-		Background(SurfaceColorForElevation(th, tokens.Level2)).
-		Border(1, resolveHairlineColor(th, ui.Color{})).
+		Radius(panelRadius).
+		Background(SurfaceColorForElevation(th, tokens.Level3)).
 		TextColor(th.Colors.OnSurface).
 		DimDisabled(false).Disabled(o.Disabled).
 		Label(name)
+	if hcW, hcCol := highContrastBorder(th); hcW > 0 {
+		panel.Border(hcW, hcCol)
+	}
+	attachTopSpecular(panel, th, tokens.Level2, [4]float32{panelRadius, panelRadius, panelRadius, panelRadius})
 	ApplyElevationShadows(th, panel, tokens.Level2)
 }
 

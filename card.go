@@ -1,6 +1,8 @@
 package md3e
 
 import (
+	"time"
+
 	"github.com/egoist/mygo/ui"
 
 	"github.com/imicola/mygo-md3e/motion"
@@ -11,12 +13,13 @@ import (
 type CardVariant int
 
 const (
-	// CardElevated paints the Level1 surface with Level1 shadows, lifting to
-	// Level2 while pressed.
+	// CardElevated paints SurfaceContainerLow with Level1 shadows, lifting to
+	// Level2 while hovered or pressed.
 	CardElevated CardVariant = iota
-	// CardFilled paints the SurfaceContainerHighest fill without shadows.
+	// CardFilled paints SurfaceContainerLow without shadows.
 	CardFilled
-	// CardOutlined paints the Surface fill with an OutlineVariant border.
+	// CardOutlined paints the Surface fill with an OutlineVariant border (or
+	// 1.5 DIP Outline in HighContrast).
 	CardOutlined
 )
 
@@ -41,8 +44,9 @@ type CardOptions struct {
 	Padding float32
 	// ShapeScale selects an MD3E corner radius token for the card (for example
 	// tokens.ShapeLargeIncreased or tokens.ShapeExtraLarge for Bento layouts).
-	// The zero value (ShapeNone) keeps tokens.ShapeMedium. Radius > 0 overrides
-	// ShapeScale when set.
+	// The zero value (ShapeNone) defaults to tokens.ShapeLargeIncreased (20 DIP)
+	// for Elevated/Filled cards and tokens.ShapeLarge (16 DIP) for Outlined
+	// cards. Radius > 0 overrides ShapeScale when set.
 	ShapeScale tokens.ShapeScale
 	// Radius overrides the resting corner radius in DIP; takes precedence over
 	// ShapeScale when positive and finite.
@@ -119,7 +123,10 @@ func Card(c *ui.Context, content func(), opts ...CardOptions) ui.Element {
 	cs := th.Colors
 
 	interactive := o.Clickable || o.OnClick != nil
-	baseScale := tokens.ShapeMedium
+	baseScale := tokens.ShapeLargeIncreased
+	if o.Variant == CardOutlined {
+		baseScale = tokens.ShapeLarge
+	}
 	if o.ShapeScale > tokens.ShapeNone && o.ShapeScale <= tokens.ShapeFull {
 		baseScale = o.ShapeScale
 	}
@@ -142,18 +149,32 @@ func Card(c *ui.Context, content func(), opts ...CardOptions) ui.Element {
 	disabled := o.Disabled || el.IsDisabled()
 
 	bg, border, elevation := cardPalette(th, o.Variant, disabled)
-	if !disabled && o.Hairline {
-		if border.A == 0 || o.HairlineColor.A > 0 {
-			border = resolveHairlineColor(th, o.HairlineColor)
+	borderW := float32(0)
+	if !disabled {
+		if o.Variant == CardOutlined {
+			borderW = outlineBorderWidth(th)
+		}
+		if o.Hairline {
+			if border.A == 0 || o.HairlineColor.A > 0 {
+				border = resolveHairlineColor(th, o.HairlineColor)
+			}
+			borderW = outlineBorderWidth(th)
+		} else if border.A == 0 {
+			if hcW, hcCol := highContrastBorder(th); hcW > 0 {
+				borderW = hcW
+				border = hcCol
+			}
 		}
 	}
 	if disabled {
 		if o.Variant == CardOutlined {
 			bg = cs.Surface
 			border = cs.OnSurface.Alpha(float32(tokens.DisabledContainerOpacity))
+			borderW = 1
 		} else {
 			bg = cs.OnSurface.Alpha(float32(tokens.DisabledContainerOpacity))
 			border = ui.Transparent
+			borderW = 0
 		}
 		elevation = tokens.Level0
 	}
@@ -196,10 +217,25 @@ func Card(c *ui.Context, content func(), opts ...CardOptions) ui.Element {
 		}
 	}
 	hasCustomDraw := (linGrad != nil && radGrad != nil) || o.Backdrop != nil
+	wantHoverElev := interactive && !disabled && !pressed && o.Variant == CardElevated
+	wantSpecular := !disabled && hasTopSpecularReflection(th, elevation)
 	if hasCustomDraw {
 		drawRadius := radius
 		backdrop := o.Backdrop
 		overlayRadial := linGrad != nil && radGrad != nil
+		var hoverSt *haloFadeState
+		var baseSpec, hoverSpec tokens.ElevationSpec
+		var shadowCol ui.Color
+		thReduce := th.ReduceMotion
+		if wantHoverElev {
+			hoverSt = localHaloFade(el, animChan7)
+			baseSpec = tokens.Level1.Spec()
+			hoverSpec = tokens.Level2.Spec()
+			shadowCol = cs.Shadow
+			if shadowCol.A == 0 {
+				shadowCol = ui.RGB(0, 0, 0)
+			}
+		}
 		el.Draw(func(p *ui.Painter, r ui.Rect) {
 			if !isPositiveFiniteF32(r.W) || !isPositiveFiniteF32(r.H) {
 				return
@@ -211,13 +247,37 @@ func Card(c *ui.Context, content func(), opts ...CardOptions) ui.Element {
 				if backdrop != nil {
 					backdrop(p, r)
 				}
+				if wantSpecular {
+					paintTopSpecularStrip(p, r)
+				}
 			})
+			if hoverSt != nil && el.Valid() && !el.IsDisabled() && rectIntersects(r, p.Visible()) {
+				target := float32(0)
+				if el.Hovered() && !el.Pressed() {
+					target = 1
+				}
+				t, needFrame := hoverSt.step(target, p.Now(), thReduce || p.Preferences().ReduceMotion)
+				if needFrame {
+					p.After(16 * time.Millisecond)
+				}
+				if t > 0.005 {
+					paintHoverElevationDelta(p, r, drawRadius, shadowCol, baseSpec, hoverSpec, t)
+				}
+			}
 		})
-	} else if interactive && !disabled && !pressed && o.Variant == CardElevated {
-		attachHoverElevation(el, th, tokens.Level1, tokens.Level2, radius, false)
+	} else if wantHoverElev || wantSpecular {
+		baseL, hoverL := tokens.Level0, tokens.Level0
+		if wantHoverElev {
+			baseL, hoverL = tokens.Level1, tokens.Level2
+		}
+		specL := tokens.Level0
+		if wantSpecular {
+			specL = elevation
+		}
+		attachElevatedSurfaceEffects(el, th, baseL, hoverL, radius, disabled, specL)
 	}
-	if border.A > 0 {
-		el.Border(1, border)
+	if borderW > 0 && border.A > 0 {
+		el.Border(borderW, border)
 	}
 	if elevation > tokens.Level0 {
 		ApplyElevationShadows(th, el, elevation)
@@ -230,8 +290,8 @@ func Card(c *ui.Context, content func(), opts ...CardOptions) ui.Element {
 	el.TextColor(ink)
 	if interactive {
 		borderInset := float32(0)
-		if border.A > 0 {
-			borderInset = 1
+		if borderW > 0 && border.A > 0 {
+			borderInset = borderW
 		}
 		attachRippleWithContext(c, th, el, StateLayerOptions{
 			Color:       ink,
@@ -262,9 +322,9 @@ func cardPalette(th *Theme, v CardVariant, disabled bool) (bg, border ui.Color, 
 	}
 	switch v {
 	case CardFilled:
-		bg = cs.SurfaceContainerHighest
+		bg = cs.SurfaceContainerLow
 		if bg.A == 0 {
-			bg = SurfaceColorForElevation(th, tokens.Level2)
+			bg = SurfaceColorForElevation(th, tokens.Level1)
 		}
 	case CardOutlined:
 		bg = cs.Surface

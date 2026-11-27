@@ -126,13 +126,15 @@ func TopAppBar(c *ui.Context, title string, opts ...TopAppBarOptions) ui.Element
 		Role(ui.RoleRegion).
 		Label(labelOr(o.Label, title))
 	if p > 0.01 {
-		hairline := resolveHairlineColor(th, ui.Color{}).Alpha(p)
-		bar.DrawOver(func(p *ui.Painter, r ui.Rect) {
-			if !isPositiveFiniteF32(r.W) || !isPositiveFiniteF32(r.H) {
-				return
-			}
-			p.Fill(ui.Rect{X: r.X, Y: r.Y + r.H - 1, W: r.W, H: 1}, hairline, 0)
-		})
+		if hcW, hcCol := highContrastBorder(th); hcW > 0 {
+			hairline := hcCol.Alpha(p)
+			bar.DrawOver(func(p *ui.Painter, r ui.Rect) {
+				if !isPositiveFiniteF32(r.W) || !isPositiveFiniteF32(r.H) {
+					return
+				}
+				p.Fill(ui.Rect{X: r.X, Y: r.Y + r.H - hcW, W: r.W, H: hcW}, hairline, 0)
+			})
+		}
 	}
 
 	bigRole := tokens.HeadlineMedium
@@ -434,17 +436,17 @@ func SearchAppBar(c *ui.Context, query *string, opts ...SearchAppBarOptions) ui.
 
 	hoverSt := localHaloFade(bar, animChan0)
 	thReduce := th.ReduceMotion
-	hairline := resolveHairlineColor(th, ui.Color{})
+	hcW, hcCol := highContrastBorder(th)
 	focusCol := cs.Primary
-	darkMode := th.Dark
 	bar.DrawOver(func(p *ui.Painter, r ui.Rect) {
 		if !isPositiveFiniteF32(r.W) || !isPositiveFiniteF32(r.H) {
 			return
 		}
 		rad := r.H * 0.5
 		if !bar.Valid() {
-			if darkMode && !disabled && hairline.A > 0 {
-				p.Stroke(insetRect(r, 0.5), hairline, max(0, rad-0.5), 1)
+			if !disabled && hcW > 0 && hcCol.A > 0 {
+				half := hcW * 0.5
+				p.Stroke(insetRect(r, half), hcCol, max(0, rad-half), hcW)
 			}
 			return
 		}
@@ -463,8 +465,9 @@ func SearchAppBar(c *ui.Context, query *string, opts ...SearchAppBarOptions) ui.
 		}
 		if focused && focusCol.A > 0 {
 			p.Stroke(insetRect(r, 1), focusCol, max(0, rad-1), 1.75)
-		} else if darkMode && !disabled && hairline.A > 0 {
-			p.Stroke(insetRect(r, 0.5), hairline, max(0, rad-0.5), 1)
+		} else if !disabled && hcW > 0 && hcCol.A > 0 {
+			half := hcW * 0.5
+			p.Stroke(insetRect(r, half), hcCol, max(0, rad-half), hcW)
 		}
 	})
 

@@ -40,7 +40,7 @@ func TestFloatingToolbarLayoutsAndTones(t *testing.T) {
 		tone FloatingToolbarTone
 		bg   ui.Color
 	}{
-		{"Standard", ToolbarStandard, th.Colors.SurfaceContainer},
+		{"Standard", ToolbarStandard, th.Colors.SurfaceContainerLow},
 		{"Vibrant", ToolbarVibrant, th.Colors.PrimaryContainer},
 	}
 
@@ -251,7 +251,7 @@ func TestFloatingToolbarSpringRTLAndDisabledVisual(t *testing.T) {
 
 	// Hiding starts at full opacity: no instant 50% dim jump.
 	bar := buttonInfo(t, tt, ui.RoleToolbar, "Tools")
-	container := rgbOf(th.Colors.SurfaceContainer)
+	container := rgbOf(th.Colors.SurfaceContainerLow)
 	visible = false
 	tt.Frame()
 	px := tt.Image().RGBAAt(int(bar.Bounds.X)+4, int(bar.Bounds.Y+bar.Bounds.H/2))

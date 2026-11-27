@@ -99,12 +99,18 @@ func buildActionChip(c *ui.Context, label string, o ChipOptions, panicMsg string
 	if pal.container.A > 0 {
 		el.Background(pal.container)
 	}
-	if pal.border.A > 0 {
-		el.Border(1, pal.border)
-	} else if o.Elevated && !disabled && th.Dark {
-		if hl := resolveHairlineColor(th, ui.Color{}); hl.A > 0 {
-			el.Border(1, hl)
+	borderW := float32(0)
+	borderCol := pal.border
+	if borderCol.A > 0 {
+		borderW = 1
+		if !disabled {
+			borderW = outlineBorderWidth(th)
 		}
+	} else if o.Elevated && !disabled {
+		borderW, borderCol = highContrastBorder(th)
+	}
+	if borderW > 0 && borderCol.A > 0 {
+		el.Border(borderW, borderCol)
 	}
 	el.Radius(chipRadius).TextColor(pal.content)
 	if o.Elevated && !disabled {
@@ -122,8 +128,8 @@ func buildActionChip(c *ui.Context, label string, o ChipOptions, panicMsg string
 	el.PaddingStart(padStart).PaddingEnd(padEnd)
 
 	borderInset := float32(0)
-	if pal.border.A > 0 {
-		borderInset = 1
+	if borderW > 0 && borderCol.A > 0 {
+		borderInset = borderW
 	}
 	attachRippleWithContext(c, th, el, StateLayerOptions{
 		Color:       pal.content,
@@ -237,18 +243,25 @@ func FilterChip(c *ui.Context, selected *bool, label string, opts ...FilterChipO
 		ApplyElevationShadows(th, el, tokens.Level1)
 	}
 
-	var darkHairline ui.Color
-	if o.Elevated && !disabled && th.Dark {
-		darkHairline = resolveHairlineColor(th, ui.Color{})
+	borderW := float32(1)
+	if !disabled {
+		borderW = outlineBorderWidth(th)
+	}
+	var hcBorder ui.Color
+	var hcBorderW float32
+	if !disabled {
+		hcBorderW, hcBorder = highContrastBorder(th)
 	}
 	el.Draw(func(p *ui.Painter, r ui.Rect) {
-		drawFilterChip(p, r, selectT, pal, darkHairline)
+		drawFilterChip(p, r, selectT, pal, borderW, hcBorderW, hcBorder)
 	})
 	content := pal.content.MixOklab(pal.selectedContent, selectT)
 	iconColor := pal.icon.MixOklab(pal.selectedContent, selectT)
 	borderInset := float32(0)
-	if (pal.border.A > 0 && selectT < 0.5) || darkHairline.A > 0 {
-		borderInset = 1
+	if hcBorderW > 0 && hcBorder.A > 0 {
+		borderInset = hcBorderW
+	} else if pal.border.A > 0 && selectT < 0.5 {
+		borderInset = borderW
 	}
 	attachRippleWithContext(c, th, el, StateLayerOptions{
 		Color:       content,
@@ -370,12 +383,18 @@ func InputChip(c *ui.Context, label string, opts ...InputChipOptions) ui.Element
 	if pal.container.A > 0 {
 		outer.Background(pal.container)
 	}
-	if pal.border.A > 0 {
-		outer.Border(1, pal.border)
-	} else if o.Elevated && !disabled && th.Dark {
-		if hl := resolveHairlineColor(th, ui.Color{}); hl.A > 0 {
-			outer.Border(1, hl)
+	borderW := float32(0)
+	borderCol := pal.border
+	if borderCol.A > 0 {
+		borderW = 1
+		if !disabled {
+			borderW = outlineBorderWidth(th)
 		}
+	} else if o.Elevated && !disabled {
+		borderW, borderCol = highContrastBorder(th)
+	}
+	if borderW > 0 && borderCol.A > 0 {
+		outer.Border(borderW, borderCol)
 	}
 	outer.Radius(chipRadius).TextColor(pal.content)
 	if o.Elevated && !disabled {
@@ -397,8 +416,8 @@ func InputChip(c *ui.Context, label string, opts ...InputChipOptions) ui.Element
 		closeInk = bodyInk
 	}
 	borderInset := float32(0)
-	if pal.border.A > 0 || (o.Elevated && !disabled && th.Dark) {
-		borderInset = 1
+	if borderW > 0 && borderCol.A > 0 {
+		borderInset = borderW
 	}
 	removeLabel := o.RemoveLabel
 	if removeLabel == "" {
@@ -581,12 +600,16 @@ func chipPaletteOf(th *Theme, elevated, filter, disabled bool) chipColors {
 			container = SurfaceColorForElevation(th, tokens.Level1)
 		}
 	}
+	border := cs.OutlineVariant
+	if th.Contrast >= tokens.ContrastHigh && cs.Outline.A > 0 {
+		border = cs.Outline
+	}
 	out := chipColors{
 		container:       container,
 		content:         cs.OnSurface,
 		selectedContent: cs.OnSecondaryContainer,
 		icon:            cs.Primary,
-		border:          cs.OutlineVariant,
+		border:          border,
 	}
 	if elevated {
 		// MD3E elevated chips carry their container instead of a border.
@@ -600,8 +623,9 @@ func chipPaletteOf(th *Theme, elevated, filter, disabled bool) chipColors {
 
 // drawFilterChip paints a filter chip's container: the unselected outlined or
 // elevated fill and border cross-fading into the selected SecondaryContainer
-// with no border, by t from 0 to 1.
-func drawFilterChip(p *ui.Painter, r ui.Rect, t float32, pal chipColors, darkHairline ui.Color) {
+// with no border (retaining a crisp 1.5 DIP Outline in HighContrast), by t from
+// 0 to 1.
+func drawFilterChip(p *ui.Painter, r ui.Rect, t float32, pal chipColors, borderW, hcBorderW float32, hcBorder ui.Color) {
 	if r.W <= 0 || r.H <= 0 {
 		return
 	}
@@ -611,9 +635,9 @@ func drawFilterChip(p *ui.Painter, r ui.Rect, t float32, pal chipColors, darkHai
 	if t > 0.001 && pal.selectedContainer.A > 0 {
 		p.Fill(ui.Rect{X: r.X, Y: r.Y, W: r.W, H: r.H}, pal.selectedContainer.Alpha(t), chipRadius)
 	}
-	if a := 1 - t; a > 0.01 && pal.border.A > 0 {
-		p.Stroke(r, pal.border.Alpha(a), chipRadius, 1)
-	} else if a := 1 - t; a > 0.01 && darkHairline.A > 0 {
-		p.Stroke(r, darkHairline.Alpha(a), chipRadius, 1)
+	if hcBorderW > 0 && hcBorder.A > 0 {
+		p.Stroke(r, hcBorder, chipRadius, hcBorderW)
+	} else if a := 1 - t; a > 0.01 && pal.border.A > 0 {
+		p.Stroke(r, pal.border.Alpha(a), chipRadius, borderW)
 	}
 }

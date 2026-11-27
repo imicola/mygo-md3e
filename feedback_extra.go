@@ -439,7 +439,6 @@ func Banner(c *ui.Context, message string, opts ...BannerOptions) ui.Element {
 	fg := sem.onContainer
 	iconInk := sem.accent
 	actionInk := sem.accent
-	border := sem.border.Alpha(0.35)
 	if o.Tone == ToneNeutral {
 		bg = cs.SurfaceContainerLow
 		if bg.A == 0 {
@@ -448,8 +447,8 @@ func Banner(c *ui.Context, message string, opts ...BannerOptions) ui.Element {
 		fg = cs.OnSurface
 		iconInk = cs.OnSurfaceVariant
 		actionInk = cs.Primary
-		border = resolveHairlineColor(th, ui.Color{})
 	}
+	borderW, border := highContrastBorder(th)
 	if iconInk.A == 0 {
 		iconInk = fg
 	}
@@ -493,8 +492,8 @@ func Banner(c *ui.Context, message string, opts ...BannerOptions) ui.Element {
 		TextColor(fg).
 		Role(role).
 		DimDisabled(false)
-	if border.A > 0 {
-		row.Border(1, border)
+	if borderW > 0 && border.A > 0 {
+		row.Border(borderW, border)
 	}
 	if o.Tone != ToneNeutral && sem.accent.A > 0 {
 		accentBar := sem.accent.Alpha(0.85)

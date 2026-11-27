@@ -211,13 +211,14 @@ func WindowTitleBar(c *ui.Context, opts ...WindowTitleBarOptions) ui.Element {
 	}
 
 	if o.Divider {
+		divW := outlineBorderWidth(th)
 		divCol := resolveHairlineColor(th, ui.Color{})
 		if divCol.A > 0 {
 			root.DrawOver(func(p *ui.Painter, r ui.Rect) {
 				if !isPositiveFiniteF32(r.W) || !isPositiveFiniteF32(r.H) {
 					return
 				}
-				p.Fill(ui.Rect{X: r.X, Y: r.Y + r.H - 1, W: r.W, H: 1}, divCol, 0)
+				p.Fill(ui.Rect{X: r.X, Y: r.Y + r.H - divW, W: r.W, H: divW}, divCol, 0)
 			})
 		}
 	}
@@ -355,8 +356,9 @@ func WindowTitleBar(c *ui.Context, opts ...WindowTitleBarOptions) ui.Element {
 				}
 
 				if hasWinControls && (o.Trailing != nil || showPin) {
-					ui.Box(c).Size(1, min(14, max(8, barH-16))).Shrink(0).
-						Radius(0.5).Background(resolveHairlineColor(th, ui.Color{}))
+					sepW := outlineBorderWidth(th)
+					ui.Box(c).Size(sepW, min(14, max(8, barH-16))).Shrink(0).
+						Radius(sepW * 0.5).Background(resolveHairlineColor(th, ui.Color{}))
 				}
 
 				if hasWinControls {

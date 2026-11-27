@@ -262,22 +262,24 @@ func ContextMenu(c *ui.Context, target ui.Element, items []MenuItem, opts ...Men
 	return target
 }
 
-// styleMenuPanel paints the layered, large-cornered menu surface.
+// styleMenuPanel paints the layered, medium-cornered floating menu surface.
 func styleMenuPanel(c *ui.Context, th *Theme, panel ui.Element, o MenuOptions) {
 	if isPositiveFiniteF32(o.Width) {
 		panel.Width(o.Width)
 	} else {
 		panel.MinWidth(menuPanelMinWidth)
 	}
+	panelRadius := th.Shapes.Radius(tokens.ShapeMedium)
 	panel.Padding(menuPanelPadding).
 		Gap(2).
-		Radius(th.Shapes.Radius(tokens.ShapeLarge)).
-		Background(SurfaceColorForElevation(th, tokens.Level2)).
+		Radius(panelRadius).
+		Background(SurfaceColorForElevation(th, tokens.Level3)).
 		TextColor(th.Colors.OnSurface).
 		AttachedOrigin()
-	if hl := resolveHairlineColor(th, ui.Color{}); hl.A > 0 {
-		panel.Border(1, hl)
+	if hcW, hcCol := highContrastBorder(th); hcW > 0 {
+		panel.Border(hcW, hcCol)
 	}
+	attachTopSpecular(panel, th, tokens.Level2, [4]float32{panelRadius, panelRadius, panelRadius, panelRadius})
 	ApplyElevationShadows(th, panel, tokens.Level2)
 	if !(th.ReduceMotion || c.Preferences().ReduceMotion) {
 		panel.Transition(ui.ElementTransition{

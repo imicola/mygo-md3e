@@ -119,8 +119,13 @@ func IconButton(c *ui.Context, label string, icon IconDraw, opts ...IconButtonOp
 	if pal.container.A > 0 {
 		el.Background(pal.container)
 	}
+	borderW := float32(0)
 	if pal.border.A > 0 {
-		el.Border(1, pal.border)
+		borderW = 1
+		if !disabled {
+			borderW = outlineBorderWidth(th)
+		}
+		el.Border(borderW, pal.border)
 	}
 
 	pressed := el.Pressed()
@@ -136,8 +141,8 @@ func IconButton(c *ui.Context, label string, icon IconDraw, opts ...IconButtonOp
 	}
 
 	borderInset := float32(0)
-	if pal.border.A > 0 {
-		borderInset = 1
+	if borderW > 0 {
+		borderInset = borderW
 	}
 	attachRippleWithContext(c, th, el, StateLayerOptions{
 		Color:       pal.content,
@@ -209,8 +214,13 @@ func ToggleIconButton(c *ui.Context, on *bool, label string, icon IconDraw, opts
 	if container.A > 0 {
 		el.Background(container)
 	}
+	borderW := float32(0)
 	if border.A > 0 {
-		el.Border(1, border)
+		borderW = 1
+		if !disabled {
+			borderW = outlineBorderWidth(th)
+		}
+		el.Border(borderW, border)
 	}
 
 	pressed := el.Pressed()
@@ -227,8 +237,8 @@ func ToggleIconButton(c *ui.Context, on *bool, label string, icon IconDraw, opts
 	}
 
 	borderInset := float32(0)
-	if border.A > 0 {
-		borderInset = 1
+	if borderW > 0 {
+		borderInset = borderW
 	}
 	attachRippleWithContext(c, th, el, StateLayerOptions{
 		Color:       content,
