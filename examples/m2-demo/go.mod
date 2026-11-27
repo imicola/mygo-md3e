@@ -5,7 +5,7 @@ go 1.27.3
 tool github.com/egoist/mygo/cmd/mygo
 
 require (
-	github.com/egoist/mygo v0.10.1-0.20261119113012-61ea5567ab14
+	github.com/egoist/mygo v0.10.1-0.20261126131133-611bbf74402f
 	github.com/imicola/mygo-md3e v0.0.0-00010101000000-000000000000
 )
 

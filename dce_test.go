@@ -81,13 +81,14 @@ func main() {
 	t.Logf("pure-Go binaries (%s/%s %s): Button %d bytes, Gallery %d bytes",
 		runtime.GOOS, runtime.GOARCH, runtime.Version(), buttonBytes, galleryBytes)
 	// Keep absolute budgets on the platform and toolchain family used for
-	// the baseline. Linker sections and frameworks differ on other targets.
+	// the baseline (mygo v0.10.1-0.20261126131133-611bbf74402f: Button ~14.01 MB,
+	// Gallery ~18.49 MB). Linker sections and frameworks differ on other targets.
 	if runtime.GOOS == "linux" && runtime.GOARCH == "amd64" && strings.HasPrefix(runtime.Version(), "go1.27.") {
-		if buttonBytes > 13_900_000 {
-			t.Errorf("Button binary is %d bytes, want <= 13,900,000", buttonBytes)
+		if buttonBytes > 14_100_000 {
+			t.Errorf("Button binary is %d bytes, want <= 14,100,000", buttonBytes)
 		}
-		if galleryBytes > 18_500_000 {
-			t.Errorf("Gallery binary is %d bytes, want <= 18,500,000", galleryBytes)
+		if galleryBytes > 18_600_000 {
+			t.Errorf("Gallery binary is %d bytes, want <= 18,600,000", galleryBytes)
 		}
 	}
 }
