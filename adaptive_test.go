@@ -390,3 +390,61 @@ func TestBentoGridResponsiveSpansAndZeroSizeSafety(t *testing.T) {
 		t.Fatalf("zero-sized BentoGrid triggered %d rebuilds", builds)
 	}
 }
+
+func TestAdaptiveScaffoldContentWidthTracksLiveRailSpring(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor, ThemeOptions{Density: tokens.DensityDesktop})
+	icon := func(p *ui.Painter, r ui.Rect, ink ui.Color) {
+		p.Fill(r, ink, 2)
+	}
+	dests := []NavigationDestination{
+		{Label: "Home", Icon: icon},
+		{Label: "Settings", Icon: icon},
+	}
+	selected := 0
+	expanded := false
+	var observedScopedW float32
+	var observedSlotW float32
+
+	tt := ui.NewTester(func(c *ui.Context) {
+		ThemeScope(c, th, func() {
+			AdaptiveScaffold(c.Key("live-scaffold"), dests, func() {
+				if w, ok := scopedContentWidth(c); ok {
+					observedScopedW = w
+				}
+				ui.Box(c).Fill().Draw(func(_ *ui.Painter, r ui.Rect) {
+					observedSlotW = r.W
+				})
+			}, AdaptiveScaffoldOptions{
+				Selected:          &selected,
+				RailExpanded:      &expanded,
+				RailExpandedWidth: 192,
+			})
+		}).Fill()
+	}, 970, 500)
+
+	tt.Advance(600 * time.Millisecond)
+	if absF32(observedScopedW-observedSlotW) > 1.0 || absF32(observedSlotW-890) > 1.0 {
+		t.Fatalf("collapsed baseline mismatch: scoped=%.1f actual=%.1f want ~890", observedScopedW, observedSlotW)
+	}
+
+	// Toggle rail expanded (80 -> 192 DIP): scoped content width must track actual live slot width
+	// across first, mid-spring, and settled frames within 1 DIP.
+	expanded = true
+	tt.Frame()
+	if absF32(observedScopedW-observedSlotW) > 1.0 {
+		t.Fatalf("frame 1 expand mismatch: scoped=%.1f actual=%.1f (premature breakpoint jump)", observedScopedW, observedSlotW)
+	}
+
+	tt.Advance(60 * time.Millisecond)
+	if absF32(observedScopedW-observedSlotW) > 1.0 {
+		t.Fatalf("mid-spring expand mismatch: scoped=%.1f actual=%.1f", observedScopedW, observedSlotW)
+	}
+
+	tt.Advance(800 * time.Millisecond)
+	if absF32(observedScopedW-observedSlotW) > 1.0 || absF32(observedSlotW-778) > 1.0 {
+		t.Fatalf("settled expanded mismatch: scoped=%.1f actual=%.1f want ~778", observedScopedW, observedSlotW)
+	}
+	if tt.FramePending() {
+		t.Fatal("AdaptiveScaffold rail spring did not settle")
+	}
+}

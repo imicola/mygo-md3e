@@ -105,6 +105,11 @@ type navRailIndicatorState struct {
 //		{Label: "Mail", Icon: mailIcon, Badge: "3"},
 //	}, md3e.NavigationRailOptions{Selected: &app.tab, Expanded: &app.railExpanded})
 func NavigationRail(c *ui.Context, destinations []NavigationDestination, opts ...NavigationRailOptions) ui.Element {
+	root, _ := buildNavigationRail(c, destinations, opts...)
+	return root
+}
+
+func buildNavigationRail(c *ui.Context, destinations []NavigationDestination, opts ...NavigationRailOptions) (ui.Element, float32) {
 	if len(opts) > 1 {
 		panic("md3e: NavigationRail takes at most one NavigationRailOptions")
 	}
@@ -186,7 +191,7 @@ func NavigationRail(c *ui.Context, destinations []NavigationDestination, opts ..
 	})
 
 	if !listCol.Valid() {
-		return root
+		return root, railW
 	}
 
 	selIdx := -1
@@ -309,7 +314,7 @@ func NavigationRail(c *ui.Context, destinations []NavigationDestination, opts ..
 		}
 	})
 
-	return root
+	return root, railW
 }
 
 // navRailDestination builds one destination of a NavigationRail. expand is the

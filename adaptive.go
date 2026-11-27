@@ -235,24 +235,12 @@ func AdaptiveScaffold(c *ui.Context, destinations []NavigationDestination, conte
 	class := resolveSizeClass(c, o.WidthOverride)
 	navLabel := labelOr(o.NavigationLabel, "Navigation")
 
-	// The content slot only gets what the rail leaves, so carry that width into
-	// the content build: nested layouts must not treat a wide window with a wide
-	// rail as a wide content area.
+	// The content slot only gets what the rail leaves, so carry the live
+	// spring width of NavigationRail into the content build: nested layouts
+	// track the actual remaining room instead of jumping early on the target bool.
 	winW, _ := c.Size()
 	if isPositiveFiniteF32(o.WidthOverride) {
 		winW = o.WidthOverride
-	}
-	contentW := winW
-	if class != WindowCompact && len(destinations) > 0 {
-		railW := float32(navRailCollapsedWidth)
-		expanded := class == WindowExpanded
-		if o.RailExpanded != nil {
-			expanded = *o.RailExpanded
-		}
-		if expanded {
-			railW = resolveNavRailExpandedWidth(o.RailExpandedWidth, th.Density)
-		}
-		contentW = max(0, contentW-railW)
 	}
 
 	root := ui.Column(c).
@@ -273,13 +261,14 @@ func AdaptiveScaffold(c *ui.Context, destinations []NavigationDestination, conte
 		}
 
 		ui.Row(c).Grow(1).FillWidth().MinWidth(0).MinHeight(0).Children(func() {
+			contentW := winW
 			if class != WindowCompact && len(destinations) > 0 {
 				expanded := o.RailExpanded
 				if expanded == nil {
 					auto := class == WindowExpanded
 					expanded = &auto
 				}
-				NavigationRail(c.Key(adaptiveNavRailKey{}), destinations, NavigationRailOptions{
+				_, liveRailW := buildNavigationRail(c.Key(adaptiveNavRailKey{}), destinations, NavigationRailOptions{
 					Selected:      selected,
 					Changed:       o.Changed,
 					Expanded:      expanded,
@@ -288,6 +277,7 @@ func AdaptiveScaffold(c *ui.Context, destinations []NavigationDestination, conte
 					Label:         navLabel,
 					Disabled:      o.Disabled,
 				})
+				contentW = max(0, winW-liveRailW)
 			}
 
 			ui.Box(c.Key(adaptiveContentKey{})).
