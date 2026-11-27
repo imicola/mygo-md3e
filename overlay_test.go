@@ -979,3 +979,40 @@ func TestAlertDialogParentCloseClearsChildFullScreenDialog(t *testing.T) {
 		})
 	}
 }
+
+func TestBottomSheetHiddenDetentsNoPerFrameSortAllocAndClampsDetent(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor, ThemeOptions{ReduceMotion: true})
+	open := false
+	detent := 9
+	detents := []float32{1.0, 0.25, -0.5, 0.6} // 3 valid detents -> clamped to index 2
+
+	ttSheet := ui.NewTester(func(c *ui.Context) {
+		ThemeScope(c, th, func() {
+			BottomSheet(c.Key("hidden-sheet"), &open, BottomSheetOptions{
+				Modal:   true,
+				Detents: detents,
+				Detent:  &detent,
+				Label:   "Hidden",
+			})
+		})
+	}, 300, 300)
+	if detent != 2 {
+		t.Fatalf("hidden BottomSheet clamped detent = %d, want 2", detent)
+	}
+
+	ttEmpty := ui.NewTester(func(c *ui.Context) {
+		ThemeScope(c, th, func() {
+			ui.Box(c.Key("empty-anchor")).Size(0, 0)
+		})
+	}, 300, 300)
+	for range 10 {
+		ttSheet.Frame()
+		ttEmpty.Frame()
+	}
+
+	sheetAllocs := testing.AllocsPerRun(50, func() { ttSheet.Frame() })
+	emptyAllocs := testing.AllocsPerRun(50, func() { ttEmpty.Frame() })
+	if sheetAllocs > emptyAllocs {
+		t.Fatalf("hidden Modal BottomSheet allocated %.1f allocs/frame vs empty host %.1f (extra per-frame Detents sort allocation)", sheetAllocs, emptyAllocs)
+	}
+}

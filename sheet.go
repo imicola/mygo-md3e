@@ -1,6 +1,7 @@
 package md3e
 
 import (
+	"slices"
 	"time"
 
 	"github.com/egoist/mygo/ui"
@@ -47,10 +48,23 @@ const (
 
 // bottomSheetState remembers a modal sheet through its exit animation.
 type bottomSheetState struct {
-	shown      bool
-	appeared   bool
-	exitHeight float32
-	exitOffset float32
+	shown       bool
+	appeared    bool
+	exitHeight  float32
+	exitOffset  float32
+	hasDetents  bool
+	rawDetents  []float32
+	normDetents []float32
+}
+
+func (st *bottomSheetState) resolveDetents(in []float32) []float32 {
+	if st.hasDetents && slices.Equal(st.rawDetents, in) {
+		return st.normDetents
+	}
+	st.rawDetents = append(st.rawDetents[:0], in...)
+	st.normDetents = normalizeDetentsInto(st.normDetents[:0], in)
+	st.hasDetents = true
+	return st.normDetents
 }
 
 // bottomSheetDragState follows a pull of the sheet's handle in the scrim's
@@ -110,7 +124,14 @@ func BottomSheet(c *ui.Context, open *bool, opts ...BottomSheetOptions) ui.Eleme
 	if detent == nil {
 		detent = localInt(anchor, animChan4)
 	}
-	detents := normalizeDetents(o.Detents)
+	if !*open && !st.shown {
+		*detent = max(0, min(*detent, countValidDetents(o.Detents)-1))
+		st.appeared = false
+		st.exitHeight, st.exitOffset = 0, 0
+		*drag = bottomSheetDragState{}
+		return anchor
+	}
+	detents := st.resolveDetents(o.Detents)
 	*detent = max(0, min(*detent, len(detents)-1))
 
 	_, windowH := c.Size()
@@ -121,12 +142,6 @@ func BottomSheet(c *ui.Context, open *bool, opts ...BottomSheetOptions) ui.Eleme
 	maxH := windowH * detents[len(detents)-1]
 	baseH := windowH * detents[*detent]
 	reduce := th.ReduceMotion || c.Preferences().ReduceMotion
-
-	if !*open && !st.shown {
-		*st = bottomSheetState{}
-		*drag = bottomSheetDragState{}
-		return anchor
-	}
 	if *open {
 		if !st.shown {
 			st.exitHeight, st.exitOffset = 0, 0
@@ -415,17 +430,32 @@ func bottomSheetPanel(c *ui.Context, th *Theme, height float32, label string, o 
 	return panel
 }
 
-// normalizeDetents returns the sheet's detents clamped to (0, 1] and sorted
-// ascending, or the {0.5, 1} default.
-func normalizeDetents(detents []float32) []float32 {
-	out := make([]float32, 0, len(detents))
+// countValidDetents returns how many entries in detents fall in (0, 1],
+// or 2 when none do (matching the {0.5, 1} default), without allocating.
+func countValidDetents(detents []float32) int {
+	n := 0
+	for _, d := range detents {
+		if d > 0 && d <= 1 {
+			n++
+		}
+	}
+	if n == 0 {
+		return 2
+	}
+	return n
+}
+
+// normalizeDetentsInto appends valid (0, 1] detents into dst, sorted ascending,
+// or {0.5, 1} when none are valid.
+func normalizeDetentsInto(dst, detents []float32) []float32 {
+	out := dst[:0]
 	for _, d := range detents {
 		if d > 0 && d <= 1 {
 			out = append(out, d)
 		}
 	}
 	if len(out) == 0 {
-		return []float32{0.5, 1}
+		return append(out, 0.5, 1)
 	}
 	for i := 1; i < len(out); i++ {
 		for j := i; j > 0 && out[j] < out[j-1]; j-- {
@@ -433,4 +463,10 @@ func normalizeDetents(detents []float32) []float32 {
 		}
 	}
 	return out
+}
+
+// normalizeDetents returns the sheet's detents clamped to (0, 1] and sorted
+// ascending, or the {0.5, 1} default.
+func normalizeDetents(detents []float32) []float32 {
+	return normalizeDetentsInto(make([]float32, 0, len(detents)), detents)
 }
