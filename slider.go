@@ -376,12 +376,20 @@ func drawSliderStopDots(p *ui.Painter, x0, w, cy float32, loVal, hiVal, step flo
 		return
 	}
 	span := hiVal - loVal
-	n := int(span/step + 1e-9)
-	if n <= 0 || n > sliderMaxStops {
+	if !(span > 0) || step >= span {
 		return
 	}
-	for i := 1; i < n; i++ {
-		f := float32((float64(i) * step) / span)
+	eps := span * 1e-9
+	maxSteps := int(math.Floor((span - eps) / step))
+	if maxSteps <= 0 || maxSteps > sliderMaxStops {
+		return
+	}
+	for i := 1; i <= maxSteps; i++ {
+		pos := float64(i) * step
+		if pos >= span-eps {
+			break
+		}
+		f := float32(pos / span)
 		if rtl {
 			f = 1 - f
 		}
@@ -433,18 +441,30 @@ func showValueIndicator(c *ui.Context, th *Theme, text string, cx, anchorTop, an
 	pillH := max(float32(sliderIndicatorHeight)-tail, tm.LineHeight+10)
 	h := pillH + tail
 
-	winW, _ := c.Size()
-	left := cx - w/2
-	if winW > w+16 {
-		left = clampF32(left, 8, winW-w-8)
+	winW, winH := c.Size()
+	margin := float32(8)
+	if winW > 0 {
+		if winW <= 2*margin {
+			margin = max(float32(0), min(4, winW*0.1))
+		}
+		availW := max(float32(1), winW-2*margin)
+		w = min(w, availW)
 	}
-	tipOffsetX := clampF32(cx-left, pillH*0.5, max(pillH*0.5, w-pillH*0.5))
+	left := cx - w/2
+	if winW > 0 {
+		left = clampF32(left, margin, max(margin, winW-w-margin))
+	}
+	tipInset := min(w*0.5, max(float32(7), pillH*0.35))
+	tipOffsetX := clampF32(cx-left, tipInset, max(tipInset, w-tipInset))
 
 	flipped := false
 	top := anchorTop - h - 8
 	if top < 4 && anchorBottom > 0 {
 		flipped = true
 		top = anchorBottom + 6
+	}
+	if winH > 0 {
+		top = clampF32(top, 4, max(4, winH-h-4))
 	}
 	originY := float32(1)
 	if flipped {
@@ -512,7 +532,16 @@ func showValueIndicator(c *ui.Context, th *Theme, text string, cx, anchorTop, an
 			}
 
 			tw, thText := p.MeasureText(0, span)
-			p.RichText(pill.X+(pill.W-tw)/2, pill.Y+(pill.H-thText)/2, 0, span)
+			textClip := insetRect(pill, 4)
+			if textClip.W > 0 && textClip.H > 0 {
+				p.Clip(textClip, max(0, radius-4), func() {
+					txText := pill.X + (pill.W-tw)/2
+					if tw > textClip.W {
+						txText = textClip.X
+					}
+					p.RichText(txText, pill.Y+(pill.H-thText)/2, 0, span)
+				})
+			}
 		})
 	})
 }

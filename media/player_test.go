@@ -508,3 +508,73 @@ func TestAudioPlayerCardMiniPlayerDynamicColorAndReduceMotion(t *testing.T) {
 		t.Fatalf("MiniPlayer with DynamicColor did not fill parent width: ok=%v bounds=%+v", ok, reg.Bounds)
 	}
 }
+
+func TestMediaScrubberTimeBubbleNarrowWindowClamping(t *testing.T) {
+	th := md3e.ThemeFromSeed(ui.RGB(103, 80, 164), md3e.ThemeOptions{ReduceMotion: true})
+	bubbleBg := ui.RGB(24, 24, 30)
+	bubbleFg := ui.RGB(248, 248, 252)
+
+	for _, tc := range []struct {
+		name string
+		winW int
+		pos  time.Duration
+		rtl  bool
+		zoom float32
+	}{
+		{"Narrow76_End_LTR", 76, 12*time.Hour + 34*time.Minute + 56*time.Second, false, 1},
+		{"Narrow96_Start_LTR", 96, 0, false, 1},
+		{"Narrow96_End_RTL", 96, 12*time.Hour + 34*time.Minute + 56*time.Second, true, 1},
+		{"Narrow152_Zoom2_End_LTR", 152, 12*time.Hour + 34*time.Minute + 56*time.Second, false, 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tt := ui.NewTester(func(c *ui.Context) {
+				if tc.zoom > 1 {
+					c.SetZoom(tc.zoom)
+				}
+				md3e.ThemeScope(c, th, func() {
+					ui.Column(c).Fill().Background(ui.RGB(250, 250, 250)).Padding(56, 4, 4, 4).Children(func() {
+						mediaScrubber(c.Key("narrow-scrub"), scrubberOptions{
+							position:   tc.pos,
+							duration:   12*time.Hour + 34*time.Minute + 56*time.Second,
+							showBubble: true,
+							bubbleBg:   bubbleBg,
+							bubbleFg:   bubbleFg,
+							label:      "Scrub",
+						})
+					})
+				}).Fill()
+			}, tc.winW, 120)
+			if tc.rtl {
+				tt.SetDirection(ui.RightToLeft)
+			}
+			tt.Key(0, ui.KeyTab)
+			tt.Frame()
+
+			img := tt.Image()
+			b := img.Bounds()
+			minX, maxX := b.Max.X, -1
+			for y := b.Min.Y; y < 56 && y < b.Max.Y; y++ {
+				for x := b.Min.X; x < b.Max.X; x++ {
+					px := img.RGBAAt(x, y)
+					dr := int(px.R) - int(bubbleBg.R)
+					dg := int(px.G) - int(bubbleBg.G)
+					db := int(px.B) - int(bubbleBg.B)
+					if dr*dr+dg*dg+db*db <= 25*25 {
+						if x < minX {
+							minX = x
+						}
+						if x > maxX {
+							maxX = x
+						}
+					}
+				}
+			}
+			if maxX < 0 {
+				t.Fatal("media scrubber time bubble not painted")
+			}
+			if minX == 0 || maxX >= b.Max.X-1 {
+				t.Fatalf("media scrubber time bubble clipped edge: minX=%d maxX=%d bounds=[%d..%d]", minX, maxX, b.Min.X, b.Max.X-1)
+			}
+		})
+	}
+}

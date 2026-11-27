@@ -906,3 +906,120 @@ func TestSlidersHoverZeroRebuildsAndSettles(t *testing.T) {
 		}
 	})
 }
+
+func TestSliderDiscreteNonDivisibleStopsAndEdges(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor, ThemeOptions{ReduceMotion: true})
+	cs := th.Colors
+
+	// Non-divisible step: lo=0, hi=10, step=3 -> interior stops at 3, 6, and 9!
+	val := 0.0
+	tt := sliderCanvas(th, func(c *ui.Context) {
+		Slider(c, &val, 0, 10, SliderOptions{Label: "OddStep", Step: 3})
+	})
+	b := buttonInfo(t, tt, ui.RoleSlider, "OddStep").Bounds
+	cy := int(math.Round(float64(b.Y + b.H/2)))
+	img := tt.Image()
+	for _, stopVal := range []float64{3, 6, 9} {
+		sx := int(math.Round(float64(sliderX(b, float32(stopVal/10.0)))))
+		found := false
+		for dy := -2; dy <= 2 && !found; dy++ {
+			for dx := -2; dx <= 2 && !found; dx++ {
+				if colorMatches(img.RGBAAt(sx+dx, cy+dy), cs.OnSurfaceVariant, 35) {
+					found = true
+				}
+			}
+		}
+		if !found {
+			t.Fatalf("non-divisible stop dot at value %.0f (x=%d, y=%d) missing", stopVal, sx, cy)
+		}
+	}
+
+	// RTL mirrors stop at 9 to fraction 1 - 0.9 = 0.1 (left side).
+	tt.SetDirection(ui.RightToLeft)
+	tt.Frame()
+	bRTL := buttonInfo(t, tt, ui.RoleSlider, "OddStep").Bounds
+	imgRTL := tt.Image()
+	sxRTL := int(math.Round(float64(sliderX(bRTL, 0.1))))
+	foundRTL := false
+	for dy := -2; dy <= 2 && !foundRTL; dy++ {
+		for dx := -2; dx <= 2 && !foundRTL; dx++ {
+			if colorMatches(imgRTL.RGBAAt(sxRTL+dx, cy+dy), cs.OnSurfaceVariant, 35) {
+				foundRTL = true
+			}
+		}
+	}
+	if !foundRTL {
+		t.Fatalf("RTL non-divisible stop dot at value 9 (x=%d, y=%d) missing", sxRTL, cy)
+	}
+
+	// step > span draws zero interior dots without panic.
+	vBig := 5.0
+	ttBig := sliderCanvas(th, func(c *ui.Context) {
+		Slider(c, &vBig, 0, 10, SliderOptions{Label: "BigStep", Step: 25})
+	})
+	ttBig.Frame()
+}
+
+func TestSliderValueIndicatorNarrowWindowAndZoomClamping(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor, ThemeOptions{ReduceMotion: true})
+	for _, tc := range []struct {
+		name string
+		winW int
+		val  float64
+		rtl  bool
+		zoom float32
+	}{
+		{"Narrow96_Start_LTR", 96, 0, false, 1},
+		{"Narrow96_End_LTR", 96, 100, false, 1},
+		{"Narrow96_End_RTL", 96, 100, true, 1},
+		{"Narrow160_Zoom2_End", 160, 100, false, 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			v := tc.val
+			tt := ui.NewTester(func(c *ui.Context) {
+				if tc.zoom > 1 {
+					c.SetZoom(tc.zoom)
+				}
+				ThemeScope(c, th, func() {
+					ui.Column(c).Fill().Background(canvasRGB).Padding(60, 4, 4, 4).Children(func() {
+						Slider(c.Key("narrow-sl"), &v, 0, 100, SliderOptions{
+							Label: "Narrow",
+							FormatLabel: func(x float64) string {
+								return "VeryLongFormattedValue 100.00%"
+							},
+						}).MinWidth(40).FillWidth()
+					})
+				}).Fill()
+			}, tc.winW, 140)
+			if tc.rtl {
+				tt.SetDirection(ui.RightToLeft)
+			}
+			tt.Key(0, ui.KeyTab)
+			tt.Frame()
+
+			// Verify InverseSurface bubble pixels stay inside the canvas and don't clip off-edge.
+			img := tt.Image()
+			b := img.Bounds()
+			minX, maxX := b.Max.X, -1
+			for y := b.Min.Y; y < 58 && y < b.Max.Y; y++ {
+				for x := b.Min.X; x < b.Max.X; x++ {
+					if colorMatches(img.RGBAAt(x, y), th.Colors.InverseSurface, 30) {
+						if x < minX {
+							minX = x
+						}
+						if x > maxX {
+							maxX = x
+						}
+					}
+				}
+			}
+			if maxX < 0 {
+				t.Fatal("slider value indicator bubble not painted in narrow window")
+			}
+			// Check the bubble has clean left/right margins (not slammed past x=0 or x=Max.X-1).
+			if minX == 0 || maxX >= b.Max.X-1 {
+				t.Fatalf("value indicator bubble clipped viewport edge: minX=%d maxX=%d bounds=[%d..%d]", minX, maxX, b.Min.X, b.Max.X-1)
+			}
+		})
+	}
+}

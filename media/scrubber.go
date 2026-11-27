@@ -421,19 +421,30 @@ func showTimeBubble(c *ui.Context, th *md3e.Theme, text string, cx, anchorTop, p
 	w := clampF32(20+float32(utf8.RuneCountInString(text))*7.5, 48, 120)
 	h := float32(30)
 	tail := float32(5)
+	winW, winH := c.Size()
+	margin := float32(4)
+	if winW > 0 {
+		if winW <= 2*margin {
+			margin = 0
+		}
+		availW := max(float32(1), winW-2*margin)
+		w = min(w, availW)
+	}
 	top := anchorTop - h - tail - 6
 	if top < 4 {
 		top = 4
 	}
+	if winH > 0 {
+		top = clampF32(top, 4, max(4, winH-(h+tail)-4))
+	}
 	left := cx - w*0.5
-	winW, _ := c.Size()
 	if winW > 0 {
-		left = clampF32(left, 4, max(4, winW-w-4))
+		left = clampF32(left, margin, max(margin, winW-w-margin))
 	}
 	scale := 0.65 + 0.35*clampF32(progress, 0, 1.1)
 	opacity := clampF32(progress, 0, 1)
-	rad := h * 0.5
-	tipX := clampF32(cx-left, rad, max(rad, w-rad))
+	tipInset := min(w*0.5, max(tail+2, h*0.35))
+	tipX := clampF32(cx-left, tipInset, max(tipInset, w-tipInset))
 
 	ui.Overlay(c, func() {
 		box := ui.Box(c).
@@ -474,8 +485,9 @@ func showTimeBubble(c *ui.Context, th *md3e.Theme, text string, cx, anchorTop, p
 				Role:        tokens.LabelMedium,
 				Emphasized:  true,
 				TabularNums: true,
+				MaxLines:    1,
 				Color:       fg,
-			})
+			}).MaxWidth(max(0, w-8))
 		})
 	})
 }
