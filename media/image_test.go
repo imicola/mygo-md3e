@@ -421,3 +421,94 @@ func TestImageLightboxRTLAndReduceMotion(t *testing.T) {
 		t.Fatal("ReduceMotion lightbox left FramePending == true after close")
 	}
 }
+
+func TestImageLightboxEmptyItemsResetsSessionAndExitMonotonic(t *testing.T) {
+	red := makeTestBitmap(40, 40, ui.RGB(204, 51, 51))
+	green := makeTestBitmap(40, 40, ui.RGB(51, 180, 75))
+
+	items := []LightboxItem{
+		{Image: red, Title: "Old Slide", Caption: "Old caption"},
+	}
+	th := md3e.ThemeFromSeed(ui.RGB(103, 80, 164))
+	open := true
+	idx := 0
+
+	tt := ui.NewTester(func(c *ui.Context) {
+		md3e.ThemeScope(c, th, func() {
+			ImageLightbox(c.Key("lb"), &open, items, LightboxOptions{
+				Index:   &idx,
+				MinZoom: 1.0,
+				MaxZoom: 5.0,
+			})
+		})
+	}, 600, 400)
+	tt.Advance(500 * time.Millisecond)
+
+	// Zoom in and pan on item 0.
+	if err := tt.Click("Zoom in"); err != nil {
+		t.Fatalf("Zoom in: %v", err)
+	}
+	if err := tt.Click("Zoom in"); err != nil {
+		t.Fatalf("Zoom in 2x: %v", err)
+	}
+	tt.Advance(400 * time.Millisecond)
+	if !tt.HasText("200%") {
+		t.Fatalf("expected 200%% zoom, got texts=%v", tt.Texts())
+	}
+	tt.Press(300, 200)
+	tt.Move(360, 240)
+	tt.Release(360, 240)
+	tt.Frame()
+
+	// Clear items completely; session must end and local state must reset.
+	items = nil
+	tt.Frame()
+	if open {
+		t.Fatal("clearing items should end the active lightbox session (*open == false)")
+	}
+	if tt.FramePending() {
+		t.Fatal("empty items lightbox left pending frames")
+	}
+
+	// Refill with a brand-new item and explicitly reopen.
+	items = []LightboxItem{
+		{Image: green, Title: "New Slide", Caption: "Fresh caption"},
+	}
+	open = true
+	tt.Frame()
+	tt.Advance(600 * time.Millisecond)
+	if !tt.HasText("100%") {
+		t.Fatalf("reopened lightbox after empty items did not reset zoom to 100%%: texts=%v", tt.Texts())
+	}
+	if tt.HasText("Old Slide") || tt.HasText("Old caption") {
+		t.Fatalf("reopened lightbox leaked old slide text: %v", tt.Texts())
+	}
+	if !tt.HasText("New Slide") || !tt.HasText("Fresh caption") {
+		t.Fatalf("reopened lightbox missing new slide metadata: %v", tt.Texts())
+	}
+	if tt.FramePending() {
+		t.Fatal("reopened lightbox did not settle")
+	}
+
+	// Close and verify exit scrim alpha decays monotonically without overshoot/re-brightening.
+	open = false
+	tt.Frame()
+	prevLuma := -1.0
+	for range 25 {
+		tt.Advance(16 * time.Millisecond)
+		// Sample scrim corner pixel (light canvas behind dark scrim => luma increases monotonically as scrim fades out).
+		px := tt.Image().RGBAAt(4, 4)
+		luma := 0.2126*float64(px.R) + 0.7152*float64(px.G) + 0.0722*float64(px.B)
+		if prevLuma >= 0 && luma < prevLuma-2.0 {
+			t.Fatalf("lightbox exit scrim re-darkened (overshoot): prevLuma=%.1f curLuma=%.1f", prevLuma, luma)
+		}
+		prevLuma = luma
+		if !tt.FramePending() {
+			break
+		}
+	}
+	tt.Advance(500 * time.Millisecond)
+	if tt.FramePending() {
+		t.Fatal("lightbox exit did not settle cleanly")
+	}
+}

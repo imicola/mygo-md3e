@@ -101,7 +101,7 @@ func ImageLightbox(c *ui.Context, open *bool, items []LightboxItem, opts ...Ligh
 	}
 
 	anchor := ui.Box(c).Size(0, 0)
-	if open == nil || len(items) == 0 {
+	if open == nil {
 		return anchor
 	}
 
@@ -124,6 +124,24 @@ func ImageLightbox(c *ui.Context, open *bool, items []LightboxItem, opts ...Ligh
 	}
 	st.minZoom = minZ
 	st.maxZoom = maxZ
+
+	if len(items) == 0 {
+		if *open {
+			*open = false
+		}
+		if st.shown || st.appeared || st.zoom != minZ || st.panX != 0 || st.panY != 0 || st.dragging || !st.lastTapAt.IsZero() {
+			st.shown = false
+			st.appeared = false
+			st.openIdx = 0
+			st.lastIdx = -1
+			st.zoom = minZ
+			st.panX, st.panY = 0, 0
+			st.dragging = false
+			st.lastTapAt = time.Time{}
+			anchor.Jump(lightboxShowKey{}, 0)
+		}
+		return anchor
+	}
 
 	idx := st.localIdx
 	if o.Index != nil {
@@ -177,7 +195,7 @@ func ImageLightbox(c *ui.Context, open *bool, items []LightboxItem, opts ...Ligh
 		c.Invalidate()
 		return anchor
 	case !*open:
-		show = animateF32(anchor, lightboxShowKey{}, 0, th.Animation(motion.FastSpatial), false)
+		show = animateF32(anchor, lightboxShowKey{}, 0, th.Animation(motion.FastEffects), false)
 		if anchor.Arrived(lightboxShowKey{}) || (anchor.Settled(lightboxShowKey{}) && show <= 0.001) {
 			st.shown, st.appeared = false, false
 			st.zoom, st.panX, st.panY = minZ, 0, 0
@@ -186,7 +204,7 @@ func ImageLightbox(c *ui.Context, open *bool, items []LightboxItem, opts ...Ligh
 			return anchor
 		}
 	default:
-		show = animateF32(anchor, lightboxShowKey{}, 1, th.Animation(motion.DefaultEffects), false)
+		show = animateF32(anchor, lightboxShowKey{}, 1, th.Animation(motion.DefaultSpatial), false)
 	}
 
 	st.zoom = clampF32(st.zoom, minZ, maxZ)
