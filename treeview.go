@@ -14,10 +14,17 @@ import (
 // TreeNode describes one node in a TreeView hierarchy.
 type TreeNode struct {
 	// Key uniquely identifies this node among its siblings and serves as the
-	// selection value when TreeViewOptions.Selected is used. Comparable keys
-	// keep keyboard focus and local expansion state attached to the node across
-	// sibling expansions or insertions.
+	// selection value when TreeViewOptions.Selected is used and SelectionID is
+	// nil. Comparable keys keep keyboard focus and local expansion state
+	// attached to the node across sibling expansions or insertions. When
+	// TreeViewOptions.Selected is used without SelectionID, Key must be unique
+	// across the entire tree (or include parent identity); for sibling-scoped
+	// duplicate leaf keys across branches, set SelectionID.
 	Key any
+	// SelectionID optionally provides a tree-unique comparable identifier for
+	// TreeViewOptions.Selected and OnSelect while keeping Key sibling-scoped.
+	// When nil, Key is used.
+	SelectionID any
 	// Label is the visible node label and accessible name.
 	Label string
 	// Icon draws an optional leading icon between the disclosure chevron and
@@ -233,7 +240,8 @@ func buildTreeNode(
 		branch := openPtr != nil
 		expanded := branch && *openPtr
 		disabled := nodeDisabled || item.Row.IsDisabled()
-		selected := o.Selected != nil && treeKeysEqual(*o.Selected, n.Key)
+		selKey := treeSelectionKey(n)
+		selected := o.Selected != nil && treeKeysEqual(*o.Selected, selKey)
 
 		selTarget := float32(0)
 		if selected {
@@ -423,11 +431,11 @@ func buildTreeNode(
 		})
 
 		if rowClicked {
-			if o.Selected != nil && n.Key != nil {
-				*o.Selected = n.Key
+			if o.Selected != nil && treeKeyComparable(selKey) {
+				*o.Selected = selKey
 			}
 			if o.OnSelect != nil {
-				o.OnSelect(n.Key)
+				o.OnSelect(selKey)
 			}
 			if n.OnClick != nil {
 				n.OnClick()
@@ -482,19 +490,32 @@ func buildTreeNode(
 	})
 }
 
+func treeSelectionKey(n *TreeNode) any {
+	if n.SelectionID != nil {
+		return n.SelectionID
+	}
+	return n.Key
+}
+
+func treeKeyComparable(key any) bool {
+	if key == nil {
+		return false
+	}
+	return reflect.ValueOf(key).Comparable()
+}
+
 func treeSlotKey(key any, idx int) any {
-	if key != nil && reflect.TypeOf(key).Comparable() {
+	if treeKeyComparable(key) {
 		return key
 	}
 	return treeAutoNodeKey{i: idx}
 }
 
 func treeKeysEqual(a, b any) bool {
-	if a == nil || b == nil {
+	if !treeKeyComparable(a) || !treeKeyComparable(b) {
 		return false
 	}
-	ta, tb := reflect.TypeOf(a), reflect.TypeOf(b)
-	if ta != tb || !ta.Comparable() {
+	if reflect.TypeOf(a) != reflect.TypeOf(b) {
 		return false
 	}
 	return a == b

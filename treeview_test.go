@@ -478,3 +478,140 @@ func TestTreeViewDensityLevelsAndAccessStates(t *testing.T) {
 		}
 	}
 }
+
+func TestTreeViewUncomparableInterfaceFieldKeyNoPanic(t *testing.T) {
+	type boxKey struct{ X any }
+	badKey := boxKey{X: []int{1}}
+	goodKey := boxKey{X: "alpha"}
+	customKey := struct{ ID int }{ID: 7}
+
+	th := ThemeFromSeed(DefaultSeedColor, ThemeOptions{ReduceMotion: true})
+	var selected any = badKey
+	reordered := false
+
+	tt := ui.NewTester(func(c *ui.Context) {
+		ThemeScope(c, th, func() {
+			nodes := []TreeNode{
+				{Key: badKey, Label: "SliceWrapped"},
+				{Key: goodKey, Label: "StringWrapped"},
+				{Key: nil, Label: "NilKey"},
+				{Key: customKey, Label: "CustomKey"},
+			}
+			if reordered {
+				nodes[1], nodes[3] = nodes[3], nodes[1]
+			}
+			ui.Column(c).Size(320, 260).Background(canvasRGB).Children(func() {
+				TreeView(c.Key("uncomp-tree"), nodes, TreeViewOptions{
+					Selected: &selected,
+					Label:    "Uncomparable keys",
+				})
+			})
+		})
+	}, 320, 260)
+
+	// Clicking the node with an uncomparable dynamic interface field must not panic
+	// and must not write the uncomparable value into *Selected.
+	selected = goodKey
+	tt.Frame()
+	badInfo := treeItemInfo(t, tt, "SliceWrapped")
+	tt.ClickAt(badInfo.Bounds.X+badInfo.Bounds.W/2, badInfo.Bounds.Y+badInfo.Bounds.H/2)
+	if !treeKeysEqual(selected, goodKey) {
+		t.Fatalf("clicking uncomparable key overwrote selected to %#v, want %#v", selected, goodKey)
+	}
+
+	// Clicking nil-key node must not panic or overwrite selected.
+	nilInfo := treeItemInfo(t, tt, "NilKey")
+	tt.ClickAt(nilInfo.Bounds.X+nilInfo.Bounds.W/2, nilInfo.Bounds.Y+nilInfo.Bounds.H/2)
+	if !treeKeysEqual(selected, goodKey) {
+		t.Fatalf("clicking nil key overwrote selected to %#v, want %#v", selected, goodKey)
+	}
+
+	// Valid comparable key keeps selection across reorder.
+	customInfo := treeItemInfo(t, tt, "CustomKey")
+	tt.ClickAt(customInfo.Bounds.X+customInfo.Bounds.W/2, customInfo.Bounds.Y+customInfo.Bounds.H/2)
+	if selected != customKey {
+		t.Fatalf("selected = %#v, want %#v", selected, customKey)
+	}
+	reordered = true
+	tt.Frame()
+	if !treeItemInfo(t, tt, "CustomKey").Selected {
+		t.Fatal("valid comparable key lost selection after reorder")
+	}
+	if treeItemInfo(t, tt, "StringWrapped").Selected {
+		t.Fatal("non-selected sibling reported Selected=true after reorder")
+	}
+}
+
+func TestTreeViewSameNameLeavesDistinctSelection(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor, ThemeOptions{ReduceMotion: true})
+	openA, openB := true, true
+	var selected any
+	var clicked []string
+
+	tt := ui.NewTester(func(c *ui.Context) {
+		ThemeScope(c, th, func() {
+			ui.Column(c).Size(320, 260).Background(canvasRGB).Children(func() {
+				TreeView(c.Key("dup-leaf-tree"), []TreeNode{
+					{
+						Key:   "branch-a",
+						Label: "Branch A",
+						Open:  &openA,
+						Children: []TreeNode{
+							{
+								Key:         "settings",
+								SelectionID: "branch-a/settings",
+								Label:       "Settings A",
+								OnClick:     func() { clicked = append(clicked, "A") },
+							},
+						},
+					},
+					{
+						Key:   "branch-b",
+						Label: "Branch B",
+						Open:  &openB,
+						Children: []TreeNode{
+							{
+								Key:         "settings",
+								SelectionID: "branch-b/settings",
+								Label:       "Settings B",
+								OnClick:     func() { clicked = append(clicked, "B") },
+							},
+						},
+					},
+				}, TreeViewOptions{
+					Selected: &selected,
+					Label:    "Branches",
+				})
+			})
+		})
+	}, 320, 260)
+
+	// Select leaf under Branch A; only A's leaf reports Selected=true.
+	leafA := treeItemInfo(t, tt, "Settings A")
+	tt.ClickAt(leafA.Bounds.X+leafA.Bounds.W/2, leafA.Bounds.Y+leafA.Bounds.H/2)
+	if selected != "branch-a/settings" {
+		t.Fatalf("selected = %#v, want %q", selected, "branch-a/settings")
+	}
+	if !treeItemInfo(t, tt, "Settings A").Selected {
+		t.Fatal("Settings A did not report Selected=true")
+	}
+	if treeItemInfo(t, tt, "Settings B").Selected {
+		t.Fatal("Settings B erroneously reported Selected=true when Settings A was selected")
+	}
+
+	// Branch B's same-Key leaf remains independently activatable.
+	leafB := treeItemInfo(t, tt, "Settings B")
+	tt.ClickAt(leafB.Bounds.X+leafB.Bounds.W/2, leafB.Bounds.Y+leafB.Bounds.H/2)
+	if selected != "branch-b/settings" {
+		t.Fatalf("selected = %#v, want %q", selected, "branch-b/settings")
+	}
+	if treeItemInfo(t, tt, "Settings A").Selected {
+		t.Fatal("Settings A remained Selected=true after selecting Settings B")
+	}
+	if !treeItemInfo(t, tt, "Settings B").Selected {
+		t.Fatal("Settings B did not report Selected=true after click")
+	}
+	if !slices.Equal(clicked, []string{"A", "B"}) {
+		t.Fatalf("clicked = %v, want [A B]", clicked)
+	}
+}
