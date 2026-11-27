@@ -468,3 +468,64 @@ func TestSplitButtonDisabled(t *testing.T) {
 		t.Fatal("arrow did not open with the action disabled")
 	}
 }
+
+func TestSplitButtonMenuNilClearsOpenAndExpanded(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor, ThemeOptions{ReduceMotion: true})
+	open := false
+	hasMenu := true
+	actionClicks := 0
+	tt := ui.NewTester(func(c *ui.Context) {
+		ThemeScope(c, th, func() {
+			var menuFn func(ui.Element)
+			if hasMenu {
+				menuFn = func(panel ui.Element) {
+					panel.Children(func() {
+						ui.ButtonBase(c).Label("Save As").Height(32)
+					})
+				}
+			}
+			_, action, _, _ := SplitButton(c.Key("sb"), "Save", SplitButtonOptions{
+				Open: &open,
+				Menu: menuFn,
+			})
+			if action.Clicked() {
+				actionClicks++
+			}
+		})
+	}, 320, 200)
+
+	// Open the menu.
+	arrow := buttonInfo(t, tt, ui.RoleButton, "More options")
+	tt.ClickAt(center(arrow.Bounds))
+	if !open {
+		t.Fatal("clicking arrow did not open SplitButton menu")
+	}
+	if !buttonInfo(t, tt, ui.RoleButton, "More options").Expanded {
+		t.Fatal("open SplitButton arrow does not report Expanded=true")
+	}
+
+	// Revoke Menu (Menu=nil): *open and Expanded must clear immediately, while action still clicks.
+	hasMenu = false
+	tt.Frame()
+	if open {
+		t.Fatal("setting Menu=nil left *open == true")
+	}
+	if buttonInfo(t, tt, ui.RoleButton, "More options").Expanded {
+		t.Fatal("setting Menu=nil left arrow reporting Expanded=true")
+	}
+	action := buttonInfo(t, tt, ui.RoleButton, "Save")
+	tt.ClickAt(center(action.Bounds))
+	if actionClicks != 1 {
+		t.Fatalf("primary action click with Menu=nil fired %d times, want 1", actionClicks)
+	}
+
+	// Restoring Menu must NOT auto-reopen the menu.
+	hasMenu = true
+	tt.Frame()
+	if open {
+		t.Fatal("restoring Menu unexpectedly reopened SplitButton menu")
+	}
+	if buttonInfo(t, tt, ui.RoleButton, "More options").Expanded {
+		t.Fatal("restoring Menu left arrow reporting Expanded=true")
+	}
+}

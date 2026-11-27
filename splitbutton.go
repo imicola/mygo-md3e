@@ -112,8 +112,11 @@ func SplitButton(c *ui.Context, label string, opts ...SplitButtonOptions) (group
 	if open == nil {
 		open = localBool(group, animChan0)
 	}
-	if groupDisabled {
+	canOpen := !groupDisabled && o.Menu != nil && !inExitingOverlay(c)
+	if !canOpen {
 		*open = false
+	} else {
+		registerChildOverlayOpen(c, open)
 	}
 
 	arrowPal := pal
@@ -242,9 +245,6 @@ func SplitButton(c *ui.Context, label string, opts ...SplitButtonOptions) (group
 	}
 
 	if o.Menu != nil {
-		if inExitingOverlay(c) && *open {
-			*open = false
-		}
 		reduce := th.ReduceMotion || c.Preferences().ReduceMotion
 		panel := ui.PopoverBase(c, arrow, open, func(panel ui.Element) {
 			panel.MinWidth(112).
