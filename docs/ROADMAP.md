@@ -16,7 +16,7 @@
    - **历史与文档所有权清晰**：单页应用用一个 `*ui.Router`，需每文档独立 `Back()` 的多文档工作区每个 Tab 持有一个 `*ui.Router`；文档模型持久持有草稿、编辑缓冲、`ScrollState`/`ListState`、选区与焦点槽（跨越上游 10 页视图缓存上限），`TabStrip` 仅派发文档意图；
    - **单一关闭裁判**：轻浮层逻辑关闭立即释放输入，重模态根遮罩独占模态与关闭，父层退出同帧清理子浮层。
 2. **上游 `mygo` 可重放锁版（ADR-10）**：
-   - M16 第一步将根模块与 `examples/m2-demo` 共同升级至经核验的上游候选提交（如 `611bbf74402f`，原生提供 `SplitSecond`/`SplitLimits`/`SplitGap`、`Truncated()`、`Accordion` 禁用头跳过、Router `%2F` 保留等能力），**单独提交升级**并跑通旧消费者兼容夹具与性能基线，严禁无记录飘移。
+   - M16 第一步已将根模块与 `examples/m2-demo` 共同升级锁定至已核验上游提交 `v0.10.1-0.20261126131133-611bbf74402f`（原生提供 `SplitSecond`/`SplitLimits`/`SplitGap`、`Truncated()`、`Accordion` 禁用头跳过、Router `%2F` 保留等能力），**单独提交升级**并跑通旧消费者兼容夹具与性能基线，严禁无记录飘移。
 3. **无框 Tonal 皮肤与单一时钟动效（ADR-06 ~ ADR-07）**：
    - 保持公开 Go API 兼容，升级默认无框 Tonal 表面层次并新增 `tokens.SurfaceStyle`（`SurfaceNeutral` 低色度干净表面），对不透明合成 sRGB 执行完整对比度矩阵门禁；
    - **每个自由度仅受一个时钟控制**（L1 `paintRamp` / L2 锚定 `ElementTransition` / L3 `presence` 模态宿 / L4 `Collapse` 与 `CollapsibleBase` 单通道 / L5 `RouterView` 独占过场），杜绝双重驱动与退场过冲。
@@ -69,25 +69,25 @@ flowchart LR
 
 ### P0：锁版排雷、美学重塑与动效重构（治本提质）
 
-#### M16 — 上游 `mygo` 锁版同步、基线建立与桌面缺陷清零
+#### M16 — 上游 `mygo` 锁版同步、基线建立与桌面缺陷清零（已完成）
 > **目标**：先锁定上游可重放提交、补齐画板/关键帧/性能基准，并一次性修复图 3 及审阅发现的全部 P1/P2 桌面缺陷（改视觉之前先让地基干净无毒）。
 
-- [ ] **M16.1 上游 `github.com/egoist/mygo` 可重放锁版（独立提交）**
-  - 将根 `go.mod` 与 `examples/m2-demo/go.mod` 升级锁定至最新已核验上游提交（候选 `611bbf74402f` 或更新稳定提交），补齐旧消费者编译夹具（校验既有公开签名与复合字面量兼容）；
-  - 复测候选新能力（`SplitSecond`/`SplitLimits`/`SplitGap`、`Truncated()`、`Accordion` 跳过禁用头、`Router` 保留 `%2F` 路径段）并同步记录到 `docs/architecture.md`；
-  - 建立可重跑的基准基线任务（记录升级前后 `BenchmarkDashboardSteady`、`BenchmarkDataTable100K/{Steady,Scroll}`、`TestRetainedHeap` 与 `TestButtonDeadCodeElimination` 数值，并建立复用 Monitor 切片夹具）。
-- [ ] **M16.2 已知显性 Bug 与全仓 P1/P2 缺陷清零（先红后绿回归单测）**
+- [x] **M16.1 上游 `github.com/egoist/mygo` 可重放锁版（独立提交）**
+  - 已将根 `go.mod` 与 `examples/m2-demo/go.mod` 升级锁定至已核验上游提交 `v0.10.1-0.20261126131133-611bbf74402f`（独立提交 `760cbe7`），并补齐外部消费者编译夹具（`compat_m16_test.go`，校验既有公开签名与 `SplitButton` 返回值契约）；
+  - 已在 `compat_m16_test.go` 复测锁版新能力（`SplitSecond`/`SplitLimits`/`SplitGap`、`Truncated()`、`AccordionBase` 跳过禁用头、`Router` 保留 `%2F` 路径段）并同步记录到 `docs/architecture.md`；
+  - 已建立可重跑的基准基线任务（记录 `61ea5567ab14` → `611bbf74402f` 升级前后 `BenchmarkDashboardSteady`、`BenchmarkDataTable100K/{Steady,Scroll}`、`TestRetainedHeap` 与 `TestButtonDeadCodeElimination` 实测数值，并在 `examples/workbench/monitor_slice_test.go` 建立可复用 Monitor 切片夹具与 `BenchmarkMonitorSliceSteady`）。
+- [x] **M16.2 已知显性 Bug 与全仓 P1/P2 缺陷清零（先红后绿回归单测）**
   - **已知 P0/P1**：
-    - [textfield.go](../textfield.go#L321)：`!floated` 时每帧显式调用 `input.Placeholder("")` 清空持久化 `editor.placeholder` + 浮动期按 `labelT` 渐隐；无 `Label` 的 `Outlined` 移除顶部 `10 DIP` 预留；单行 `Filled` 保持固定父链防切 `Label` 丢选区/焦点/撤销（`textfield.go:286`）；
-    - [treeview.go](../treeview.go#L486)：改用 `reflect.Value.Comparable()` 修复含切片结构体 key 运行时 panic；明确同名叶跨分支选择契约；
-    - [datatable.go](../datatable.go#L566) & [virtuallist.go](../virtuallist.go#L227) & [examples/workbench/monitor.go](../examples/workbench/monitor.go#L534)：修复外部 `ListState` 临时覆盖（菜单/ItemKey/选区/CellsStyle 换肤）不撤回问题，并将 `CellMenu` 复制动作改为捕获 `c.Services()` 而非短寿命 `*ui.Context`；
-    - [dialog.go](../dialog.go#L366)：`FullScreenDialog` 接入 `inExitingOverlay` 守卫，父关闭同帧清理子模态；
-    - [media/lightbox.go](../media/lightbox.go#L103)：修正入退场弹簧语义颠倒，并在 `items` 清空时复位 `shown`/`zoom`/`pan`。
+    - [textfield.go](../textfield.go#L321)：`!floated` 时每帧显式调用 `input.Placeholder("")` 清空持久化 `editor.placeholder` + 浮动期按 `labelT` 渐隐；无 `Label` 的 `Outlined` 移除顶部 `10 DIP` 预留；单行 `Filled` 通过固定 keyed 输入父组保持父链稳定防切 `Label`/`LeadingIcon` 丢选区/焦点/撤销；
+    - [treeview.go](../treeview.go#L486)：改用 `reflect.Value.Comparable()` 修复含切片接口字段结构体 key 运行时 panic；新增可选 `TreeNode.SelectionID` 明确跨分支同名叶独立选中契约；
+    - [datatable.go](../datatable.go#L566) & [virtuallist.go](../virtuallist.go#L227) & [examples/workbench/monitor.go](../examples/workbench/monitor.go#L534)：为外部 `*ui.ListState` 建立按字段基底记录与覆盖撤回机制（菜单/ItemKey/选区/HeaderCell 与自动 `CellsStyle` 换肤刷新），并将 `CellMenu`/`OnRowSubmit`/`OnSortChanged` 改为捕获 `c.Services()`；
+    - [dialog.go](../dialog.go#L366)：`FullScreenDialog` 接入 `inExitingOverlay` 守卫并引入 `overlayChildTracker` 与 opener `ui.Handle` 焦点归还，父关闭同帧（含 `ReduceMotion`）清理子模态；
+    - [media/lightbox.go](../media/lightbox.go#L103)：修正入退场弹簧语义颠倒（入场 `DefaultSpatial`、退场临界阻尼单调 `FastEffects`），并在 `items` 清空时结束会话并复位 `shown`/`zoom`/`pan`。
   - **高价值 P2 同步修复**：
-    - `splitbutton.go:115`（`Menu=nil` 时清空 `open` 与 `Expanded`）、`textfield.go:550`（`Error=false` 时静态 `ErrorMessage` 不占空白行）、`adaptive.go:247`（`ContentWidth` 与 `NavigationRail` 瞬时弹簧宽同源防提前换档）、`slider.go:379,432` & `media/scrubber.go:429`（修复不整除步长漏末个停靠点、窄窗与高缩放气泡双侧钳位）、`sheet.go:113`（隐藏 Modal Sheet 跳过每帧切片排序分配）。
-- [ ] **M16.3 视觉画板导出与动效关键帧测试基础设施（前置到 M17 之前）**
-  - 新增按环境变量触发的无头 `ui.Tester` 视觉状态画板导出工具（输出至临时目录，绝不污染仓库），提供改前/改后 Workbench 三档宽度截图对照；
-  - 实现 `§12.4` 关键帧测试辅助（采样 `t = 0, D/4, D/2, 3D/4, D` 校验合成 alpha、包围盒、曲线四分点、弹簧过冲上界、纯 Hover 零树重建与 `ReduceMotion` 零残留帧）。
+    - `splitbutton.go`（`Menu=nil` 时清空 `*open` 与 `Expanded`）、`textfield.go`（`Error=false` 时静态 `ErrorMessage` 不占空白行）、`adaptive.go` & `navrail.go`（`ContentWidth` 与 `NavigationRail` 瞬时弹簧宽同源防提前换档）、`slider.go` & `media/scrubber.go`（修复不整除步长漏末个停靠点、窄窗与高缩放气泡双侧钳位）、`sheet.go`（隐藏 Modal Sheet 跳过每帧切片排序分配并保留 `*Detent` 钳位）。
+- [x] **M16.3 视觉画板导出与动效关键帧测试基础设施（前置到 M17 之前）**
+  - 已在 `examples/workbench/visual_board_test.go` 新增按环境变量（`MD3E_EXPORT_BOARD=1` / `MD3E_EXPORT_BOARD_DIR`）触发的无头 `ui.Tester` 视觉状态画板导出工具（默认输出至临时目录，绝不污染仓库），覆盖 Compact (`520`) / Medium (`760`) / Expanded (`1280`) 三档宽度及 Dark / Light / HighContrast；
+  - 已在 `keyframe_test.go` 实现 `§12.4` 关键帧测试辅助（采样 `t = 0, D/4, D/2, 3D/4, D` 校验 `±2` 码值合成 alpha、`±1px` 包围盒、`O`/`I`/`S` 四分点、弹簧过冲上界、纯 Hover 零树重建、`ReduceMotion` 零残留帧与 `Router` 中途取消边界）。
 
 ---
 
@@ -163,7 +163,7 @@ flowchart LR
 
 - [ ] **M21.1 `Popover` 与 `SideSheet`**
   - `Popover`（桥接 `ui.PopoverBase`，固定零尺寸宿主 key、`Placement` 锚点连接、`AttachedOrigin`+`Flip` 完整进退场、单裁判关闭与焦点安全归还）；
-  - `SideSheet`（`SideSheetStandard` 复用候选上游 `ui.Split` + `SplitSecond()` + `SplitLimits()` 占真实宽度，空间不足 `ContentMin + 柄 + MinWidth` 自动降级为 `SideSheetModal` 且保留用户偏好宽度与正文状态）。
+  - `SideSheet`（`SideSheetStandard` 复用锁版上游 `ui.Split` + `SplitSecond()` + `SplitLimits()` 占真实宽度，空间不足 `ContentMin + 柄 + MinWidth` 自动降级为 `SideSheetModal` 且保留用户偏好宽度与正文状态）。
 - [ ] **M21.2 `CommandPalette`、`Kbd` 与 `FindBar`**
   - `Kbd`（按平台输出 `⌘`/`⌥` 或 `Ctrl`/`Alt` 与完整读屏名，菜单/Tooltip/搜索框共用显示格式且不重复注册热键）；
   - `CommandPalette`（`Cmd/Ctrl+K`：多级命令树深入/Escape 逐级回退、稳定评分排序、rune 级匹配高亮、最近执行记录、`Run` 在关层后单次触发、窗口级数据无全局 map）；
@@ -198,12 +198,13 @@ flowchart LR
 
 > 数据来源于 `phase3-architecture-review.md §7`（`BenchmarkDashboardSteady`、`BenchmarkDataTable100K/{Steady,Scroll}` 与 640×420 预热 `TestRetainedHeap`）：
 
-| 基准项 | 锁定基线 (`61ea5567ab14`) | 候选基线 (`611bbf74402f`) | Phase 3 目标状态 |
+| 基准项 | 升级前基线 (`61ea5567ab14`) | M16 最终锁版 (`611bbf74402f`) | Phase 3 目标状态 |
 | :--- | :---: | :---: | :--- |
-| `DashboardSteady` | `1.112 ms` · 101 allocs/op | `1.035 ms` · 101 allocs/op | 待优化冲刺 `< 0.5 ms` |
-| `DataTable100K/Steady` | `0.442 ms` · 179 allocs/op | `0.377 ms` · 184 allocs/op | 待优化冲刺 `< 0.3 ms`（压降分配） |
-| `DataTable100K/Scroll` | `1.324 ms` · 253 allocs/op | `0.966 ms` · 259 allocs/op | 专项跟踪连续滚动成本 |
-| `TestRetainedHeap` 增量 | `471,328 B` | `371,928 B` | 持续保持 `< 5,000,000 B` |
+| `DashboardSteady` | `0.952 ms` · 59 allocs/op | `1.099 ms` · 59 allocs/op | 待优化冲刺 `< 0.5 ms` |
+| `DataTable100K/Steady` | `0.356 ms` · 110 allocs/op | `0.430 ms` · 115 allocs/op | 待优化冲刺 `< 0.3 ms`（压降分配） |
+| `DataTable100K/Scroll` | `0.891 ms` · 185 allocs/op | `0.845 ms` · 190 allocs/op | 专项跟踪连续滚动成本 |
+| `TestRetainedHeap` 增量 | `478,856 B` | `377,472 B` | 持续保持 `< 5,000,000 B` |
+| `Button` / `Gallery` 体积 | `13.89 MB` / `18.39 MB` | `14.01 MB` / `18.49 MB` | 零禁表符号（`md3e` 自身仅 `80 KB`） |
 
 ### 四条发布硬门禁
 1. **视觉与对比度门禁**：M17 通过全种子/变体/明暗/对比度不透明合成 sRGB 对比度矩阵测试；M17、M19、M22 产出亮/暗/高对比无头视觉画板人工复核通过（零残留提交）。

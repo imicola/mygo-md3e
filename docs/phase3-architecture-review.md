@@ -541,7 +541,7 @@ md3e.ToastStack(c.Key("notifications"),
 
 | 门禁 | 交付前必须留下的证据 |
 |---|---|
-| □ M16 · 锁版可回放 | 记录锁定/候选 SHA、两份 go.mod 与 go.sum、真实上游符号及变更。单独提交升级，先跑旧消费者夹具、原始 Golden、目标包、DCE；再合入行为修复。对 §6 的 P1 建先红后绿的最小回归；含双 build 去重、空→有→空、开→关→重开。文档中的「候选」必须替换为最终锁版 |
+| ☑ M16 · 锁版可回放 | 已将根模块与 `examples/m2-demo` 独立提交锁版至 `v0.10.1-0.20261126131133-611bbf74402f`（`760cbe7`），补齐 `compat_m16_test.go` 旧消费者夹具与 4 项上游新能力复测、`examples/workbench/monitor_slice_test.go` 可复用切片、`examples/workbench/visual_board_test.go` 无头三档宽度画板导出与 `keyframe_test.go` 关键帧助手，并完成 §6 全部 P1/P2 缺陷的先红后绿回归修复与四平台编译验收。 |
 | □ M17 · 颜色和表面 | 保留零值 SurfaceTonal、显式 Hairline/Outlined 与高对比边界；跑 §3 种子×色板×明暗×对比×状态配对，失败输出 seed、前景/背景的最终 RGBA、比值和控件。用固定数据和时钟导出改前/改后 Workbench 三档宽度；画板输出到临时目录。几何 Golden 有意更新时，Windows 默认与非 Windows 所需基线一起审核 |
 | □ M18 · 动效所有权 | 给每个通道标记 paint/pose/layout/modal/router 的一个 owner，登记屏幕移除、重复打开、ReduceMotion 中途开启、快速滚出。按 §4 采像素、几何、build 次数、待发帧；ghost 尾帧不得读取失效句柄或预约下一帧；键盘焦点/A11y 在逻辑关闭时退出。仅做背景 hover 的用例要求树 build 增量为零 |
 | □ M19 · 壳与多文档 | A→B→A 草稿/选区/滚动/焦点可恢复，各文档独立 Back，超过 10 个保活页仍能重建业务状态；测最后一个 Tab、脏项取消、右键批量关闭、固定分区、窗内无目标松手、窗外松手建窗失败。测试系统标题按钮命中、RTL 拖动与 100/150/200% zoom。wasm 的浏览器后退与文档后退各有一个 owner |

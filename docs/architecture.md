@@ -6,7 +6,9 @@
 
 ## 1. 模块与目录布局
 
-Go 模块路径：`github.com/imicola/mygo-md3e`（直接依赖上游 `github.com/egoist/mygo` 与 `tool github.com/egoist/mygo/cmd/mygo`；生命周期静态检查命令为不带路径参数的 `go tool mygo vet`）。
+Go 模块路径：`github.com/imicola/mygo-md3e`（根模块与 `examples/m2-demo` 共同锁定上游 `github.com/egoist/mygo v0.10.1-0.20261126131133-611bbf74402f` 与 `tool github.com/egoist/mygo/cmd/mygo`；生命周期静态检查命令为不带路径参数的 `go tool mygo vet`）。
+
+> **M16 已验证锁版能力（`v0.10.1-0.20261126131133-611bbf74402f`）**：由 [compat_m16_test.go](../compat_m16_test.go) 与 [keyframe_test.go](../keyframe_test.go) 持续回归守护，涵盖 `Element.SplitSecond()` / `SplitLimits` / `SplitGap`（支撑尾侧可调宽检查器）、`Element.Truncated()`（前一帧文本省略检测）、`AccordionBase` 方向键自动跳过禁用头、`Router` 保留路径段内 `%2F`（`/docs/a%2Fb` → `Param("id") == "a/b"`），以及可重跑的基准与无头视觉画板导出任务（`examples/workbench/monitor_slice_test.go`、`examples/workbench/visual_board_test.go`）。
 
 ```text
 .
@@ -140,6 +142,8 @@ Go 模块路径：`github.com/imicola/mygo-md3e`（直接依赖上游 `github.co
 │   ├── markdown_test.go    # Markdown 排版密度、块集成、Stream、Copy as Markdown 与 ReduceMotion 测试
 │   ├── outline_test.go     # Outline 滚动联动、Anchor 回退、键盘与 RTL 测试
 │   └── dce_test.go         # Zero-Bloat / 死代码消除链接边界测试
+├── compat_m16_test.go      # M16.1: 外部消费者 API 兼容夹具与锁版 611bbf74402f 上游新能力回归测试
+├── keyframe_test.go        # M16.3: §12.4 动效关键帧测试基础设施（O/I/S 曲线、合成 alpha、过冲上界、纯 Hover 零重建）
 ├── golden_test.go          # 纯几何 Golden 视觉基线测试（testdata/）
 └── examples/
     ├── m2-demo/            # M2: 独立可运行的令牌/动效/形状预览模块
