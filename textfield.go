@@ -40,6 +40,8 @@ const (
 	textFieldOuterTop   = 10
 )
 
+type textFieldInputGroupKey struct{}
+
 // TextFieldOptions configures TextField and TextArea. The zero value is an
 // enabled, filled, single-line field with no label or icons.
 type TextFieldOptions struct {
@@ -158,7 +160,7 @@ func buildTextField(c *ui.Context, value *string, multiline bool, o TextFieldOpt
 	dm := textFieldMetricsForDensity(th.Density)
 
 	outer := ui.Column(c).Shrink(0).DimDisabled(false)
-	if outlined {
+	if outlined && o.Label != "" {
 		outer.Padding(textFieldOuterTop*scaleUp, 0, 0, 0)
 	}
 	disabled := o.Disabled || outer.IsDisabled()
@@ -283,15 +285,19 @@ func buildTextField(c *ui.Context, value *string, multiline bool, o TextFieldOpt
 			if o.LeadingIcon != nil {
 				drawIconBox(c, o.LeadingIcon, dm.iconSize, variationInk)
 			}
-			if !outlined && !multiline && o.Label != "" {
-				// Shift single-line Filled text downward so it clears the floated
-				// label cleanly while leading/trailing icons remain centered.
-				ui.Row(c).Grow(1).MinWidth(0).AlignItems(ui.Center).Gap(textFieldGap).
-					Padding(dm.filledTopPad*scaleUp, 0, 0, 0).
-					Children(buildInputGroup)
+			inputGroup := ui.Row(c.Key(textFieldInputGroupKey{})).
+				Grow(1).MinWidth(0).Gap(textFieldGap)
+			if multiline {
+				inputGroup.AlignSelf(ui.Stretch).AlignItems(ui.Stretch)
 			} else {
-				buildInputGroup()
+				inputGroup.AlignItems(ui.Center)
+				if !outlined && o.Label != "" {
+					// Shift single-line Filled text downward so it clears the floated
+					// label cleanly while leading/trailing icons remain centered.
+					inputGroup.Padding(dm.filledTopPad*scaleUp, 0, 0, 0)
+				}
 			}
+			inputGroup.Children(buildInputGroup)
 			if o.TrailingIcon != nil {
 				if o.OnTrailing != nil {
 					hasTrailing = true
@@ -320,19 +326,26 @@ func buildTextField(c *ui.Context, value *string, multiline bool, o TextFieldOpt
 
 	focused := input.Focused()
 	floated := false
-	if o.Label == "" {
-		// Without a label the placeholder is the only cue and always shows.
-		input.Placeholder(o.Placeholder)
-	} else {
+	if o.Label != "" {
 		floated = focused || *value != "" || input.Composing()
-		if floated {
-			input.Placeholder(o.Placeholder)
-		}
 	}
 
 	var labelT float32
 	if o.Label != "" {
 		labelT = clampF32(animateValue(field, animChan1, boolFloat(floated), spatial, th.ReduceMotion), 0, 1.1)
+	}
+	if o.Label == "" {
+		// Without a label the placeholder is the only cue and always shows.
+		input.Placeholder(o.Placeholder)
+		input.PlaceholderColor(variationInk)
+	} else if floated {
+		input.Placeholder(o.Placeholder)
+		input.PlaceholderColor(variationInk.Alpha(clampF32(labelT, 0, 1)))
+	} else {
+		// Explicitly clear upstream's persisted editor.placeholder while the
+		// label rests in the content area.
+		input.Placeholder("")
+		input.PlaceholderColor(variationInk.Alpha(0))
 	}
 	indicatorT := clampF32(animateValue(field, animChan2, boolFloat(focused && !disabled), effects, th.ReduceMotion), 0, 1)
 
@@ -547,23 +560,23 @@ func buildTextField(c *ui.Context, value *string, multiline bool, o TextFieldOpt
 		}
 	})
 
-	if o.SupportingText != "" || o.ErrorMessage != "" || (o.CharacterCounter && o.MaxLength > 0) {
-		text := o.SupportingText
-		textColor := cs.OnSurfaceVariant
+	supportText := o.SupportingText
+	textColor := cs.OnSurfaceVariant
+	if disabled {
+		textColor = cs.OnSurface.Alpha(float32(tokens.DisabledContentOpacity))
+	}
+	if o.Error && o.ErrorMessage != "" {
+		supportText = o.ErrorMessage
+		textColor = cs.Error
 		if disabled {
 			textColor = cs.OnSurface.Alpha(float32(tokens.DisabledContentOpacity))
 		}
-		counter := ""
-		if o.CharacterCounter && o.MaxLength > 0 {
-			counter = fmt.Sprintf("%d/%d", utf16Len(*value), o.MaxLength)
-		}
-		if o.Error && o.ErrorMessage != "" {
-			text = o.ErrorMessage
-			textColor = cs.Error
-			if disabled {
-				textColor = cs.OnSurface.Alpha(float32(tokens.DisabledContentOpacity))
-			}
-		}
+	}
+	counter := ""
+	if o.CharacterCounter && o.MaxLength > 0 {
+		counter = fmt.Sprintf("%d/%d", utf16Len(*value), o.MaxLength)
+	}
+	if supportText != "" || counter != "" {
 		outer.Children(func() {
 			row := ui.Row(c).
 				Height(textFieldSupportH*scaleUp).
@@ -572,8 +585,8 @@ func buildTextField(c *ui.Context, value *string, multiline bool, o TextFieldOpt
 				Margin(textFieldSupportGap, 0, 0, 0).
 				AlignItems(ui.Center)
 			row.Children(func() {
-				if text != "" {
-					applyTypeStyleWithTheme(th, ui.Text(c, text).NoWrap().Grow(1).TextColor(textColor).AccessHidden(true), tokens.BodySmall)
+				if supportText != "" {
+					applyTypeStyleWithTheme(th, ui.Text(c, supportText).NoWrap().Grow(1).TextColor(textColor).AccessHidden(true), tokens.BodySmall)
 				} else {
 					ui.Box(c).Grow(1)
 				}

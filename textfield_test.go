@@ -751,3 +751,168 @@ func TestTextFieldDensityRTLAndReduceMotion(t *testing.T) {
 		}
 	}
 }
+
+func TestTextFieldPlaceholderClearsOnBlurAndFadesWithLabel(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor)
+	val := ""
+	tt := fieldCanvas(th, func(c *ui.Context) {
+		ui.Column(c).Gap(16).Children(func() {
+			TextField(c.Key("email"), &val, TextFieldOptions{
+				Variant:     TextFieldOutlined,
+				Label:       "Email",
+				Placeholder: "you@example.com",
+			}).Width(280)
+			Button(c.Key("blur"), "Blur")
+		})
+	})
+
+	// Initially blurred & empty: placeholder must be cleared, not leaked.
+	info := buttonInfo(t, tt, ui.RoleTextField, "Email")
+	if info.Placeholder != "" {
+		t.Fatalf("initial blurred placeholder = %q, want empty", info.Placeholder)
+	}
+
+	// Focus -> label floats and placeholder appears.
+	tt.ClickAt(center(info.Bounds))
+	tt.Advance(900 * time.Millisecond)
+	info = buttonInfo(t, tt, ui.RoleTextField, "Email")
+	if info.Placeholder != "you@example.com" {
+		t.Fatalf("focused placeholder = %q, want %q", info.Placeholder, "you@example.com")
+	}
+
+	// Blur while still empty -> placeholder must clear immediately so it never overlaps the resting label.
+	blur := buttonInfo(t, tt, ui.RoleButton, "Blur")
+	tt.ClickAt(center(blur.Bounds))
+	tt.Advance(900 * time.Millisecond)
+	info = buttonInfo(t, tt, ui.RoleTextField, "Email")
+	if info.Placeholder != "" {
+		t.Fatalf("blurred-after-focus placeholder = %q, want empty (stale editor.placeholder leaked)", info.Placeholder)
+	}
+	if tt.FramePending() {
+		t.Fatal("settled blur left pending frames")
+	}
+}
+
+func TestTextFieldOutlinedNoLabelNoTopReserve(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor, ThemeOptions{ReduceMotion: true})
+	val := ""
+	var unlabeledR, labeledR ui.Rect
+	tt := fieldCanvas(th, func(c *ui.Context) {
+		ui.Column(c).Gap(12).Children(func() {
+			TextField(c.Key("unlabeled"), &val, TextFieldOptions{
+				Variant:     TextFieldOutlined,
+				Placeholder: "Search...",
+			}).Width(260).DrawOver(func(_ *ui.Painter, r ui.Rect) { unlabeledR = r })
+			TextField(c.Key("labeled"), &val, TextFieldOptions{
+				Variant: TextFieldOutlined,
+				Label:   "Query",
+			}).Width(260).DrawOver(func(_ *ui.Painter, r ui.Rect) { labeledR = r })
+		})
+	})
+	tt.Frame()
+
+	wantFieldH := float32(textFieldHeight)
+	if absF32(unlabeledR.H-wantFieldH) > 0.5 {
+		t.Fatalf("unlabeled Outlined outer height = %.1f, want %.1f (no top 10 DIP reserve)", unlabeledR.H, wantFieldH)
+	}
+	if absF32(labeledR.H-(wantFieldH+textFieldOuterTop)) > 0.5 {
+		t.Fatalf("labeled Outlined outer height = %.1f, want %.1f", labeledR.H, wantFieldH+textFieldOuterTop)
+	}
+}
+
+func TestTextFieldFilledLabelTogglePreservesEditorState(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor, ThemeOptions{ReduceMotion: true})
+	val := "hello"
+	label := "Title"
+	showLead := false
+	tt := fieldCanvas(th, func(c *ui.Context) {
+		var lead IconDraw
+		if showLead {
+			lead = mdicon.Search.Draw
+		}
+		TextField(c.Key("stable-field"), &val, TextFieldOptions{
+			Variant:     TextFieldFilled,
+			Label:       label,
+			Placeholder: "Enter title",
+			LeadingIcon: lead,
+		}).Width(280)
+	})
+
+	// Focus, type to push an undo entry, and select all text.
+	info := buttonInfo(t, tt, ui.RoleTextField, "Title")
+	tt.ClickAt(center(info.Bounds))
+	tt.Type(" world")
+	if val != "hello world" {
+		t.Fatalf("typed value = %q, want %q", val, "hello world")
+	}
+	tt.Key(ui.Cmd, ui.KeyA)
+	tt.Frame()
+
+	// Toggle Label from non-empty -> empty and toggle LeadingIcon on.
+	label = ""
+	showLead = true
+	tt.Frame()
+
+	info = buttonInfo(t, tt, ui.RoleTextField, "Enter title")
+	if !info.Focused {
+		t.Fatal("toggling Label off on single-line Filled TextField lost editor focus")
+	}
+	// Replace selection to prove selection survived the Label toggle.
+	tt.Type("X")
+	if val != "X" {
+		t.Fatalf("after Label off + typing over selection, val = %q, want %q (selection lost)", val, "X")
+	}
+
+	// Toggle Label back on and LeadingIcon off, then verify undo stack survived.
+	label = "Title"
+	showLead = false
+	tt.Frame()
+	info = buttonInfo(t, tt, ui.RoleTextField, "Title")
+	if !info.Focused {
+		t.Fatal("toggling Label back on lost editor focus")
+	}
+	tt.Key(ui.Cmd, ui.KeyZ)
+	tt.Frame()
+	if val != "hello world" {
+		t.Fatalf("after Label on + Cmd+Z undo, val = %q, want %q (undo stack lost)", val, "hello world")
+	}
+}
+
+func TestTextFieldStaticErrorMessageNoBlankRowWhenNotError(t *testing.T) {
+	th := ThemeFromSeed(DefaultSeedColor, ThemeOptions{ReduceMotion: true})
+	val := ""
+	isErr := false
+	var plainR, staticErrR ui.Rect
+	tt := fieldCanvas(th, func(c *ui.Context) {
+		ui.Column(c).Gap(12).Children(func() {
+			TextField(c.Key("plain"), &val, TextFieldOptions{
+				Label: "Plain",
+			}).Width(260).DrawOver(func(_ *ui.Painter, r ui.Rect) { plainR = r })
+			TextField(c.Key("with-static-err"), &val, TextFieldOptions{
+				Label:        "Validated",
+				Error:        isErr,
+				ErrorMessage: "Must not be empty",
+			}).Width(260).DrawOver(func(_ *ui.Painter, r ui.Rect) { staticErrR = r })
+		})
+	})
+	tt.Frame()
+
+	if absF32(staticErrR.H-plainR.H) > 0.5 {
+		t.Fatalf("Error=false with static ErrorMessage height = %.1f, want %.1f (same as plain field)", staticErrR.H, plainR.H)
+	}
+
+	// Flipping Error=true adds the error row.
+	isErr = true
+	tt.Frame()
+	wantErrH := plainR.H + textFieldSupportH + textFieldSupportGap
+	if absF32(staticErrR.H-wantErrH) > 0.5 {
+		t.Fatalf("Error=true height = %.1f, want %.1f", staticErrR.H, wantErrH)
+	}
+
+	// Clearing Error=false restores the exact compact height.
+	isErr = false
+	tt.Frame()
+	if absF32(staticErrR.H-plainR.H) > 0.5 {
+		t.Fatalf("after clearing Error, height = %.1f, want %.1f", staticErrR.H, plainR.H)
+	}
+}
