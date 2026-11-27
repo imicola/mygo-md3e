@@ -880,3 +880,102 @@ func TestBottomSheetCancelDragAndExitingChildOverlayIsolation(t *testing.T) {
 		t.Fatal("exited BottomSheet with closed child overlay left pending frames")
 	}
 }
+
+// TestAlertDialogParentCloseClearsChildFullScreenDialog checks that closing an
+// AlertDialog programmatically immediately closes a nested FullScreenDialog on
+// the same frame (both normal motion and ReduceMotion), prevents resurrection
+// on parent reopen, and returns focus once to the opener.
+func TestAlertDialogParentCloseClearsChildFullScreenDialog(t *testing.T) {
+	for _, reduce := range []bool{false, true} {
+		name := "NormalMotion"
+		if reduce {
+			name = "ReduceMotion"
+		}
+		t.Run(name, func(t *testing.T) {
+			th := ThemeFromSeed(DefaultSeedColor, ThemeOptions{ReduceMotion: reduce})
+			parentOpen := false
+			childOpen := false
+			childSaved := 0
+
+			tt := containerCanvas(th, func(c *ui.Context) {
+				if Button(c.Key("opener"), "Open Parent").Clicked() {
+					parentOpen = true
+				}
+				AlertDialog(c.Key("parent-alert"), &parentOpen, AlertDialogOptions{
+					Headline: "Parent Alert",
+					Content: func() ui.Element {
+						return ui.Column(c).Children(func() {
+							if Button(c.Key("open-child"), "Open Child").Clicked() {
+								childOpen = true
+							}
+							FullScreenDialog(c.Key("child-fs"), &childOpen, FullScreenDialogOptions{
+								Title:     "Child Editor",
+								SaveLabel: "Save Child",
+								OnSave:    func() { childSaved++ },
+								Content: func() ui.Element {
+									return ui.Text(c, "Child content")
+								},
+							})
+						})
+					},
+					Dismiss: &DialogAction{Label: "Close"},
+				})
+			})
+
+			// Open parent, then open child FullScreenDialog inside parent's Content.
+			tt.Click("Open Parent")
+			tt.Advance(500 * time.Millisecond)
+			if _, ok := tt.AccessByRole(ui.RoleAlertDialog, "Parent Alert"); !ok {
+				t.Fatal("parent AlertDialog did not open")
+			}
+			tt.Click("Open Child")
+			tt.Advance(300 * time.Millisecond)
+			if _, ok := tt.AccessByRole(ui.RoleDialog, "Child Editor"); !ok {
+				t.Fatal("child FullScreenDialog did not open")
+			}
+			saveBtn := buttonInfo(t, tt, ui.RoleButton, "Save Child")
+
+			// Programmatically close parent while childOpen is still true.
+			parentOpen = false
+			tt.Frame()
+			if childOpen {
+				t.Fatal("programmatic parent close left childOpen == true on same frame")
+			}
+			if _, ok := tt.AccessByRole(ui.RoleDialog, "Child Editor"); ok {
+				t.Fatal("child FullScreenDialog remained in access tree on same frame as parent close")
+			}
+			if reduce {
+				// ReduceMotion closes both modals on the same frame and returns focus immediately.
+				if tt.FramePending() {
+					t.Fatal("ReduceMotion parent + child close left pending frames")
+				}
+				if !tt.Focused("Open Parent") {
+					t.Fatal("ReduceMotion focus did not return to opener after parent + child close")
+				}
+			}
+			// Clicking old Save Child coordinates must not trigger OnSave.
+			tt.ClickAt(center(saveBtn.Bounds))
+			tt.Advance(600 * time.Millisecond)
+			if childSaved != 0 {
+				t.Fatalf("closed child FullScreenDialog fired OnSave %d times, want 0", childSaved)
+			}
+			if tt.FramePending() {
+				t.Fatal("parent + child close left pending frames")
+			}
+			if !reduce && !tt.Focused("Open Parent") {
+				t.Fatal("focus did not return to opener after parent + child close")
+			}
+
+			// Reopening parent must NOT resurrect the child FullScreenDialog.
+			parentOpen = true
+			tt.Frame()
+			tt.Advance(500 * time.Millisecond)
+			if _, ok := tt.AccessByRole(ui.RoleAlertDialog, "Parent Alert"); !ok {
+				t.Fatal("parent AlertDialog failed to reopen")
+			}
+			if _, ok := tt.AccessByRole(ui.RoleDialog, "Child Editor"); ok {
+				t.Fatal("reopening parent resurrected closed child FullScreenDialog")
+			}
+		})
+	}
+}

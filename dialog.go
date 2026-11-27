@@ -11,9 +11,40 @@ import (
 	"github.com/imicola/mygo-md3e/tokens"
 )
 
+type overlayChildTracker struct {
+	childOpens []*bool
+}
+
+func (t *overlayChildTracker) reset() {
+	clear(t.childOpens)
+	t.childOpens = t.childOpens[:0]
+}
+
+func (t *overlayChildTracker) add(open *bool) {
+	if open == nil {
+		return
+	}
+	for _, existing := range t.childOpens {
+		if existing == open {
+			return
+		}
+	}
+	t.childOpens = append(t.childOpens, open)
+}
+
+func (t *overlayChildTracker) clearAll() {
+	for _, open := range t.childOpens {
+		if open != nil && *open {
+			*open = false
+		}
+	}
+	t.reset()
+}
+
 type exitingOverlaySlot struct {
-	srv   ui.Services
-	depth int
+	srv    ui.Services
+	depth  int
+	owners []*overlayChildTracker
 }
 
 var (
@@ -27,8 +58,10 @@ func adjustExitingOverlayDepth(srv ui.Services, delta int) {
 	for i := range exitingOverlaySlots {
 		if exitingOverlaySlots[i].srv == srv {
 			exitingOverlaySlots[i].depth += delta
-			if exitingOverlaySlots[i].depth <= 0 {
+			if exitingOverlaySlots[i].depth <= 0 && len(exitingOverlaySlots[i].owners) == 0 {
 				exitingOverlaySlots[i] = exitingOverlaySlot{}
+			} else if exitingOverlaySlots[i].depth < 0 {
+				exitingOverlaySlots[i].depth = 0
 			}
 			return
 		}
@@ -39,6 +72,83 @@ func adjustExitingOverlayDepth(srv ui.Services, delta int) {
 	for i := range exitingOverlaySlots {
 		if exitingOverlaySlots[i].srv == (ui.Services{}) {
 			exitingOverlaySlots[i] = exitingOverlaySlot{srv: srv, depth: delta}
+			return
+		}
+	}
+}
+
+func withOverlayOwner(c *ui.Context, tracker *overlayChildTracker, exiting bool, fn func()) {
+	if c == nil {
+		fn()
+		return
+	}
+	srv := c.Services()
+	if srv == (ui.Services{}) {
+		fn()
+		return
+	}
+	if exiting {
+		withExitingOverlay(c, true, fn)
+		return
+	}
+	if tracker == nil {
+		fn()
+		return
+	}
+	tracker.reset()
+	exitingOverlayMu.Lock()
+	slotIdx := -1
+	for i := range exitingOverlaySlots {
+		if exitingOverlaySlots[i].srv == srv {
+			slotIdx = i
+			break
+		}
+	}
+	if slotIdx < 0 {
+		for i := range exitingOverlaySlots {
+			if exitingOverlaySlots[i].srv == (ui.Services{}) {
+				exitingOverlaySlots[i].srv = srv
+				slotIdx = i
+				break
+			}
+		}
+	}
+	if slotIdx >= 0 {
+		exitingOverlaySlots[slotIdx].owners = append(exitingOverlaySlots[slotIdx].owners, tracker)
+	}
+	exitingOverlayMu.Unlock()
+	if slotIdx >= 0 {
+		defer func() {
+			exitingOverlayMu.Lock()
+			owners := exitingOverlaySlots[slotIdx].owners
+			if n := len(owners); n > 0 {
+				owners[n-1] = nil
+				exitingOverlaySlots[slotIdx].owners = owners[:n-1]
+			}
+			if exitingOverlaySlots[slotIdx].depth <= 0 && len(exitingOverlaySlots[slotIdx].owners) == 0 {
+				exitingOverlaySlots[slotIdx] = exitingOverlaySlot{}
+			}
+			exitingOverlayMu.Unlock()
+		}()
+	}
+	fn()
+}
+
+func registerChildOverlayOpen(c *ui.Context, open *bool) {
+	if c == nil || open == nil {
+		return
+	}
+	srv := c.Services()
+	if srv == (ui.Services{}) {
+		return
+	}
+	exitingOverlayMu.Lock()
+	defer exitingOverlayMu.Unlock()
+	for i := range exitingOverlaySlots {
+		if exitingOverlaySlots[i].srv == srv {
+			if n := len(exitingOverlaySlots[i].owners); n > 0 {
+				exitingOverlaySlots[i].owners[n-1].add(open)
+			}
 			return
 		}
 	}
@@ -124,6 +234,8 @@ const (
 type alertDialogState struct {
 	shown    bool
 	appeared bool
+	opener   *ui.Handle
+	children overlayChildTracker
 }
 
 // AlertDialog builds a Material Design 3 Expressive alert over the window while
@@ -155,12 +267,17 @@ func AlertDialog(c *ui.Context, open *bool, opts ...AlertDialogOptions) ui.Eleme
 	}
 	if inExitingOverlay(c) && *open {
 		*open = false
+	} else {
+		registerChildOverlayOpen(c, open)
 	}
 	th := CurrentTheme(c)
 	cs := th.Colors
 	st := localPtr(anchor, animChan2, func() *alertDialogState { return &alertDialogState{} })
 	reduce := th.ReduceMotion || c.Preferences().ReduceMotion
 
+	if !*open {
+		st.children.clearAll()
+	}
 	if !*open && !st.shown {
 		return anchor
 	}
@@ -172,9 +289,18 @@ func AlertDialog(c *ui.Context, open *bool, opts ...AlertDialogOptions) ui.Eleme
 		target = 0
 	}
 	var show, scrimT float32
+	restoreOpener := func() {
+		if st.opener != nil {
+			if el := c.Resolve(*st.opener); !el.Valid() || !el.IsDisabled() {
+				st.opener.Focus(c)
+			}
+			st.opener = nil
+		}
+	}
 	switch {
 	case *open && !st.appeared:
 		st.appeared = true
+		st.opener = focusedTriggerHandle(c)
 		if reduce {
 			show = anchor.Jump(animChan1, 1)
 			scrimT = anchor.Jump(animChan0, 1)
@@ -187,6 +313,7 @@ func AlertDialog(c *ui.Context, open *bool, opts ...AlertDialogOptions) ui.Eleme
 		}
 	case !*open && reduce:
 		st.shown, st.appeared = false, false
+		restoreOpener()
 		c.Invalidate()
 		return anchor
 	case !*open:
@@ -194,6 +321,7 @@ func AlertDialog(c *ui.Context, open *bool, opts ...AlertDialogOptions) ui.Eleme
 		scrimT = animateValue(anchor, animChan0, 0, th.Animation(motion.FastEffects), false)
 		if anchor.Arrived(animChan1) || (anchor.Settled(animChan1) && show <= 0.001) {
 			st.shown, st.appeared = false, false
+			restoreOpener()
 			c.Invalidate()
 			return anchor
 		}
@@ -225,7 +353,7 @@ func AlertDialog(c *ui.Context, open *bool, opts ...AlertDialogOptions) ui.Eleme
 			back.Modal()
 		}
 		back.IgnoreInput(exiting).AccessHidden(exiting)
-		withExitingOverlay(c, exiting, func() {
+		withOverlayOwner(c, &st.children, exiting, func() {
 			back.Children(func() {
 				scaleT := clampF32(show, 0, 1.06)
 				panelScale := 0.92 + 0.08*scaleT
@@ -363,7 +491,17 @@ func FullScreenDialog(c *ui.Context, open *bool, opts ...FullScreenDialogOptions
 		o = opts[0]
 	}
 	anchor := ui.Box(c).Size(0, 0)
-	if open == nil || !*open {
+	if open == nil {
+		return anchor
+	}
+	st := localPtr(anchor, animChan0, func() *overlayChildTracker { return &overlayChildTracker{} })
+	if inExitingOverlay(c) && *open {
+		*open = false
+	} else {
+		registerChildOverlayOpen(c, open)
+	}
+	if !*open {
+		st.clearAll()
 		return anchor
 	}
 	th := CurrentTheme(c)
@@ -387,47 +525,52 @@ func FullScreenDialog(c *ui.Context, open *bool, opts ...FullScreenDialogOptions
 				Enter:    &ui.Motion{Opacity: 0, Y: 24},
 			})
 		}
-		panel.Children(func() {
-			bar := ui.Row(c).Height(fullScreenBarHeight).FillWidth().
-				PaddingStart(4).PaddingEnd(12).AlignItems(ui.Center).Gap(4)
-			bar.Children(func() {
-				close := IconButton(c, closeLabel, mdicon.Close.Draw, IconButtonOptions{Size: tokens.SizeS})
-				if close.Clicked() {
-					dismissed = true
-					if o.OnClose != nil {
-						o.OnClose()
-					}
-					*open = false
-				}
-				if o.Title != "" {
-					title := ui.Text(c, o.Title).Grow(1)
-					title.TextColor(cs.OnSurface)
-					applyTypeStyleWithTheme(th, title, tokens.TitleLarge)
-				} else {
-					ui.Box(c).Grow(1)
-				}
-				if o.SaveLabel != "" {
-					save := Button(c, o.SaveLabel, ButtonOptions{Variant: ButtonText})
-					if save.Clicked() {
+		withOverlayOwner(c, st, false, func() {
+			panel.Children(func() {
+				bar := ui.Row(c).Height(fullScreenBarHeight).FillWidth().
+					PaddingStart(4).PaddingEnd(12).AlignItems(ui.Center).Gap(4)
+				bar.Children(func() {
+					close := IconButton(c, closeLabel, mdicon.Close.Draw, IconButtonOptions{Size: tokens.SizeS})
+					if close.Clicked() {
 						dismissed = true
-						if o.OnSave != nil {
-							o.OnSave()
+						if o.OnClose != nil {
+							o.OnClose()
 						}
 						*open = false
 					}
-				}
-			})
-			Divider(c)
-			scroll := ui.Scroll(c).Grow(1).Scrollbars(false)
-			scroll.Children(func() {
-				if o.Content != nil {
-					if content := o.Content(); content.Valid() {
-						content.FillWidth()
+					if o.Title != "" {
+						title := ui.Text(c, o.Title).Grow(1)
+						title.TextColor(cs.OnSurface)
+						applyTypeStyleWithTheme(th, title, tokens.TitleLarge)
+					} else {
+						ui.Box(c).Grow(1)
 					}
-				}
+					if o.SaveLabel != "" {
+						save := Button(c, o.SaveLabel, ButtonOptions{Variant: ButtonText})
+						if save.Clicked() {
+							dismissed = true
+							if o.OnSave != nil {
+								o.OnSave()
+							}
+							*open = false
+						}
+					}
+				})
+				Divider(c)
+				scroll := ui.Scroll(c).Grow(1).Scrollbars(false)
+				scroll.Children(func() {
+					if o.Content != nil {
+						if content := o.Content(); content.Valid() {
+							content.FillWidth()
+						}
+					}
+				})
 			})
 		})
 	})
+	if !*open {
+		st.clearAll()
+	}
 	if panel.Valid() && panel.Dismissed() && !dismissed && o.OnClose != nil {
 		o.OnClose()
 	}
