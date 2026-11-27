@@ -325,11 +325,11 @@ MD3E 将动效分为 **Spatial（空间：位移、缩放、尺寸、圆角、�
   - `SurfaceNeutral` 在 `NewDynamicScheme` 进入 `resolve` 之前选定表面色板：沿 `N` 自身色相取目标色度 `C = min(Cn, 2)`，沿 `NV` 自身色相（`OutlineVariant` 与表面辅文）取 `C = min(Cnv, 3)`，`Monochrome` 走既有零色度灰阶分支；`Primary`/`Secondary`/`Tertiary`/`Error` 及其 `On*` 保留原 `Variant` 特征；
   - `SurfaceStyle` 必须贯通 `ThemeOptions`、`DynamicSchemeOptions`、主题 provenance、`schemeCacheKey`、高对比重建、`AnimatedThemeScope` 目标与示例 `themeSignature`。
 - **最终不透明 sRGB 对比度验收闭环**：
-  - 对每个前景色与实际合成背景（含 hover/press/selected 及渐变最亮/最暗点），**先按渲染混合顺序合成为不透明 sRGB**，再以 `tokens.ContrastRatio` 校验（因其忽略 alpha）：标准模式正文（含 placeholder）`>= 4.5:1`、大字与必要图标/状态标识 `>= 3:1`；高对比目标正文 `>= 7:1`、标识 `>= 4.5:1`，必要边界 `1.5 DIP`，焦点环 `2 DIP` 且内外留距 `2 DIP`；
-  - 验收矩阵覆盖 4 组 Workbench 种子色（`#E06D1B`/`#6750A4`/`#0061A4`/`#2E6B3E`）+ `#808080` + 纯黑白 + `Monochrome` × 全 `Variant` × 双 `SurfaceStyle` × 明暗 × 三档对比 × 换肤插值 `0/0.25/0.5/0.75/1`。
+  - 对每个前景色与实际合成背景（含 hover `0.08` / press `0.10` / selected 及渐变最亮/最暗点），**先按渲染混合顺序合成为不透明 sRGB**，再以 `tokens.ContrastRatio` 校验（因其忽略 alpha）：标准模式正文（含 placeholder）`>= 4.5:1`、大字与必要图标/状态标识 `>= 3:1`；高对比目标正文 `>= 7:1`、标识 `>= 4.5:1`，必要有效边界统一 `1.5 DIP` `Outline`，焦点环保持标准 `2 DIP` / 高对比 `3 DIP`、内外留距 `2 DIP`；
+  - 验收矩阵覆盖 4 组 Workbench 种子色（`#E06D1B`/`#6750A4`/`#0061A4`/`#2E6B3E`）+ `#808080` + 纯黑白 + `Monochrome` × 全 `Variant` × 双 `SurfaceStyle` × 明暗 × 三档对比 × 换肤插值 `0/0.25/0.5/0.75/1`（并守住 `Monochrome` `Switch` 选中勾与暗色高对比 `ToneNeutral` `SurfaceContainerHigh` 全态层达标）。
 - **默认去框与控件色阶重校准**：
-  - `Card Elevated / Filled / Outlined` 桌面默认分别映射到 `Low (20, E1)` / `Low (20, E0)` / `Surface (16, E0, 1 DIP 描边)`；`MetricCard` 默认 `Low (20, E0)` 且 `Hairline` nil 默认为 `false`；`CodeBlock` 默认 `Container (12, E0)` 且 `Hairline` nil 默认为 `false`；`FAB`、`Dialog`、`Menu`、`Sheet`、`SplitButton`、`FloatingToolbar`、`NavigationRail`、`DataTable`、`Pagination` 移除非必要默认 1px 描边；
-  - `PillTabs` / `SegmentedTabs` 统一色槽解析：暗槽 `SurfaceContainerLowest`、亮槽 `SurfaceContainer`；色彩胶囊用 `Primary` 或 `PrimaryContainer` 配达标 `On*`（`>= 4.5:1` 文本、`>= 3:1` 图形），中性胶囊暗 `High` / 亮 `Lowest`，移除槽与胶囊双重描边；
+  - `Card Elevated / Filled / Outlined` 桌面默认分别映射到 `Low (20, E1)` / `Low (20, E0)` / `Surface (16, E0, 1 DIP 描边)`；`MetricCard` 默认 `Low (20, E0)` 且 `Hairline` nil 默认为 `false`（内嵌 `AreaSparkline` 未显式设置时默认 `FillTopAlpha=0.10`）；`CodeBlock` 默认 `Container (12, E0)` 且 `Hairline` nil 默认为 `false`；`FAB`、`Dialog`、`Menu`、`Sheet`、`SplitButton`、`FloatingToolbar`（Standard `Low/E1`）、`NavigationRail`、`DataTable`（`Low`+`Container` 表头 `16/E0`）、`Pagination` 移除非必要默认 1px 描边（保留显式 `Hairline`/`Outlined` 与高对比 `1.5 DIP` 边界）；
+  - `PillTabs` / `SegmentedTabs` 统一色槽解析：暗槽 `SurfaceContainerLowest`、亮槽 `SurfaceContainer`，移除槽与胶囊双重描边及胶囊阴影（`E0`）；`PillTabsTonePrimary` 使用 `Primary`/`OnPrimary`（文字 `>= 4.5:1`、图形 `>= 3:1`），`PillTabsToneSurface` 使用暗 `High` / 亮 `Lowest` 并在胶囊/槽比 `< 3:1` 时补充紧凑勾选标识，徽章复用当前标签文字色；
   - `WindowTitleBar` 默认无底分割线融入画布，并与全高侧栏（`SidebarToTop`）共享物理安全区与窗口缩放契约。
 
 ### 12.3 全组件动效编排规范（Motion Choreography Matrix，M18 基线）

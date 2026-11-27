@@ -67,12 +67,15 @@ var variantPresets = []variantPreset{
 
 var densityNames = []string{"Comfort", "Desktop", "Compact"}
 
+var surfaceStyleNames = []string{"Tonal", "Neutral"}
+
 type themeSignature struct {
-	seed       ui.Color
-	variantIdx int
-	dark       bool
-	densityIdx int
-	reduce     bool
+	seed            ui.Color
+	variantIdx      int
+	surfaceStyleIdx int
+	dark            bool
+	densityIdx      int
+	reduce          bool
 }
 
 type appState struct {
@@ -81,15 +84,16 @@ type appState struct {
 	syncedWinDark bool
 	syncedWinBg   ui.Color
 
-	page       int
-	seedIdx    int
-	variantIdx int
-	dark       bool
-	densityIdx int
-	pinned     bool
-	reduce     bool
-	rtl        bool
-	prefsOpen  bool
+	page            int
+	seedIdx         int
+	variantIdx      int
+	surfaceStyleIdx int
+	dark            bool
+	densityIdx      int
+	pinned          bool
+	reduce          bool
+	rtl             bool
+	prefsOpen       bool
 
 	theme *md3e.Theme
 	sig   themeSignature
@@ -141,14 +145,22 @@ func (a *appState) activeSeed() ui.Color {
 	return seedPresets[a.seedIdx].color
 }
 
+func (a *appState) surfaceStyle() tokens.SurfaceStyle {
+	if a.surfaceStyleIdx == 1 {
+		return tokens.SurfaceNeutral
+	}
+	return tokens.SurfaceTonal
+}
+
 func (a *appState) currentTheme() *md3e.Theme {
 	seed := a.activeSeed()
 	sig := themeSignature{
-		seed:       seed,
-		variantIdx: a.variantIdx,
-		dark:       a.dark,
-		densityIdx: a.densityIdx,
-		reduce:     a.reduce,
+		seed:            seed,
+		variantIdx:      a.variantIdx,
+		surfaceStyleIdx: a.surfaceStyleIdx,
+		dark:            a.dark,
+		densityIdx:      a.densityIdx,
+		reduce:          a.reduce,
 	}
 	if a.theme != nil && a.sig == sig {
 		return a.theme
@@ -156,6 +168,7 @@ func (a *appState) currentTheme() *md3e.Theme {
 	a.theme = md3e.ThemeFromSeed(seed, md3e.ThemeOptions{
 		Dark:         a.dark,
 		Variant:      variantPresets[a.variantIdx].variant,
+		SurfaceStyle: a.surfaceStyle(),
 		Density:      a.density(),
 		Motion:       motion.Expressive,
 		ReduceMotion: a.reduce,
@@ -407,6 +420,19 @@ func (a *appState) preferencesDialog(c *ui.Context) {
 						FullWidth: true,
 						Changed:   func(int) { a.dirty = true },
 						Label:     "Scheme variant",
+					})
+				})
+
+				ui.Column(c).FillWidth().Gap(4).Children(func() {
+					md3e.Text(c, "Surface style", tokens.LabelLarge).TextColor(cs.OnSurface)
+					md3e.SegmentedTabs(c.Key("pref-surface-style"), []md3e.TabItem{
+						{Label: surfaceStyleNames[0]},
+						{Label: surfaceStyleNames[1]},
+					}, md3e.PillTabsOptions{
+						Selected:  &a.surfaceStyleIdx,
+						FullWidth: true,
+						Changed:   func(int) { a.dirty = true },
+						Label:     "Surface style",
 					})
 				})
 

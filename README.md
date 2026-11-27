@@ -7,7 +7,7 @@ English | [简体中文](README.zh-CN.md)
 ## Highlights
 
 - **Pure Go (`CGO_ENABLED=0`)**: Compiles and passes tests without cgo, with verified cross-compilation for `linux/amd64`, `darwin/arm64`, and `js/wasm`.
-- **Full MD3E Design System (`tokens`)**: HCT / CAM16 color space, `TonalPalette`, 7 `DynamicScheme` variants (`TonalSpot`, `Expressive`, `Vibrant`, `Neutral`, `Monochrome`, `Fidelity`, `Content`), 3 contrast tiers, 45+ semantic color roles, 10 shape scales, XS–XL size tiers, 15 standard + 15 emphasized typography styles, and 6 elevation levels.
+- **Full MD3E Design System (`tokens`)**: HCT / CAM16 color space, `TonalPalette`, 7 `DynamicScheme` variants (`TonalSpot`, `Expressive`, `Vibrant`, `Neutral`, `Monochrome`, `Fidelity`, `Content`), dual `SurfaceStyle` (`SurfaceTonal` default / `SurfaceNeutral` low-chroma clean desktop surfaces), 3 contrast tiers with quantized sRGB contrast closure, 45+ semantic color roles, 10 shape scales, XS–XL size tiers, 15 standard + 15 emphasized typography styles, and 6 elevation levels.
 - **Physics-Driven Spring Motion (`motion`)**: 12 Expressive and Standard spring presets (Spatial & Effects) converting MD3E damping ratio $\zeta$ and stiffness $k$ to MyGo's viscous damping coefficient $c = 2\zeta\sqrt{k}$ (`Mass = 1`), with Oklab interpolation for effect tokens.
 - **35 Expressive Shapes & Bidirectional Morphing (`shape`)**: Built-in `RoundedPolygon` primitives (`Circle` through `Heart`) and bijective cubic Bézier morphing rendered and clipped via `ui.Path`.
 - **Zero-Bloat Vector Symbol Library (`symbols`)**: 252 rounded 24×24 vector symbols across 7 functional domains with zero `init()` or global registries for verified per-icon dead-code elimination; `symbols.<Name>.Draw` plugs directly into any `md3e.IconDraw` slot.
@@ -20,7 +20,7 @@ English | [简体中文](README.zh-CN.md)
 ## Requirements & Installation
 
 - **Go 1.27.3+** (aligned with `github.com/egoist/mygo`).
-- Depends directly on upstream `github.com/egoist/mygo` (`v0.10.1-0.20261119113012-61ea5567ab14`), with no local checkout or `replace` directive required.
+- Depends directly on upstream `github.com/egoist/mygo` (`v0.10.1-0.20261126131133-611bbf74402f`), with no local checkout or `replace` directive required.
 
 Install into an existing Go module:
 
@@ -122,6 +122,7 @@ Key conventions:
 2. Call `c.Key(...)` before constructing stateful controls (`TextField`, `Switch`, `Slider`, etc.), and call `e.Key(...)` on containers before reading element state or calling `ui.Local`.
 3. `md3e.ThemeScope` bridges `ui.Themed`, so overlays opened via `ui.Overlay` (`AlertDialog`, `BottomSheet`, `DropdownMenu`, `DatePicker`, `SnackbarHost`, etc.) inherit the active theme.
 4. `ThemeScope` defaults to content height. When used as the full-window root wrapper around `.Fill()` or `.Grow(1)` scroll containers, chain `.Fill()` on `ThemeScope` (as shown above); omit `.Fill()` for nested cards or partial sections.
+5. Pass `SurfaceStyle: tokens.SurfaceNeutral` in `md3e.ThemeOptions` (or `tokens.DynamicSchemeOptions`) for clean low-chroma neutral desktop surfaces (`N <= 2`, `NV <= 3`) while preserving full variant accent palettes; the zero value `tokens.SurfaceTonal` keeps canonical MD3 tonal surfaces.
 
 ---
 

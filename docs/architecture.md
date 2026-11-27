@@ -24,7 +24,8 @@ Go 模块路径：`github.com/imicola/mygo-md3e`（根模块与 `examples/m2-dem
 ├── tokens/                 # M1/M9/M12: 纯 Go MD3E 设计令牌、HCT 色彩与封面取色引擎（无 UI 状态依赖）
 │   ├── hct.go              # sRGB/XYZ/Lab/CAM16/HCT 转换、对比度计算
 │   ├── palette.go          # TonalPalette & CorePalette
-│   ├── scheme.go           # DynamicScheme (TonalSpot/Expressive/Vibrant/...) & 45+ ColorRoles
+│   ├── scheme.go           # DynamicScheme (TonalSpot/Expressive/Vibrant/...)、SurfaceStyle (Tonal/Neutral)、量化 sRGB 对比度闭环与 45+ ColorRoles
+│   ├── contrast_matrix_test.go # M17.1: 7 种子×7 变体×2 表面风格×明暗×3 对比度×态层 sRGB 对比度发布矩阵
 │   ├── extract.go          # M12: QuantizerCelebi（Wu+WSMeans）与 Material Score 动态封面取色（上限 16,384 样本）
 │   ├── size.go             # XS..XL 尺寸档位（SizeTier / SizeSpec）
 │   ├── density.go          # M9: Comfortable / Desktop / Compact 三档密度规格与 ButtonSpec
@@ -49,8 +50,8 @@ Go 模块路径：`github.com/imicola/mygo-md3e`（根模块与 `examples/m2-dem
 │   └── status.go           # 状态、告警、人员、图表与徽章符号（32）
 ├── internal/
 │   └── mdicon/             # M3: 内置无外部依赖矢量路径/图标（Check, Close, Chevron, Search...）
-├── theme.go                # M3/M9: md3e.Theme（含 Density/MonoFont）、ThemeScope、系统偏好桥接、ui.Theme 转换
-├── surface.go              # M3/M9: Surface 容器、Elevation 阴影/Tonal 叠色、Hairline/渐变/Backdrop
+├── theme.go                # M3/M9/M17: md3e.Theme（含 Density/MonoFont/SurfaceStyle）、ThemeScope、AnimatedThemeScope、LerpTheme 与 ui.Theme 桥接
+├── surface.go              # M3/M9/M17: 无框 Tonal Surface、Elevation 阴影、暗色 E2/E3 顶部反射 (PaintTopSpecular)、高对比 1.5 DIP 边界与 Backdrop
 ├── typography.go           # M3/M9: Text、TextWith、TabularNums、ApplyTypeStyle 与 TypeStyleOf 排版辅助
 ├── ripple.go               # M3: StateLayer 状态层（Hover/Focus/Pressed/Dragged）与 Expressive Ripple
 ├── button.go               # M4: Expressive Button (Filled/Tonal/Elevated/Outlined/Text × XS-XL)
@@ -143,6 +144,7 @@ Go 模块路径：`github.com/imicola/mygo-md3e`（根模块与 `examples/m2-dem
 │   ├── outline_test.go     # Outline 滚动联动、Anchor 回退、键盘与 RTL 测试
 │   └── dce_test.go         # Zero-Bloat / 死代码消除链接边界测试
 ├── compat_m16_test.go      # M16.1: 外部消费者 API 兼容夹具与锁版 611bbf74402f 上游新能力回归测试
+├── contrast_matrix_test.go # M17: 根包组件与 LerpTheme sRGB 对比度矩阵、SurfaceStyle 透传、顶部反射与去框/高对比 1.5 DIP 像素回归测试
 ├── keyframe_test.go        # M16.3: §12.4 动效关键帧测试基础设施（O/I/S 曲线、合成 alpha、过冲上界、纯 Hover 零重建）
 ├── golden_test.go          # 纯几何 Golden 视觉基线测试（testdata/）
 └── examples/

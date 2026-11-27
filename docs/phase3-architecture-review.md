@@ -542,7 +542,7 @@ md3e.ToastStack(c.Key("notifications"),
 | 门禁 | 交付前必须留下的证据 |
 |---|---|
 | ☑ M16 · 锁版可回放 | 已将根模块与 `examples/m2-demo` 独立提交锁版至 `v0.10.1-0.20261126131133-611bbf74402f`（`760cbe7`），补齐 `compat_m16_test.go` 旧消费者夹具与 4 项上游新能力复测、`examples/workbench/monitor_slice_test.go` 可复用切片、`examples/workbench/visual_board_test.go` 无头三档宽度画板导出与 `keyframe_test.go` 关键帧助手，并完成 §6 全部 P1/P2 缺陷的先红后绿回归修复与四平台编译验收。 |
-| □ M17 · 颜色和表面 | 保留零值 SurfaceTonal、显式 Hairline/Outlined 与高对比边界；跑 §3 种子×色板×明暗×对比×状态配对，失败输出 seed、前景/背景的最终 RGBA、比值和控件。用固定数据和时钟导出改前/改后 Workbench 三档宽度；画板输出到临时目录。几何 Golden 有意更新时，Windows 默认与非 Windows 所需基线一起审核 |
+| ☑ M17 · 颜色和表面 | 已完成 `tokens.SurfaceStyle`（零值 `SurfaceTonal` / 低色度 `SurfaceNeutral`）、暗色 E2/E3 顶部 2 DIP 柔微反射（`PaintTopSpecular`，亮色/高对比置零）与全库默认去框重校准（保留显式 `Hairline`/`Outlined` 与 `ContrastHigh` 统一 `1.5 DIP` `Outline` 边界）；`tokens/contrast_matrix_test.go` 与 `contrast_matrix_test.go` 跑通 7 种子×7 变体×2 风格×明暗×3 对比×态层/换肤插值 sRGB 对比度矩阵（含 `Monochrome` `Switch` 勾标修复）；已用固定数据/时钟导出并逐张审视改前/改后 7 张 Monitor 无头画板（Compact `520`/Medium `760`/Expanded `1280` × Dark/Light/HighContrast/`SurfaceNeutral`）；6 组纯几何 `testdata/*.png` 零漂移全绿，DCE 实测 Button 14,025,413 B，四平台交叉编译全绿。 |
 | □ M18 · 动效所有权 | 给每个通道标记 paint/pose/layout/modal/router 的一个 owner，登记屏幕移除、重复打开、ReduceMotion 中途开启、快速滚出。按 §4 采像素、几何、build 次数、待发帧；ghost 尾帧不得读取失效句柄或预约下一帧；键盘焦点/A11y 在逻辑关闭时退出。仅做背景 hover 的用例要求树 build 增量为零 |
 | □ M19 · 壳与多文档 | A→B→A 草稿/选区/滚动/焦点可恢复，各文档独立 Back，超过 10 个保活页仍能重建业务状态；测最后一个 Tab、脏项取消、右键批量关闭、固定分区、窗内无目标松手、窗外松手建窗失败。测试系统标题按钮命中、RTL 拖动与 100/150/200% zoom。wasm 的浏览器后退与文档后退各有一个 owner |
 | □ M20 · 编辑和表单事务 | IME、组合期间 Escape/Enter、粘贴、UTF-16 长度、分组禁用、选项过滤到零、只读→可写、错误→清空、外部重置、多轮 build。每项核对模型、可见文案、读屏名/错误关系、回调次数。取消不修改基础模型；保存错误能继续输入 |

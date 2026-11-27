@@ -91,18 +91,19 @@ flowchart LR
 
 ---
 
-#### M17 — 桌面优先 MD3E 视觉语言重塑（无框 Tonal 美学升级）
+#### M17 — 桌面优先 MD3E 视觉语言重塑（无框 Tonal 美学升级，已完成）
 > **目标**：按 `docs/md3e-spec.md §12.1–12.2` 精确数值配方完成去框与色阶重校准，通过全色板合成对比度矩阵门禁。
 
-- [ ] **M17.1 `tokens.SurfaceStyle` 与表面/反射基础能力（`tokens` + `theme.go` + `surface.go`）**
-  - 新增 `tokens.SurfaceStyle`（`SurfaceTonal=0` 零值兼容、`SurfaceNeutral` 将 `N` 压至 `min(Cn,2)`、`NV` 压至 `min(Cnv,3)`），贯通 `ThemeOptions`、`DynamicSchemeOptions`、provenance、`schemeCacheKey`、高对比重建与 `AnimatedThemeScope`；
-  - 暗色 E2/E3 浮层支持顶部内侧 2 DIP 柔微反射 `α(y)=0.035·max(0,1−y/2)²`（高对比/亮色置零）；建立覆盖 4 组 Workbench 种子 + 灰/黑/白/Mono × 全 Variant × 双 Style × 明暗 × 三对比 × 换肤插值的**不透明合成 sRGB 对比度发布测试矩阵**。
-- [ ] **M17.2 全库默认去框与控件色阶重校准**
-  - `Card`（Elevated/Filled 默认 `Low/20`）、`charts.MetricCard`（`Low/20/E0`，`Hairline` nil 默认 `false`）、`docview.CodeBlock`（`Container/12/E0`，`Hairline` nil 默认 `false`）、`FAB`、`Dialog`、`Menu`、`Sheet`、`SplitButton`、`FloatingToolbar`、`NavigationRail`、`DataTable`（`Low`+`Container` 表头 `16/E0`）、`Pagination` 默认去除非必要 1px 描边（保留显式 `Hairline`/`Outlined` 与高对比 `1.5 DIP` 边界）；
-  - 合并统一 `PillTabs` / `SegmentedTabs` 色槽解析（暗槽 `Lowest`、亮槽 `Container`，移除双重描边并确保文字 `>=4.5:1` / 图形 `>=3:1`）；
-  - 统一 `Switch`、`Chip`、`Tag`、`StatusPill`、`Button`、`WindowTitleBar` 的表面配方与桌面字重/比例。
-- [ ] **M17.3 Golden 基线与亮/暗/高对比画板验收**
-  - 同步刷新受颜色/几何影响的纯几何 `testdata/*.png`（Windows 默认与非 Windows 平台基线齐全），并完成 Monitor 切片三档宽度改前/改后画板审视。
+- [x] **M17.1 `tokens.SurfaceStyle` 与表面/反射基础能力（`tokens` + `theme.go` + `surface.go`，提交 `4252d75`）**
+  - 已新增 `tokens.SurfaceStyle`（`SurfaceTonal=0` 零值兼容、`SurfaceNeutral` 在非 `Monochrome` 下将 `N` 压至 `min(Cn,2)`、`NV` 压至 `min(Cnv,3)`），贯通 `ThemeOptions`、`DynamicSchemeOptions`、provenance、`schemeCacheKey`、`WithPreferences` 高对比重建、`LerpTheme`、`AnimatedThemeScope` 与 Workbench `themeSignature`；
+  - 已落地暗色 E2/E3 浮层顶部内侧 `2 DIP` 柔微反射 `α(y)=0.035·max(0,1−y/2)²` 及导出原语 `md3e.PaintTopSpecular`（亮色与高对比度严格置零、Ghost-Draw 安全），并建立 `tokens/contrast_matrix_test.go` 与 `contrast_matrix_test.go` 覆盖 7 组种子 × 7 变体 × 双 `SurfaceStyle` × 明暗 × 三档对比 × Hover/Press 态层叠加 × `LerpTheme` (`0/0.25/0.5/0.75/1`) 的不透明合成 sRGB 对比度发布测试矩阵与量化后求解闭环。
+- [x] **M17.2 全库默认去框与控件色阶重校准（提交 `ab2ea8e` & `a83c871`）**
+  - 已完成根包 `Card`（Elevated/Filled 默认 `Low/20`、Outlined `Surface/16`）、`charts.MetricCard`（`Low/20/E0`，`Hairline` nil 默认 `false`，内嵌 `AreaSparkline` 默认 `FillTopAlpha=0.10`）、`docview.CodeBlock` / `Markdown`（`Container/12/E0`，`Hairline` nil 默认 `false`）、`FAB`、`Dialog`、`Menu`、`Sheet`、`SplitButton`、`FloatingToolbar`（`ToolbarStandard` `Low/E1`）、`NavigationRail`、`NavigationDrawer`、`NavigationBar`、`RichTooltip`、`DatePicker`、`TimePicker`、`List`、`DataTable`（默认 `ShapeLarge 16`）、`Pagination`、`Button`/`Chip`/`AppBar`/`Carousel`/`Banner` 默认移除非必要 1px 隐式描边，严格保留显式 `Hairline`/`Outlined` 并在 `ContrastHigh` 下统一升级有效边界为 `1.5 DIP` `Outline`；
+  - 已合并统一 `PillTabs` / `SegmentedTabs` 色槽解析（暗槽 `SurfaceContainerLowest`、亮槽 `SurfaceContainer`，移除槽与胶囊双描边与阴影，`PillTabsTonePrimary` 使用 `Primary`/`OnPrimary`，`PillTabsToneSurface` 暗 `High`/亮 `Lowest` 并在胶囊/槽对比度 `< 3:1` 时渲染紧凑勾选标识）；
+  - 已修复 `Switch` 在 `Monochrome` 模式下选中勾撞色不可见缺陷（`< 3:1` 回退 `Primary`），并统一 `Tag`/`StatusPill` 复用主题语义色与暗色高对比 `ToneNeutral` `SurfaceContainerHigh` 全态层 `>= 7:1`。
+- [x] **M17.3 Golden 基线与亮/暗/高对比画板验收**
+  - 既有 6 组纯几何 `testdata/*.png` 零漂移全绿通过，`TestButtonDeadCodeElimination`（Linux/amd64 Go 1.27.4：Button 14,025,413 B，Gallery 18,554,134 B）与 `TestLegacyConsumerCompatibilityFixture` 全绿；
+  - 已在 `examples/workbench/main.go` 贯通 `SurfaceStyle` 偏好切换并扩展 `visual_board_test.go` 覆盖 Compact(`520`)/Medium(`760`)/Expanded(`1280`) × Dark/Light/HighContrast/`SurfaceNeutral` 共 7 张无头画板，完成改前/改后人工逐张视觉对比验收与文档同步。
 
 ---
 

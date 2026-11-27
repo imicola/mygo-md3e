@@ -14,20 +14,23 @@ import (
 )
 
 type visualBoardSpec struct {
-	name     string
-	width    int
-	height   int
-	dark     bool
-	contrast tokens.Contrast
-	rtl      bool
+	name         string
+	width        int
+	height       int
+	dark         bool
+	contrast     tokens.Contrast
+	surfaceStyle tokens.SurfaceStyle
+	rtl          bool
 }
 
 var monitorVisualBoardSpecs = []visualBoardSpec{
-	{name: "monitor_dark_compact_520", width: 520, height: 760, dark: true, contrast: tokens.ContrastStandard},
-	{name: "monitor_dark_medium_760", width: 760, height: 760, dark: true, contrast: tokens.ContrastStandard},
-	{name: "monitor_dark_expanded_1280", width: 1280, height: 760, dark: true, contrast: tokens.ContrastStandard},
-	{name: "monitor_light_expanded_1280", width: 1280, height: 760, dark: false, contrast: tokens.ContrastStandard},
-	{name: "monitor_hc_dark_1280", width: 1280, height: 760, dark: true, contrast: tokens.ContrastHigh},
+	{name: "monitor_dark_compact_520", width: 520, height: 760, dark: true, contrast: tokens.ContrastStandard, surfaceStyle: tokens.SurfaceTonal},
+	{name: "monitor_dark_medium_760", width: 760, height: 760, dark: true, contrast: tokens.ContrastStandard, surfaceStyle: tokens.SurfaceTonal},
+	{name: "monitor_dark_expanded_1280", width: 1280, height: 760, dark: true, contrast: tokens.ContrastStandard, surfaceStyle: tokens.SurfaceTonal},
+	{name: "monitor_light_expanded_1280", width: 1280, height: 760, dark: false, contrast: tokens.ContrastStandard, surfaceStyle: tokens.SurfaceTonal},
+	{name: "monitor_hc_dark_1280", width: 1280, height: 760, dark: true, contrast: tokens.ContrastHigh, surfaceStyle: tokens.SurfaceTonal},
+	{name: "monitor_neutral_dark_expanded_1280", width: 1280, height: 760, dark: true, contrast: tokens.ContrastStandard, surfaceStyle: tokens.SurfaceNeutral},
+	{name: "monitor_neutral_light_expanded_1280", width: 1280, height: 760, dark: false, contrast: tokens.ContrastStandard, surfaceStyle: tokens.SurfaceNeutral},
 }
 
 func resolveVisualBoardOutputDir(t *testing.T) (dir string, keep bool) {
@@ -65,6 +68,7 @@ func TestMonitorSliceVisualBoardExport(t *testing.T) {
 		opts := defaultMonitorSliceOptions()
 		opts.Dark = spec.dark
 		opts.Contrast = spec.contrast
+		opts.SurfaceStyle = spec.surfaceStyle
 		opts.RTL = spec.rtl
 
 		f := newMonitorSliceFixture(opts)

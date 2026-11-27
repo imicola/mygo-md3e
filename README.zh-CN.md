@@ -7,7 +7,7 @@
 ## 核心特性
 
 - **纯 Go、`CGO_ENABLED=0`**：无 cgo 环境下即可完成编译、测试与运行，并支持 `linux/amd64`、`darwin/arm64`、`js/wasm` 跨平台编译。
-- **完整 MD3E 设计令牌（`tokens`）**：HCT / CAM16 色彩科学、`TonalPalette`、7 种 `DynamicScheme` Variant（`TonalSpot`、`Expressive`、`Vibrant`、`Neutral`、`Monochrome`、`Fidelity`、`Content`）、3 档 Contrast、45+ 语义色角色、10 档形状圆角、XS–XL 五档尺寸、30 组 Standard / Emphasized 排版样式及 6 级 Elevation。
+- **完整 MD3E 设计令牌（`tokens`）**：HCT / CAM16 色彩科学、`TonalPalette`、7 种 `DynamicScheme` Variant（`TonalSpot`、`Expressive`、`Vibrant`、`Neutral`、`Monochrome`、`Fidelity`、`Content`）、双表面风格 `SurfaceStyle`（默认 `SurfaceTonal` 与低色度桌面中性表面 `SurfaceNeutral`）、3 档 Contrast 及量化后不透明 sRGB 对比度闭环、45+ 语义色角色、10 档形状圆角、XS–XL 五档尺寸、30 组 Standard / Emphasized 排版样式及 6 级 Elevation。
 - **物理弹簧动效（`motion`）**：12 组 Expressive / Standard 弹簧预设（Spatial 与 Effects），将 MD3E 的阻尼比 $\zeta$ 与刚度 $k$ 精确换算为 MyGo 物理阻尼系数 $c = 2\zeta\sqrt{k}$（$m=1$），Effects 类令牌启用 Oklab 插值与临界阻尼无过冲。
 - **35 种表现力形状与双向变形（`shape`）**：内置 `Circle` 至 `Heart` 共 35 种 `RoundedPolygon` 几何基元与双向 Cubic Bézier Morph，可直接通过 `ui.Path` 绘制与裁切。
 - **零膨胀矢量图标子包（`symbols`）**：内置 252 个 24×24 圆角矢量符号（分 7 个功能域），零 `init()`、零全局注册表，实现单图标级死代码消除；`symbols.<Name>.Draw` 可直接传入任意 `md3e.IconDraw` 槽位。
@@ -20,7 +20,7 @@
 ## 环境要求与安装
 
 - **Go 1.27.3+**（与上游 `github.com/egoist/mygo` 对齐）。
-- 直接依赖上游 `github.com/egoist/mygo`（`v0.10.1-0.20261119113012-61ea5567ab14`），克隆后即可直接构建运行，无需本地 `./mygo` 或 `replace` 配置。
+- 直接依赖上游 `github.com/egoist/mygo`（`v0.10.1-0.20261126131133-611bbf74402f`），克隆后即可直接构建运行，无需本地 `./mygo` 或 `replace` 配置。
 
 在你的 Go 模块中安装：
 
@@ -122,6 +122,7 @@ func main() {
 2. 有状态控件必须在构造前使用 `c.Key(...)` 指定唯一 key；容器在读取状态或调用 `ui.Local` 前使用 `e.Key(...)`。
 3. `md3e.ThemeScope` 会同步桥接 `ui.Themed`，因此内部通过 `ui.Overlay` 弹出的 Dialog / Sheet / Menu / Modal Picker / Snackbar 都会自动继承同一主题。
 4. `ThemeScope` 默认按内容高度布局。作为整窗根包装、且内部包含 `.Fill()` 或 `.Grow(1)` 滚动容器时，请在其后链式调用 `.Fill()`（如上所示）；局部或卡片内的 `ThemeScope` 无需加 `.Fill()`。
+5. 在 `md3e.ThemeOptions`（或 `tokens.DynamicSchemeOptions`）中传入 `SurfaceStyle: tokens.SurfaceNeutral` 可启用低色度干净中性桌面表面（`N <= 2`、`NV <= 3`）同时完整保留原 `Variant` 强调色板；零值 `tokens.SurfaceTonal` 保持传统 MD3 色调表面。
 
 ---
 

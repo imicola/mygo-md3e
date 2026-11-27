@@ -20,6 +20,7 @@ import (
 type monitorSliceOptions struct {
 	Seed         ui.Color
 	Variant      tokens.Variant
+	SurfaceStyle tokens.SurfaceStyle
 	Dark         bool
 	Contrast     tokens.Contrast
 	Density      tokens.Density
@@ -60,6 +61,7 @@ func newMonitorSliceFixture(o monitorSliceOptions) *monitorSliceFixture {
 	th := md3e.ThemeFromSeed(seed, md3e.ThemeOptions{
 		Dark:         o.Dark,
 		Variant:      o.Variant,
+		SurfaceStyle: o.SurfaceStyle,
 		Contrast:     o.Contrast,
 		Density:      o.Density,
 		Motion:       motion.Expressive,
@@ -139,11 +141,15 @@ func (f *monitorSliceFixture) view(c *ui.Context) {
 							Label:           "Monitor slice metrics",
 						})
 
-						md3e.Surface(c.Key("slice-ledger"), md3e.SurfaceOptions{
+						ledgerOpt := md3e.SurfaceOptions{
 							Color:      cs.SurfaceContainerLow,
 							ShapeScale: tokens.ShapeLargeIncreased,
-							Hairline:   true,
-						}).FillWidth().Padding(14).Column().Gap(10).Children(func() {
+						}
+						if th.Contrast >= tokens.ContrastHigh {
+							ledgerOpt.BorderWidth = 1.5
+							ledgerOpt.BorderColor = cs.Outline
+						}
+						md3e.Surface(c.Key("slice-ledger"), ledgerOpt).FillWidth().Padding(14).Column().Gap(10).Children(func() {
 							md3e.TextField(c.Key("slice-filter"), &a.mon.query, md3e.TextFieldOptions{
 								Variant:       md3e.TextFieldOutlined,
 								Label:         "Filter host, process, or rule",
@@ -170,7 +176,6 @@ func (f *monitorSliceFixture) view(c *ui.Context) {
 								Sort:      sortPtr,
 								SortBy:    sortByPtr,
 								RoundRows: true,
-								Hairline:  true,
 								Label:     "Connections slice table",
 								ItemKey:   func(row int) any { return a.mon.recordIDAt(row) },
 								RowLabel:  func(row int) string { return a.mon.hostAt(row) },
